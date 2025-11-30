@@ -161,12 +161,12 @@ defmodule Imgd.Workflows.Execution do
 
   def by_status(query \\ __MODULE__, statuses_or_status)
 
-  def by_status(query, status) when is_atom(status) do
-    from e in query, where: e.status == ^status
+  def by_status(query, statuses_or_status) when is_atom(statuses_or_status) do
+    from e in query, where: e.status == ^statuses_or_status
   end
 
-  def by_status(query, statuses) when is_list(statuses) do
-    from e in query, where: e.status in ^statuses
+  def by_status(query, statuses_or_status) when is_list(statuses_or_status) do
+    from e in query, where: e.status in ^statuses_or_status
   end
 
   def active(query \\ __MODULE__) do

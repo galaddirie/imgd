@@ -230,6 +230,7 @@ defmodule Imgd.Workflows.ExecutionStep do
         value
       end
     rescue
+      # TODO: silent failure is not good
       _ -> %{_type: inspect(value.__struct__ || :unknown), _not_json_encodable: true}
     end
   end

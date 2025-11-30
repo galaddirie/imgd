@@ -149,6 +149,8 @@ defmodule Imgd.Workflows.Workflow do
     |> Base.encode64()
   end
 
+
+  # TODO: may need to look at this again later
   @doc """
   Deserializes a stored workflow definition back to Runic events.
   """
@@ -158,10 +160,7 @@ defmodule Imgd.Workflows.Workflow do
     |> :erlang.binary_to_term()
   end
 
-  def deserialize_definition(definition) when is_map(definition) do
-    # Handle legacy or direct map storage
-    definition
-  end
+
 
   @doc """
   Rebuilds a Runic.Workflow from the stored definition.
