@@ -38,7 +38,7 @@ defmodule Imgd.AccountsTest do
   describe "get_user!/1" do
     test "raises if id is invalid" do
       assert_raise Ecto.NoResultsError, fn ->
-        Accounts.get_user!(-1)
+        Accounts.get_user!(Ecto.UUID.generate())
       end
     end
 
@@ -274,7 +274,13 @@ defmodule Imgd.AccountsTest do
     end
 
     test "duplicates the authenticated_at of given user in new token", %{user: user} do
-      user = %{user | authenticated_at: DateTime.add(DateTime.utc_now(:second), -3600)}
+      user =
+        %{
+          user
+          | authenticated_at:
+              DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:microsecond)
+        }
+
       token = Accounts.generate_user_session_token(user)
       assert user_token = Repo.get_by(UserToken, token: token)
       assert user_token.authenticated_at == user.authenticated_at

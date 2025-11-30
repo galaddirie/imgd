@@ -79,7 +79,10 @@ defmodule Imgd.AccountsFixtures do
   end
 
   def offset_user_token(token, amount_to_add, unit) do
-    dt = DateTime.add(DateTime.utc_now(:second), amount_to_add, unit)
+    dt =
+      DateTime.utc_now()
+      |> DateTime.add(amount_to_add, unit)
+      |> DateTime.truncate(:microsecond)
 
     Imgd.Repo.update_all(
       from(ut in Accounts.UserToken, where: ut.token == ^token),

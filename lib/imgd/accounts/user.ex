@@ -107,7 +107,7 @@ defmodule Imgd.Accounts.User do
   Confirms the account by setting `confirmed_at`.
   """
   def confirm_changeset(user) do
-    now = DateTime.utc_now(:second)
+    now = DateTime.utc_now()
     change(user, confirmed_at: now)
   end
 

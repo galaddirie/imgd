@@ -28,7 +28,8 @@ defmodule ImgdWeb.UserLive.SettingsTest do
       {:ok, conn} =
         conn
         |> log_in_user(user_fixture(),
-          token_authenticated_at: DateTime.add(DateTime.utc_now(:second), -11, :minute)
+          token_authenticated_at:
+            DateTime.utc_now() |> DateTime.add(-11, :minute) |> DateTime.truncate(:microsecond)
         )
         |> live(~p"/users/settings")
         |> follow_redirect(conn, ~p"/users/log-in")

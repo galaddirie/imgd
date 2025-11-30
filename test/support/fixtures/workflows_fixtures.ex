@@ -137,7 +137,8 @@ defmodule Imgd.WorkflowsFixtures do
       step_name: attrs[:step_name] || "test_step_#{step_hash}",
       step_type: attrs[:step_type] || "Step",
       generation: attrs[:generation] || 0,
-      input_fact_hash: attrs[:input_fact_hash] || :erlang.phash2("fact-#{System.unique_integer()}"),
+      input_fact_hash:
+        attrs[:input_fact_hash] || :erlang.phash2("fact-#{System.unique_integer()}"),
       input_snapshot: %{value: "test_input"},
       status: :pending
     })

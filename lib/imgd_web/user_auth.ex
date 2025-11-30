@@ -91,7 +91,7 @@ defmodule ImgdWeb.UserAuth do
 
   # Reissue the session token if it is older than the configured reissue age.
   defp maybe_reissue_user_session_token(conn, user, token_inserted_at) do
-    token_age = DateTime.diff(DateTime.utc_now(:second), token_inserted_at, :day)
+    token_age = DateTime.diff(DateTime.utc_now(), token_inserted_at, :day)
 
     if token_age >= @session_reissue_age_in_days do
       create_or_extend_session(conn, user, %{})
