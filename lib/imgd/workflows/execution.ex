@@ -10,6 +10,7 @@ defmodule Imgd.Workflows.Execution do
   import Ecto.Query
 
   alias Imgd.Workflows.{Workflow, ExecutionCheckpoint, ExecutionStep}
+  alias Imgd.Accounts.User
 
   @type status :: :pending | :running | :paused | :completed | :failed | :cancelled | :timeout
   @type trigger_type :: :manual | :schedule | :webhook | :event
@@ -19,7 +20,6 @@ defmodule Imgd.Workflows.Execution do
   @timestamps_opts [type: :utc_datetime_usec]
 
   schema "executions" do
-    field :tenant_id, :binary_id
     field :workflow_version, :integer
 
     field :status, Ecto.Enum,
@@ -66,13 +66,14 @@ defmodule Imgd.Workflows.Execution do
       }
 
     belongs_to :workflow, Workflow
+    belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id, type: :id
     has_many :checkpoints, ExecutionCheckpoint
     has_many :steps, ExecutionStep
 
     timestamps()
   end
 
-  @required_fields [:workflow_id, :tenant_id, :workflow_version]
+  @required_fields [:workflow_id, :workflow_version]
   @optional_fields [
     :status,
     :trigger_type,
@@ -84,7 +85,8 @@ defmodule Imgd.Workflows.Execution do
     :completed_at,
     :expires_at,
     :metadata,
-    :stats
+    :stats,
+    :triggered_by_user_id
   ]
 
   def changeset(execution, attrs) do
@@ -163,10 +165,6 @@ defmodule Imgd.Workflows.Execution do
   end
 
   # Queries
-
-  def by_tenant(query \\ __MODULE__, tenant_id) do
-    from e in query, where: e.tenant_id == ^tenant_id
-  end
 
   def by_workflow(query \\ __MODULE__, workflow_id) do
     from e in query, where: e.workflow_id == ^workflow_id

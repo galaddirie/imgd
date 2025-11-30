@@ -10,6 +10,7 @@ defmodule Imgd.Workflows.Workflow do
   import Ecto.Query
 
   alias Imgd.Workflows.{WorkflowVersion, Execution}
+  alias Imgd.Accounts.User
 
   @type status :: :draft | :published | :archived
 
@@ -20,7 +21,6 @@ defmodule Imgd.Workflows.Workflow do
   schema "workflows" do
     field :name, :string
     field :description, :string
-    field :tenant_id, :binary_id
     field :version, :integer, default: 1
     field :status, Ecto.Enum, values: [:draft, :published, :archived], default: :draft
 
@@ -50,10 +50,12 @@ defmodule Imgd.Workflows.Workflow do
     has_many :versions, WorkflowVersion
     has_many :executions, Execution
 
+    belongs_to :user, User, type: :id
+
     timestamps()
   end
 
-  @required_fields [:name, :tenant_id]
+  @required_fields [:name, :user_id]
   @optional_fields [:description, :status, :definition, :trigger_config, :settings]
 
   def changeset(workflow, attrs) do
@@ -62,7 +64,7 @@ defmodule Imgd.Workflows.Workflow do
     |> validate_required(@required_fields)
     |> validate_length(:name, min: 1, max: 255)
     |> maybe_compute_definition_hash()
-    |> unique_constraint([:tenant_id, :name])
+    |> unique_constraint(:name)
   end
 
   def publish_changeset(workflow, attrs \\ %{}) do
@@ -82,10 +84,6 @@ defmodule Imgd.Workflows.Workflow do
   end
 
   # Queries
-
-  def by_tenant(query \\ __MODULE__, tenant_id) do
-    from w in query, where: w.tenant_id == ^tenant_id
-  end
 
   def published(query \\ __MODULE__) do
     from w in query, where: w.status == :published
