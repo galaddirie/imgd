@@ -5,7 +5,7 @@ defmodule Imgd.Workflows do
   Provides the public API for managing workflow definitions, executions,
   checkpoints, and execution steps.
   """
-  #TODO: BREAK OUT INTO SEPARATE MODULES
+  # TODO: BREAK OUT INTO SEPARATE MODULES
   import Ecto.Query, warn: false
   alias Imgd.Repo
 
