@@ -5,18 +5,13 @@ defmodule Imgd.Workflows.Workflow do
   Stores the design-time workflow configuration including
   the serialized Runic build log and trigger configuration.
   """
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Imgd.Schema
   import Ecto.Query
 
   alias Imgd.Workflows.{WorkflowVersion, Execution}
   alias Imgd.Accounts.User
 
   @type status :: :draft | :published | :archived
-
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @foreign_key_type :binary_id
-  @timestamps_opts [type: :utc_datetime_usec]
 
   schema "workflows" do
     field :name, :string
@@ -50,7 +45,7 @@ defmodule Imgd.Workflows.Workflow do
     has_many :versions, WorkflowVersion
     has_many :executions, Execution
 
-    belongs_to :user, User, type: :id
+    belongs_to :user, User
 
     timestamps()
   end

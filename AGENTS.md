@@ -185,6 +185,17 @@ Controllers automatically have the `current_scope` available if they use the `:b
 <!-- phoenix:ecto-start -->
 ## Ecto Guidelines
 
+- **Always** use the custom `MyApp.Schema` wrapper instead of `use Ecto.Schema` in your schemas. This provides:
+  - UUID primary keys (:binary_id)
+  - UUID foreign keys (:binary_id)
+  - Microsecond timestamps (:utc_datetime_usec)
+
+      defmodule MyApp.MySchema do
+        use MyApp.Schema
+
+        # rest of your schema...
+      end
+
 - **Always** preload Ecto associations in queries when they'll be accessed in templates, ie a message that needs to reference the `message.user.email`
 - Remember `import Ecto.Query` and other supporting modules when you write `seeds.exs`
 - `Ecto.Schema` fields always use the `:string` type, even for `:text`, columns, ie: `field :name, :string`

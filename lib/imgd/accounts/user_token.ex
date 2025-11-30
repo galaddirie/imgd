@@ -1,5 +1,5 @@
 defmodule Imgd.Accounts.UserToken do
-  use Ecto.Schema
+  use Imgd.Schema
   import Ecto.Query
   alias Imgd.Accounts.UserToken
 
@@ -16,10 +16,10 @@ defmodule Imgd.Accounts.UserToken do
     field :token, :binary
     field :context, :string
     field :sent_to, :string
-    field :authenticated_at, :utc_datetime
+    field :authenticated_at, :utc_datetime_usec
     belongs_to :user, Imgd.Accounts.User
 
-    timestamps(type: :utc_datetime, updated_at: false)
+    timestamps(updated_at: false)
   end
 
   @doc """

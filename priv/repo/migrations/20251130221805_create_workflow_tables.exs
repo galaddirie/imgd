@@ -11,14 +11,17 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowTables do
       add :definition, :map
       add :definition_hash, :integer
       add :trigger_config, :map, default: %{"type" => "manual", "config" => %{}}
-      add :settings, :map, default: %{
-        "timeout_ms" => 300_000,
-        "max_retries" => 3,
-        "checkpoint_strategy" => "generation",
-        "checkpoint_interval_ms" => 60_000
-      }
+
+      add :settings, :map,
+        default: %{
+          "timeout_ms" => 300_000,
+          "max_retries" => 3,
+          "checkpoint_strategy" => "generation",
+          "checkpoint_interval_ms" => 60_000
+        }
+
       add :published_at, :utc_datetime_usec
-      add :user_id, references(:users, on_delete: :nothing), null: false
+      add :user_id, references(:users, on_delete: :nothing, type: :binary_id), null: false
 
       timestamps(type: :utc_datetime_usec)
     end
@@ -34,7 +37,9 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowTables do
       add :definition_hash, :integer
       add :change_summary, :text
       add :published_by, references(:users, on_delete: :nothing, type: :binary_id)
-      add :workflow_id, references(:workflows, on_delete: :delete_all), null: false
+
+      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id),
+        null: false
 
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
@@ -55,15 +60,18 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowTables do
       add :completed_at, :utc_datetime_usec
       add :expires_at, :utc_datetime_usec
       add :metadata, :map, default: %{}
-      add :stats, :map, default: %{
-        "steps_completed" => 0,
-        "steps_failed" => 0,
-        "steps_skipped" => 0,
-        "total_duration_ms" => 0,
-        "retries" => 0
-      }
+
+      add :stats, :map,
+        default: %{
+          "steps_completed" => 0,
+          "steps_failed" => 0,
+          "steps_skipped" => 0,
+          "total_duration_ms" => 0,
+          "retries" => 0
+        }
+
       add :triggered_by_user_id, references(:users, on_delete: :nothing, type: :binary_id)
-      add :workflow_id, references(:workflows, on_delete: :nothing), null: false
+      add :workflow_id, references(:workflows, on_delete: :nothing, type: :binary_id), null: false
 
       timestamps(type: :utc_datetime_usec)
     end
@@ -83,7 +91,9 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowTables do
       add :reason, :string, default: "generation", null: false
       add :is_current, :boolean, default: true
       add :size_bytes, :integer
-      add :execution_id, references(:executions, on_delete: :delete_all), null: false
+
+      add :execution_id, references(:executions, on_delete: :delete_all, type: :binary_id),
+        null: false
 
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
@@ -113,7 +123,9 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowTables do
       add :max_attempts, :integer, default: 1
       add :next_retry_at, :utc_datetime_usec
       add :idempotency_key, :string
-      add :execution_id, references(:executions, on_delete: :delete_all), null: false
+
+      add :execution_id, references(:executions, on_delete: :delete_all, type: :binary_id),
+        null: false
 
       timestamps(type: :utc_datetime_usec)
     end

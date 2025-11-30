@@ -5,16 +5,11 @@ defmodule Imgd.Workflows.WorkflowVersion do
   Created each time a workflow is published, preserving the exact
   definition for audit trails and execution reproducibility.
   """
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Imgd.Schema
   import Ecto.Query
 
   alias Imgd.Workflows.Workflow
   alias Imgd.Accounts.User
-
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @foreign_key_type :binary_id
-  @timestamps_opts [type: :utc_datetime_usec]
 
   schema "workflow_versions" do
     field :version, :integer
@@ -22,7 +17,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
     field :definition_hash, :integer
     field :change_summary, :string
 
-    belongs_to :published_by_user, User, foreign_key: :published_by, type: :id
+    belongs_to :published_by_user, User, foreign_key: :published_by
 
     belongs_to :workflow, Workflow
 

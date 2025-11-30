@@ -5,17 +5,12 @@ defmodule Imgd.Workflows.ExecutionCheckpoint do
   Stores serialized workflow state at a point in time, enabling
   recovery from crashes, pauses, and resumption of long-running workflows.
   """
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Imgd.Schema
   import Ecto.Query
 
   alias Imgd.Workflows.Execution
 
   @type reason :: :generation | :step | :pause | :timeout | :error | :scheduled
-
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @foreign_key_type :binary_id
-  @timestamps_opts [type: :utc_datetime_usec]
 
   schema "execution_checkpoints" do
     field :generation, :integer

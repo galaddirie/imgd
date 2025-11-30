@@ -5,8 +5,7 @@ defmodule Imgd.Workflows.Execution do
   Tracks the runtime state of a single workflow execution including
   status, timing, inputs, outputs, and error information.
   """
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Imgd.Schema
   import Ecto.Query
 
   alias Imgd.Workflows.{Workflow, ExecutionCheckpoint, ExecutionStep}
@@ -14,10 +13,6 @@ defmodule Imgd.Workflows.Execution do
 
   @type status :: :pending | :running | :paused | :completed | :failed | :cancelled | :timeout
   @type trigger_type :: :manual | :schedule | :webhook | :event
-
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @foreign_key_type :binary_id
-  @timestamps_opts [type: :utc_datetime_usec]
 
   schema "executions" do
     field :workflow_version, :integer
@@ -66,7 +61,7 @@ defmodule Imgd.Workflows.Execution do
       }
 
     belongs_to :workflow, Workflow
-    belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id, type: :id
+    belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
     has_many :checkpoints, ExecutionCheckpoint
     has_many :steps, ExecutionStep
 

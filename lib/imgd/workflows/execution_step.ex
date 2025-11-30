@@ -6,17 +6,12 @@ defmodule Imgd.Workflows.ExecutionStep do
   including timing, inputs, outputs, errors, and logs.
   Used for debugging, observability, and waterfall visualization.
   """
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Imgd.Schema
   import Ecto.Query
 
   alias Imgd.Workflows.Execution
 
   @type status :: :pending | :running | :completed | :failed | :skipped | :retrying
-
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @foreign_key_type :binary_id
-  @timestamps_opts [type: :utc_datetime_usec]
 
   schema "execution_steps" do
     # Step identification

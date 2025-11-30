@@ -1,15 +1,14 @@
 defmodule Imgd.Accounts.User do
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Imgd.Schema
 
   schema "users" do
     field :email, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
-    field :confirmed_at, :utc_datetime
-    field :authenticated_at, :utc_datetime, virtual: true
+    field :confirmed_at, :utc_datetime_usec
+    field :authenticated_at, :utc_datetime_usec, virtual: true
 
-    timestamps(type: :utc_datetime)
+    timestamps()
   end
 
   @doc """
