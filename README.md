@@ -1,4 +1,4 @@
-# Imgd
+# imgd
 
 To start your Phoenix server:
 
