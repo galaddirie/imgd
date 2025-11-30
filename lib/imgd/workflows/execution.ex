@@ -32,8 +32,10 @@ defmodule Imgd.Workflows.Execution do
 
     # Execution data
     field :input, :map
-    field :output, :map                  # Final productions
-    field :error, :map                   # Error details if failed
+    # Final productions
+    field :output, :map
+    # Error details if failed
+    field :error, :map
 
     # Current position in workflow
     field :current_generation, :integer, default: 0
@@ -41,7 +43,8 @@ defmodule Imgd.Workflows.Execution do
     # Timing
     field :started_at, :utc_datetime_usec
     field :completed_at, :utc_datetime_usec
-    field :expires_at, :utc_datetime_usec   # TTL for long-running cleanup
+    # TTL for long-running cleanup
+    field :expires_at, :utc_datetime_usec
 
     # Metadata for correlation, debugging
     field :metadata, :map, default: %{}
@@ -53,13 +56,14 @@ defmodule Imgd.Workflows.Execution do
     # }
 
     # Statistics (updated as execution progresses)
-    field :stats, :map, default: %{
-      steps_completed: 0,
-      steps_failed: 0,
-      steps_skipped: 0,
-      total_duration_ms: 0,
-      retries: 0
-    }
+    field :stats, :map,
+      default: %{
+        steps_completed: 0,
+        steps_failed: 0,
+        steps_skipped: 0,
+        total_duration_ms: 0,
+        retries: 0
+      }
 
     belongs_to :workflow, Workflow
     has_many :checkpoints, ExecutionCheckpoint
@@ -70,9 +74,17 @@ defmodule Imgd.Workflows.Execution do
 
   @required_fields [:workflow_id, :tenant_id, :workflow_version]
   @optional_fields [
-    :status, :trigger_type, :input, :output, :error,
-    :current_generation, :started_at, :completed_at,
-    :expires_at, :metadata, :stats
+    :status,
+    :trigger_type,
+    :input,
+    :output,
+    :error,
+    :current_generation,
+    :started_at,
+    :completed_at,
+    :expires_at,
+    :metadata,
+    :stats
   ]
 
   def changeset(execution, attrs) do
@@ -89,7 +101,8 @@ defmodule Imgd.Workflows.Execution do
     |> change(%{
       status: :running,
       started_at: now,
-      expires_at: DateTime.add(now, 24, :hour)  # Default 24h TTL
+      # Default 24h TTL
+      expires_at: DateTime.add(now, 24, :hour)
     })
   end
 
@@ -183,6 +196,7 @@ defmodule Imgd.Workflows.Execution do
 
   def expired(query \\ __MODULE__) do
     now = DateTime.utc_now()
+
     from e in query,
       where: e.status in [:pending, :running, :paused],
       where: e.expires_at < ^now
@@ -213,7 +227,8 @@ defmodule Imgd.Workflows.Execution do
     %{
       type: error.__struct__ |> to_string(),
       message: Exception.message(error),
-      stacktrace: nil  # Optionally include formatted stacktrace
+      # Optionally include formatted stacktrace
+      stacktrace: nil
     }
   end
 
@@ -234,6 +249,7 @@ defmodule Imgd.Workflows.Execution do
         duration_ms = DateTime.diff(completed, started, :millisecond)
         stats = Map.put(changeset.data.stats || %{}, :total_duration_ms, duration_ms)
         put_change(changeset, :stats, stats)
+
       _ ->
         changeset
     end

@@ -20,7 +20,7 @@ config :imgd, Imgd.Repo,
 # you can enable the server option below.
 config :imgd, ImgdWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
-  secret_key_base: "c++Bgf/JxJonPUhhfYATvvWtGKbCXmlVGfiq5iU+O0fTCqsKaoHzpwOeXuj8+Sgy",
+  secret_key_base: "VYCzrEj2WYjSlUeZPsMgeV4Mahw5I0XD9qa3FA5LbZwhl4SpK0SYQ2xD79GReUWi",
   server: false
 
 # In test we don't send emails

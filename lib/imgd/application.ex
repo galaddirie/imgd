@@ -12,8 +12,6 @@ defmodule Imgd.Application do
       Imgd.Repo,
       {DNSCluster, query: Application.get_env(:imgd, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Imgd.PubSub},
-      # Start the Finch HTTP client for sending emails
-      {Finch, name: Imgd.Finch},
       # Start a worker by calling: Imgd.Worker.start_link(arg)
       # {Imgd.Worker, arg},
       # Start to serve requests, typically the last entry

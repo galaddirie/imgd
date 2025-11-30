@@ -48,13 +48,18 @@ defmodule Imgd.Workflows.ExecutionCheckpoint do
 
     belongs_to :execution, Execution
 
-    timestamps(updated_at: false)  # Checkpoints are immutable
+    # Checkpoints are immutable
+    timestamps(updated_at: false)
   end
 
   @required_fields [:execution_id, :generation, :workflow_state]
   @optional_fields [
-    :pending_runnables, :accumulator_states, :completed_step_hashes,
-    :reason, :is_current, :size_bytes
+    :pending_runnables,
+    :accumulator_states,
+    :completed_step_hashes,
+    :reason,
+    :is_current,
+    :size_bytes
   ]
 
   def changeset(checkpoint, attrs) do

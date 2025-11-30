@@ -19,11 +19,11 @@ config :imgd, Imgd.Repo,
 config :imgd, ImgdWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  http: [ip: {127, 0, 0, 1}, port: 4000],
+  http: [ip: {127, 0, 0, 1}],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
-  secret_key_base: "H85cEfxR7yfbLQVa+f56+OsMo4Rr2eXI25ychvalRwCjV1/3w/V8AiXvZNJkTyl2",
+  secret_key_base: "tzl/PQ20vnnzbF107ZILQXIVSVwj74dJa9hnFHvOpGrmnKQOcOCoUzhJL6z/J1jc",
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:imgd, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:imgd, ~w(--watch)]}
@@ -52,13 +52,18 @@ config :imgd, ImgdWeb.Endpoint,
 # configured to run both http and https servers on
 # different ports.
 
-# Watch static and templates for browser reloading.
+# Reload browser tabs when matching files change.
 config :imgd, ImgdWeb.Endpoint,
   live_reload: [
+    web_console_logger: true,
     patterns: [
-      ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
-      ~r"priv/gettext/.*(po)$",
-      ~r"lib/imgd_web/(controllers|live|components)/.*(ex|heex)$"
+      # Static assets, except user uploads
+      ~r"priv/static/(?!uploads/).*\.(js|css|png|jpeg|jpg|gif|svg)$",
+      # Gettext translations
+      ~r"priv/gettext/.*\.po$",
+      # Router, Controllers, LiveViews and LiveComponents
+      ~r"lib/imgd_web/router\.ex$",
+      ~r"lib/imgd_web/(controllers|live|components)/.*\.(ex|heex)$"
     ]
   ]
 
@@ -66,7 +71,7 @@ config :imgd, ImgdWeb.Endpoint,
 config :imgd, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
-config :logger, :console, format: "[$level] $message\n"
+config :logger, :default_formatter, format: "[$level] $message\n"
 
 # Set a higher stacktrace during development. Avoid configuring such
 # in production as building large stacktraces may be expensive.
@@ -76,8 +81,10 @@ config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime
 
 config :phoenix_live_view,
-  # Include HEEx debug annotations as HTML comments in rendered markup
+  # Include debug annotations and locations in rendered markup.
+  # Changing this configuration will require mix clean and a full recompile.
   debug_heex_annotations: true,
+  debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
 

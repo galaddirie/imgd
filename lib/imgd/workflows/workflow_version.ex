@@ -20,11 +20,13 @@ defmodule Imgd.Workflows.WorkflowVersion do
     field :definition, :map
     field :definition_hash, :integer
     field :change_summary, :string
-    field :published_by, :binary_id  # User ID who published
+    # User ID who published
+    field :published_by, :binary_id
 
     belongs_to :workflow, Workflow
 
-    timestamps(updated_at: false)  # Immutable - no updates
+    # Immutable - no updates
+    timestamps(updated_at: false)
   end
 
   @required_fields [:version, :definition, :workflow_id]

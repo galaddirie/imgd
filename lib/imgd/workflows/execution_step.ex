@@ -22,7 +22,8 @@ defmodule Imgd.Workflows.ExecutionStep do
     # Step identification
     field :step_hash, :integer
     field :step_name, :string
-    field :step_type, :string      # "Step", "Condition", "Accumulator", etc.
+    # "Step", "Condition", "Accumulator", etc.
+    field :step_type, :string
     field :generation, :integer
 
     # Status tracking
@@ -33,7 +34,8 @@ defmodule Imgd.Workflows.ExecutionStep do
     # Fact lineage for dependency tracking
     field :input_fact_hash, :integer
     field :output_fact_hash, :integer
-    field :parent_step_hash, :integer    # Step that produced the input fact
+    # Step that produced the input fact
+    field :parent_step_hash, :integer
 
     # Data snapshots for debugging
     field :input_snapshot, :map
@@ -66,10 +68,21 @@ defmodule Imgd.Workflows.ExecutionStep do
 
   @required_fields [:execution_id, :step_hash, :step_name, :step_type, :generation]
   @optional_fields [
-    :status, :input_fact_hash, :output_fact_hash, :parent_step_hash,
-    :input_snapshot, :output_snapshot, :error, :logs,
-    :duration_ms, :started_at, :completed_at,
-    :attempt, :max_attempts, :next_retry_at, :idempotency_key
+    :status,
+    :input_fact_hash,
+    :output_fact_hash,
+    :parent_step_hash,
+    :input_snapshot,
+    :output_snapshot,
+    :error,
+    :logs,
+    :duration_ms,
+    :started_at,
+    :completed_at,
+    :attempt,
+    :max_attempts,
+    :next_retry_at,
+    :idempotency_key
   ]
 
   def changeset(step, attrs) do
@@ -164,6 +177,7 @@ defmodule Imgd.Workflows.ExecutionStep do
 
   def pending_retry(query \\ __MODULE__) do
     now = DateTime.utc_now()
+
     from s in query,
       where: s.status == :retrying,
       where: s.next_retry_at <= ^now
@@ -194,10 +208,11 @@ defmodule Imgd.Workflows.ExecutionStep do
   Creates a step record from a Runic node and fact.
   """
   def from_runnable(execution_id, node, fact, opts \\ []) do
-    parent_hash = case fact.ancestry do
-      {parent, _} -> parent
-      nil -> nil
-    end
+    parent_hash =
+      case fact.ancestry do
+        {parent, _} -> parent
+        nil -> nil
+      end
 
     %__MODULE__{}
     |> changeset(%{
@@ -220,6 +235,7 @@ defmodule Imgd.Workflows.ExecutionStep do
     # Limit snapshot size to prevent huge DB records
     try do
       encoded = Jason.encode!(value)
+
       if byte_size(encoded) > 10_000 do
         %{
           _truncated: true,
@@ -243,19 +259,26 @@ defmodule Imgd.Workflows.ExecutionStep do
 
   defp truncate_logs(changeset) do
     case get_change(changeset, :logs) do
-      nil -> changeset
+      nil ->
+        changeset
+
       logs when byte_size(logs) > 100_000 ->
         truncated = String.slice(logs, -100_000, 100_000)
         put_change(changeset, :logs, "[truncated...]\n" <> truncated)
-      _ -> changeset
+
+      _ ->
+        changeset
     end
   end
 
   defp maybe_truncate_field(changeset, field, max_size) do
     case get_change(changeset, field) do
-      nil -> changeset
+      nil ->
+        changeset
+
       value ->
         encoded = Jason.encode!(value)
+
         if byte_size(encoded) > max_size do
           put_change(changeset, field, %{_truncated: true, _size: byte_size(encoded)})
         else

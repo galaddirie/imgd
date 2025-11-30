@@ -35,18 +35,20 @@ defmodule Imgd.Workflows.Workflow do
     field :trigger_config, :map, default: %{type: :manual, config: %{}}
 
     # Runtime settings
-    field :settings, :map, default: %{
-      timeout_ms: 300_000,          # 5 minutes default
-      max_retries: 3,
-      checkpoint_strategy: :generation,  # :generation | :step | :time
-      checkpoint_interval_ms: 60_000
-    }
+    field :settings, :map,
+      default: %{
+        # 5 minutes default
+        timeout_ms: 300_000,
+        max_retries: 3,
+        # :generation | :step | :time
+        checkpoint_strategy: :generation,
+        checkpoint_interval_ms: 60_000
+      }
 
     field :published_at, :utc_datetime_usec
 
     has_many :versions, WorkflowVersion
     has_many :executions, Execution
-
 
     timestamps()
   end
@@ -114,6 +116,7 @@ defmodule Imgd.Workflows.Workflow do
     case get_change(changeset, :definition) do
       nil ->
         changeset
+
       definition ->
         case validate_runic_definition(definition) do
           :ok -> changeset
@@ -149,7 +152,6 @@ defmodule Imgd.Workflows.Workflow do
     |> Base.encode64()
   end
 
-
   # TODO: may need to look at this again later
   @doc """
   Deserializes a stored workflow definition back to Runic events.
@@ -159,8 +161,6 @@ defmodule Imgd.Workflows.Workflow do
     |> Base.decode64!()
     |> :erlang.binary_to_term()
   end
-
-
 
   @doc """
   Rebuilds a Runic.Workflow from the stored definition.
