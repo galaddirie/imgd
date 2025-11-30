@@ -1,0 +1,42 @@
+name: imgd-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: imgd_postgres_dev
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-imgd_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - imgd_server
+  adminer:
+    image: adminer
+    container_name: imgd_adminer_dev
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    networks:
+      - imgd_server
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_dev_data:
+
+
+networks:
+  imgd_server:
+    driver: bridge
+  kind:
+    external: true
