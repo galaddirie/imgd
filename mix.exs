@@ -67,7 +67,8 @@ defmodule Imgd.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:runic, git: "https://github.com/zblanco/runic.git", branch: "main"}
+      {:runic, git: "https://github.com/zblanco/runic.git", branch: "main"},
+      {:oban, "~> 2.20"}
     ]
   end
 
