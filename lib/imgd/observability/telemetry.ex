@@ -151,7 +151,13 @@ defmodule Imgd.Observability.Telemetry do
         case result do
           {:ok, workflow, events} ->
             output_fact = extract_output_fact(events)
-            Span.set_attribute(Tracer.current_span_ctx(), :"step.output_fact_hash", output_fact.hash)
+
+            Span.set_attribute(
+              Tracer.current_span_ctx(),
+              :"step.output_fact_hash",
+              output_fact.hash
+            )
+
             Span.set_status(Tracer.current_span_ctx(), :ok)
             emit_step_stop(execution, node, fact, :completed, duration_ms, output_fact)
             {:ok, workflow, events}
@@ -191,6 +197,7 @@ defmodule Imgd.Observability.Telemetry do
 
     Tracer.with_span span_name, %{attributes: attributes, kind: :internal} do
       start_time = System.monotonic_time()
+
       :telemetry.execute([:imgd, :engine, :checkpoint, :start], %{}, %{
         execution: execution,
         reason: reason
@@ -258,14 +265,15 @@ defmodule Imgd.Observability.Telemetry do
   This ensures all logs within the current process include workflow context.
   """
   def set_log_context(execution, workflow \\ nil) do
-    metadata = [
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      workflow_name: workflow && workflow.name,
-      workflow_version: execution.workflow_version,
-      trigger_type: execution.trigger_type
-    ]
-    |> Enum.reject(fn {_, v} -> is_nil(v) end)
+    metadata =
+      [
+        execution_id: execution.id,
+        workflow_id: execution.workflow_id,
+        workflow_name: workflow && workflow.name,
+        workflow_version: execution.workflow_version,
+        trigger_type: execution.trigger_type
+      ]
+      |> Enum.reject(fn {_, v} -> is_nil(v) end)
 
     Logger.metadata(metadata)
   end
@@ -274,16 +282,17 @@ defmodule Imgd.Observability.Telemetry do
   Sets step context in Logger metadata.
   """
   def set_step_log_context(execution, node, opts \\ []) do
-    metadata = [
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      step_hash: node.hash,
-      step_name: node.name,
-      step_type: node.__struct__ |> Module.split() |> List.last(),
-      generation: opts[:generation],
-      attempt: opts[:attempt]
-    ]
-    |> Enum.reject(fn {_, v} -> is_nil(v) end)
+    metadata =
+      [
+        execution_id: execution.id,
+        workflow_id: execution.workflow_id,
+        step_hash: node.hash,
+        step_name: node.name,
+        step_type: node.__struct__ |> Module.split() |> List.last(),
+        generation: opts[:generation],
+        attempt: opts[:attempt]
+      ]
+      |> Enum.reject(fn {_, v} -> is_nil(v) end)
 
     Logger.metadata(metadata)
   end

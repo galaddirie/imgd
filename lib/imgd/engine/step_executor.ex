@@ -62,13 +62,22 @@ defmodule Imgd.Engine.StepExecutor do
     {:ok, step} = create_step_record(execution, node, fact, generation, attempt)
 
     # Execute with full observability (spans, metrics, logs)
-    Telemetry.with_step_span(execution, node, fact, [generation: generation, attempt: attempt], fn ->
-      StructuredLogger.step_started(execution, node, fact, generation: generation, attempt: attempt)
+    Telemetry.with_step_span(
+      execution,
+      node,
+      fact,
+      [generation: generation, attempt: attempt],
+      fn ->
+        StructuredLogger.step_started(execution, node, fact,
+          generation: generation,
+          attempt: attempt
+        )
 
-      result = execute_with_timeout(workflow, node, fact, timeout_ms)
+        result = execute_with_timeout(workflow, node, fact, timeout_ms)
 
-      handle_result(result, execution, step, node, fact, timeout_ms)
-    end)
+        handle_result(result, execution, step, node, fact, timeout_ms)
+      end
+    )
   end
 
   @doc """
@@ -120,18 +129,19 @@ defmodule Imgd.Engine.StepExecutor do
   # ============================================================================
 
   defp execute_with_timeout(workflow, node, fact, timeout_ms) do
-    task = Task.async(fn ->
-      try do
-        {updated_workflow, events} = Runic.Workflow.invoke_with_events(workflow, node, fact)
-        {:ok, updated_workflow, events}
-      rescue
-        e ->
-          {:error, {:exception, e, __STACKTRACE__}}
-      catch
-        kind, reason ->
-          {:error, {:caught, kind, reason, __STACKTRACE__}}
-      end
-    end)
+    task =
+      Task.async(fn ->
+        try do
+          {updated_workflow, events} = Runic.Workflow.invoke_with_events(workflow, node, fact)
+          {:ok, updated_workflow, events}
+        rescue
+          e ->
+            {:error, {:exception, e, __STACKTRACE__}}
+        catch
+          kind, reason ->
+            {:error, {:caught, kind, reason, __STACKTRACE__}}
+        end
+      end)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, result} ->
@@ -155,7 +165,14 @@ defmodule Imgd.Engine.StepExecutor do
     {:ok, workflow, events}
   end
 
-  defp handle_result({:error, {:timeout, timeout_ms} = reason}, execution, step, node, _fact, _timeout_ms) do
+  defp handle_result(
+         {:error, {:timeout, timeout_ms} = reason},
+         execution,
+         step,
+         node,
+         _fact,
+         _timeout_ms
+       ) do
     duration_ms = calculate_duration(step.started_at)
 
     # Update step record with error
@@ -267,6 +284,7 @@ defmodule Imgd.Engine.StepExecutor do
   end
 
   defp calculate_duration(nil), do: 0
+
   defp calculate_duration(started_at) do
     DateTime.diff(DateTime.utc_now(), started_at, :millisecond)
   end

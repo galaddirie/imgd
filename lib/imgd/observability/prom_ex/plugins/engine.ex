@@ -46,7 +46,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           tags: [:workflow_id, :workflow_name, :status, :trigger_type],
           tag_values: &execution_tag_values/1
         ),
-
         distribution(
           [:imgd, :engine, :execution, :duration, :milliseconds],
           event_name: [:imgd, :engine, :execution, :stop],
@@ -57,7 +56,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           reporter_options: [buckets: @execution_duration_buckets],
           unit: :millisecond
         ),
-
         counter(
           [:imgd, :engine, :execution, :exception, :total],
           event_name: [:imgd, :engine, :execution, :exception],
@@ -83,7 +81,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           tags: [:workflow_id, :step_name, :step_type, :status],
           tag_values: &step_tag_values/1
         ),
-
         distribution(
           [:imgd, :engine, :step, :duration, :milliseconds],
           event_name: [:imgd, :engine, :step, :stop],
@@ -94,7 +91,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           reporter_options: [buckets: @step_duration_buckets],
           unit: :millisecond
         ),
-
         counter(
           [:imgd, :engine, :step, :exception, :total],
           event_name: [:imgd, :engine, :step, :exception],
@@ -126,7 +122,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
             }
           end
         ),
-
         distribution(
           [:imgd, :engine, :checkpoint, :duration, :milliseconds],
           event_name: [:imgd, :engine, :checkpoint, :stop],
@@ -166,14 +161,12 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           description: "Number of currently active workflow executions",
           measurement: :active_executions
         ),
-
         last_value(
           [:imgd, :engine, :executions, :pending],
           event_name: [:imgd, :engine, :stats, :poll],
           description: "Number of pending workflow executions",
           measurement: :pending_executions
         ),
-
         last_value(
           [:imgd, :engine, :steps, :running],
           event_name: [:imgd, :engine, :stats, :poll],
