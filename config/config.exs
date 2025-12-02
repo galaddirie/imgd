@@ -65,8 +65,6 @@ config :tailwind,
     cd: Path.expand("..", __DIR__)
   ]
 
-
-
 config :opentelemetry,
   span_processor: :batch,
   traces_exporter: :otlp,
@@ -83,14 +81,11 @@ config :opentelemetry_exporter,
   otlp_protocol: :http_protobuf,
   otlp_compression: :gzip
 
-
-
 config :imgd, Imgd.Observability.PromEx,
   disabled: false,
   manual_metrics_start_delay: :no_delay,
   drop_metrics_groups: [],
   grafana: :disabled
-
 
 config :logger,
   backends: [:console, {LoggerFileBackend, :file}],
@@ -98,13 +93,13 @@ config :logger,
   truncate: 8_192
 
 config :logger, :console,
-  format: {LoggerJSON.Formatters.Basic, :format},
+  format: {Imgd.LoggerJSONFormatter, :format},
   metadata: :all
 
 config :logger, :file,
   path: "log/imgd.log",
   level: :info,
-  format: {LoggerJSON.Formatters.Basic, :format},
+  format: {Imgd.LoggerJSONFormatter, :format},
   metadata: :all,
   rotate: %{max_bytes: 104_857_600, keep: 5}
 
@@ -125,8 +120,6 @@ config :logger_json, :backend,
   ],
   json_encoder: Jason,
   formatter: LoggerJSON.Formatters.Basic
-
-
 
 config :opentelemetry_logger_metadata,
   trace_id_field: :trace_id,

@@ -32,7 +32,7 @@ services:
       - postgres
 
   grafana:
-    image: grafana/grafana:11.0.0
+    image: grafana/grafana:latest
     container_name: imgd_grafana
     restart: unless-stopped
     ports:
@@ -59,9 +59,10 @@ services:
       - tempo
 
   tempo:
-    image: grafana/tempo:2.4.1
+    image: grafana/tempo:latest
     container_name: imgd_tempo
     restart: unless-stopped
+    user: "0"
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     ports:
       - "3200:3200"   # Tempo query API
@@ -75,7 +76,7 @@ services:
       - imgd_server
 
   loki:
-    image: grafana/loki:2.9.6
+    image: grafana/loki:latest
     container_name: imgd_loki
     restart: unless-stopped
     command: ["-config.file=/etc/loki/loki.yaml"]
@@ -89,7 +90,7 @@ services:
 
 
   promtail:
-    image: grafana/promtail:2.9.6
+    image: grafana/promtail:latest
     container_name: imgd_promtail
     restart: unless-stopped
     command: ["-config.file=/etc/promtail/promtail.yaml"]
@@ -103,7 +104,7 @@ services:
       - loki
 
   prometheus:
-    image: prom/prometheus:v2.51.0
+    image: prom/prometheus:latest
     container_name: imgd_prometheus
     restart: unless-stopped
     command:
@@ -112,6 +113,7 @@ services:
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
       - '--web.enable-lifecycle'
+      - '--web.enable-remote-write-receiver'
       - '--enable-feature=exemplar-storage'
     ports:
       - "9090:9090"
