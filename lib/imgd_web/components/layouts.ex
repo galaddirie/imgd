@@ -136,7 +136,7 @@ defmodule ImgdWeb.Layouts do
                 </li>
               <% end %>
             </ul>
-            
+
     <!-- Auth Navigation -->
             <%= if @current_scope do %>
               <div class="dropdown dropdown-end hidden lg:block">
@@ -204,7 +204,7 @@ defmodule ImgdWeb.Layouts do
                 </div>
               </div>
             <% end %>
-            
+
     <!-- Content Area with secondary background -->
             <div class="flex-1 p-6">
               <!-- Flash messages positioned here -->
