@@ -29,7 +29,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
 
   @execution_duration_buckets [10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000]
   @step_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000]
-  @checkpoint_size_buckets [1_000, 10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000]
 
   @impl true
   def event_metrics(_opts) do

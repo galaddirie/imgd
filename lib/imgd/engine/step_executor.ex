@@ -254,7 +254,7 @@ defmodule Imgd.Engine.StepExecutor do
 
   defp get_step_timeout(%Execution{} = execution, node) do
     node_timeout = Map.get(node, :timeout_ms)
-    execution_timeout = get_in(execution.settings, [:timeout_ms])
+    execution_timeout = get_in(execution.workflow.settings, [:timeout_ms])
 
     node_timeout || execution_timeout || @default_timeout_ms
   end

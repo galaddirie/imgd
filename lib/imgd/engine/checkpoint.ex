@@ -122,7 +122,7 @@ defmodule Imgd.Engine.Checkpoint do
         true
 
       :time ->
-        interval_ms = get_in(execution.settings, [:checkpoint_interval_ms]) || 60_000
+        interval_ms = get_in(execution.workflow.settings, [:checkpoint_interval_ms]) || 60_000
         last_checkpoint_at = opts[:last_checkpoint_at]
 
         is_nil(last_checkpoint_at) or

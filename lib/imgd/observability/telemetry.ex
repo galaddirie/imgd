@@ -30,7 +30,6 @@ defmodule Imgd.Observability.Telemetry do
   require OpenTelemetry.Tracer, as: Tracer
 
   alias OpenTelemetry.Span
-  alias OpenTelemetry.SemanticConventions, as: Conventions
 
   # ============================================================================
   # Event Definitions
@@ -96,12 +95,12 @@ defmodule Imgd.Observability.Telemetry do
 
         case result do
           {:ok, _} = success ->
-            Span.set_status(Tracer.current_span_ctx(), :ok, "")
+            Span.set_status(Tracer.current_span_ctx(), :ok)
             emit_execution_stop(execution, workflow, :completed, duration_ms)
             success
 
           {:error, reason} = error ->
-            Span.set_status(Tracer.current_span_ctx(), :error, inspect(reason))
+            Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
             Span.set_attribute(Tracer.current_span_ctx(), :"error.message", inspect(reason))
             emit_execution_stop(execution, workflow, :failed, duration_ms)
             error
@@ -110,7 +109,7 @@ defmodule Imgd.Observability.Telemetry do
         e ->
           duration_ms = duration_since(start_time)
           Span.record_exception(Tracer.current_span_ctx(), e, __STACKTRACE__)
-          Span.set_status(Tracer.current_span_ctx(), :error, Exception.message(e))
+          Span.set_status(Tracer.current_span_ctx(), {:error, Exception.message(e)})
           emit_execution_exception(execution, workflow, e, __STACKTRACE__, duration_ms)
           reraise e, __STACKTRACE__
       end
@@ -153,18 +152,18 @@ defmodule Imgd.Observability.Telemetry do
           {:ok, workflow, events} ->
             output_fact = extract_output_fact(events)
             Span.set_attribute(Tracer.current_span_ctx(), :"step.output_fact_hash", output_fact.hash)
-            Span.set_status(Tracer.current_span_ctx(), :ok, "")
+            Span.set_status(Tracer.current_span_ctx(), :ok)
             emit_step_stop(execution, node, fact, :completed, duration_ms, output_fact)
             {:ok, workflow, events}
 
           {:error, reason} = error ->
-            Span.set_status(Tracer.current_span_ctx(), :error, inspect(reason))
+            Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
             Span.set_attribute(Tracer.current_span_ctx(), :"error.message", inspect(reason))
             emit_step_stop(execution, node, fact, :failed, duration_ms, nil)
             error
 
           {:error, reason, workflow} ->
-            Span.set_status(Tracer.current_span_ctx(), :error, inspect(reason))
+            Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
             emit_step_stop(execution, node, fact, :failed, duration_ms, nil)
             {:error, reason, workflow}
         end
@@ -172,7 +171,7 @@ defmodule Imgd.Observability.Telemetry do
         e ->
           duration_ms = duration_since(start_time)
           Span.record_exception(Tracer.current_span_ctx(), e, __STACKTRACE__)
-          Span.set_status(Tracer.current_span_ctx(), :error, Exception.message(e))
+          Span.set_status(Tracer.current_span_ctx(), {:error, Exception.message(e)})
           emit_step_exception(execution, node, fact, e, __STACKTRACE__, duration_ms)
           reraise e, __STACKTRACE__
       end

@@ -28,8 +28,8 @@ defmodule Imgd.Engine.Runner do
 
   alias Imgd.Repo
   alias Imgd.Workflows
-  alias Imgd.Workflows.{Workflow, Execution, ExecutionCheckpoint}
-  alias Imgd.Engine.{Checkpoint, StepExecutor}
+  alias Imgd.Workflows.{Execution, ExecutionCheckpoint}
+  alias Imgd.Engine.Checkpoint
 
   require Logger
 

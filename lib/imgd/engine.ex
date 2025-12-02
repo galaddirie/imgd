@@ -27,8 +27,6 @@ defmodule Imgd.Engine do
   6. Checkpoints are created at generation boundaries
   """
 
-  alias Imgd.Workflows.{Execution, ExecutionStep, ExecutionCheckpoint}
-
   # ============================================================================
   # Types
   # ============================================================================

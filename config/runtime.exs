@@ -8,8 +8,6 @@ import Config
 
 env = config_env()
 
-
-
 config :opentelemetry,
   resource: %{
     service: %{

@@ -32,8 +32,7 @@ config :swoosh, :api_client, false
 config :opentelemetry,
   traces_exporter: :none
 
-config :imgd, Imgd.Observability.PromEx,
-  disabled: true
+config :imgd, Imgd.Observability.PromEx, disabled: true
 
 config :logger, level: :warning
 

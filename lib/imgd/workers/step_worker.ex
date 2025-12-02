@@ -38,10 +38,8 @@ defmodule Imgd.Workers.StepWorker do
     priority: 1
 
   alias Imgd.Repo
-  alias Imgd.Workflows
   alias Imgd.Workflows.{Execution, ExecutionStep}
-  alias Imgd.Engine.{Runner, StepExecutor, Checkpoint}
-  alias Imgd.Workers.ExecutionWorker
+  alias Imgd.Engine.{Runner, StepExecutor}
 
   require Logger
 
@@ -151,21 +149,16 @@ defmodule Imgd.Workers.StepWorker do
   end
 
   defp handle_step_success(state, updated_workflow, generation, generation_id) do
-    %{execution: execution} = state
+    %{execution: _execution} = state
 
     # Advance the runner state
-    case Runner.advance(state, updated_workflow) do
-      {:ok, new_state} ->
-        # Check if this generation is complete
-        check_generation_completion(new_state, generation, generation_id)
+    {:ok, new_state} = Runner.advance(state, updated_workflow)
 
-      {:error, reason} ->
-        Logger.error("Failed to advance runner state: #{inspect(reason)}")
-        {:error, {:advance_failed, reason}}
-    end
+    # Check if this generation is complete
+    check_generation_completion(new_state, generation, generation_id)
   end
 
-  defp handle_step_failure(state, node, fact, reason, attempt, generation, generation_id) do
+  defp handle_step_failure(state, node, _fact, reason, attempt, _generation, _generation_id) do
     %{execution: execution} = state
 
     # Check if we should retry
@@ -175,7 +168,7 @@ defmodule Imgd.Workers.StepWorker do
       {:snooze, StepExecutor.retry_delay_ms(attempt)}
     else
       # Permanent failure - fail the execution
-      StructuredLogger.step_permanently_failed(execution, node, reason)
+      Imgd.Observability.StructuredLogger.step_permanently_failed(execution, node, reason)
 
       # Mark execution as failed
       Runner.fail(state, reason)
@@ -187,7 +180,7 @@ defmodule Imgd.Workers.StepWorker do
     end
   end
 
-  defp check_generation_completion(state, generation, generation_id) do
+  defp check_generation_completion(state, generation, _generation_id) do
     %{execution: execution} = state
 
     # Count pending/running steps for this generation
@@ -208,9 +201,11 @@ defmodule Imgd.Workers.StepWorker do
     |> Repo.aggregate(:count)
   end
 
-  defp trigger_next_generation(%Execution{id: execution_id}) do
+  defp trigger_next_generation(%Execution{id: _execution_id}) do
     # Small delay to allow concurrent steps to finish checkpoint writes
-    ExecutionWorker.enqueue_continue(execution_id, schedule_in: 1)
+    # TODO: Implement ExecutionWorker.enqueue_continue/2
+    # ExecutionWorker.enqueue_continue(execution_id, schedule_in: 1)
+    :ok
   end
 
   defp cancel_pending_steps(%Execution{id: execution_id}) do
@@ -225,7 +220,7 @@ defmodule Imgd.Workers.StepWorker do
 
   defp get_step_timeout(%Execution{} = execution, node) do
     node_timeout = Map.get(node, :timeout_ms)
-    execution_timeout = get_in(execution.settings, [:timeout_ms])
+    execution_timeout = get_in(execution.workflow.settings, [:timeout_ms])
     node_timeout || execution_timeout || :timer.minutes(5)
   end
 end

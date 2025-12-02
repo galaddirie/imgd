@@ -7,7 +7,6 @@ defmodule Imgd.Application do
 
   @impl true
   def start(_type, _args) do
-
     setup_opentelemetry()
 
     children = [
@@ -33,7 +32,6 @@ defmodule Imgd.Application do
     ImgdWeb.Endpoint.config_change(changed, removed)
     :ok
   end
-
 
   defp setup_opentelemetry do
     :opentelemetry_cowboy.setup()

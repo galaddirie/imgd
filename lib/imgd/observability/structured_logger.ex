@@ -283,9 +283,10 @@ defmodule Imgd.Observability.StructuredLogger do
       workflow_id: execution.workflow_id,
       generation: generation,
       runnable_count: length(runnables),
-      runnables: Enum.map(runnables, fn {node, fact} ->
-        %{step_hash: node.hash, step_name: node.name, fact_hash: fact.hash}
-      end)
+      runnables:
+        Enum.map(runnables, fn {node, fact} ->
+          %{step_hash: node.hash, step_name: node.name, fact_hash: fact.hash}
+        end)
     )
   end
 
