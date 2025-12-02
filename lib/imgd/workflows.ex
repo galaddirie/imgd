@@ -96,8 +96,10 @@ defmodule Imgd.Workflows do
 
   """
   def create_workflow(%Scope{} = scope, attrs) do
+    # Normalize all keys to strings for Ecto compatibility
+    attrs = Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
     %Workflow{}
-    |> Workflow.changeset(Map.put(attrs, :user_id, scope.user.id))
+    |> Workflow.changeset(Map.put(attrs, "user_id", scope.user.id))
     |> Repo.insert()
   end
 

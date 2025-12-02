@@ -2,11 +2,12 @@ defmodule ImgdWeb.WorkflowLive.Index do
   @moduledoc """
   LiveView for browsing workflows.
 
-  Presents an index of workflows.
+  Presents an index of workflows with ability to create new ones.
   """
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
+  alias Imgd.Workflows.Workflow
   import ImgdWeb.Formatters
 
   @impl true
@@ -22,9 +23,64 @@ defmodule ImgdWeb.WorkflowLive.Index do
       socket
       |> assign(:page_title, "Workflows")
       |> assign(:workflows_empty?, workflows == [])
+      |> assign(:show_create_modal, false)
+      |> assign(:form, nil)
       |> stream(:workflows, workflows, dom_id: &"workflow-#{&1.id}")
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_event("open_create_modal", _params, socket) do
+    changeset = Workflows.change_workflow(%Workflow{}, %{})
+
+    socket =
+      socket
+      |> assign(:show_create_modal, true)
+      |> assign(:form, to_form(changeset))
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("close_create_modal", _params, socket) do
+    socket =
+      socket
+      |> assign(:show_create_modal, false)
+      |> assign(:form, nil)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("validate_workflow", %{"workflow" => workflow_params}, socket) do
+    changeset =
+      %Workflow{}
+      |> Workflows.change_workflow(workflow_params)
+      |> Map.put(:action, :validate)
+
+    {:noreply, assign(socket, form: to_form(changeset))}
+  end
+
+  @impl true
+  def handle_event("create_workflow", %{"workflow" => workflow_params}, socket) do
+    scope = socket.assigns.current_scope
+
+    case Workflows.create_workflow(scope, workflow_params) do
+      {:ok, workflow} ->
+        socket =
+          socket
+          |> put_flash(:info, "Workflow created successfully")
+          |> assign(:show_create_modal, false)
+          |> assign(:form, nil)
+          |> stream_insert(:workflows, workflow, at: 0)
+          |> assign(:workflows_empty?, false)
+
+        {:noreply, socket}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, form: to_form(changeset))}
+    end
   end
 
   @impl true
@@ -40,9 +96,20 @@ defmodule ImgdWeb.WorkflowLive.Index do
                 <h1 class="text-3xl font-semibold tracking-tight text-base-content">Workflows</h1>
               </div>
               <p class="max-w-2xl text-sm text-muted">
-                Design, publish, and monitor the automations scoped to {@current_scope.user.email}.
+                Design, publish, and monitor the automations.
                 Drafts stay private until you publish them.
               </p>
+            </div>
+
+            <div class="flex gap-3">
+              <button
+                type="button"
+                phx-click="open_create_modal"
+                class="btn btn-sm btn-primary gap-2 "
+              >
+                <.icon name="hero-plus" class="size-5" />
+                <span>New Workflow</span>
+              </button>
             </div>
           </div>
         </div>
@@ -65,7 +132,7 @@ defmodule ImgdWeb.WorkflowLive.Index do
                     <span class="badge badge-ghost badge-xs">v{workflow.version}</span>
                   </div>
                   <p class="text-xs leading-relaxed text-base-content/70">
-                    {workflow.description || "Add context so collaborators know when to use it."}
+                    {workflow.description }
                   </p>
                   <p class="text-[11px] font-mono uppercase tracking-wide text-base-content/50">
                     {short_id(workflow.id)}
@@ -117,6 +184,77 @@ defmodule ImgdWeb.WorkflowLive.Index do
             </.data_table>
           </div>
         </section>
+      </div>
+
+      <%!-- Create Workflow Modal --%>
+      <div
+        :if={@show_create_modal}
+        class="modal modal-open"
+        phx-click="close_create_modal"
+        id="create-workflow-modal"
+      >
+        <div
+          class="modal-box max-w-2xl"
+          phx-click={JS.exec("phx-remove", to: "#create-workflow-modal")}
+        >
+          <div class="flex items-center justify-between pb-4 border-b border-base-200">
+            <div class="space-y-1">
+              <h3 class="text-lg font-semibold text-base-content">Create New Workflow</h3>
+              <p class="text-sm text-base-content/70">
+                Give your workflow a name and description to get started.
+              </p>
+            </div>
+            <button
+              type="button"
+              phx-click="close_create_modal"
+              class="btn btn-ghost btn-sm btn-circle"
+              aria-label="Close"
+            >
+              <.icon name="hero-x-mark" class="size-5" />
+            </button>
+          </div>
+
+          <.form
+            :if={@form}
+            for={@form}
+            id="create-workflow-form"
+            phx-change="validate_workflow"
+            phx-submit="create_workflow"
+            class="space-y-6 py-6"
+          >
+            <.input
+              field={@form[:name]}
+              type="text"
+              label="Workflow Name"
+              placeholder="e.g., Daily Report Generator"
+              required
+            />
+
+            <.input
+              field={@form[:description]}
+              type="textarea"
+              label="Description"
+              placeholder="Describe what this workflow does and when to use it..."
+            />
+
+            <div class="flex items-center justify-end gap-3 pt-4 border-t border-base-200">
+              <button
+                type="button"
+                phx-click="close_create_modal"
+                class="btn btn-ghost"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                class="btn btn-primary gap-2"
+              >
+                <.icon name="hero-plus" class="size-4" />
+                <span>Create Workflow</span>
+              </button>
+            </div>
+          </.form>
+        </div>
       </div>
     </Layouts.app>
     """
