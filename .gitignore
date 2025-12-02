@@ -37,3 +37,5 @@ npm-debug.log
 
 # Ignore watchman files
 .watchman-*
+
+log/*
