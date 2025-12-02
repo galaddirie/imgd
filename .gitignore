@@ -35,3 +35,5 @@ imgd-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Ignore watchman files
+.watchman-*
