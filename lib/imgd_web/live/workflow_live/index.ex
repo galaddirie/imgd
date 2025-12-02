@@ -84,6 +84,59 @@ defmodule ImgdWeb.WorkflowLive.Index do
   end
 
   @impl true
+  def handle_event("open_workflow", %{"workflow_id" => workflow_id}, socket) do
+    {:noreply, push_navigate(socket, to: ~p"/workflows/#{workflow_id}")}
+  end
+
+  @impl true
+  def handle_event("duplicate_workflow", %{"workflow_id" => workflow_id}, socket) do
+    scope = socket.assigns.current_scope
+
+    case Workflows.get_workflow(scope, workflow_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Workflow not found")}
+
+      workflow ->
+        case Workflows.duplicate_workflow(scope, workflow) do
+          {:ok, duplicated_workflow} ->
+            socket =
+              socket
+              |> put_flash(:info, "Workflow duplicated successfully")
+              |> stream_insert(:workflows, duplicated_workflow, at: 0)
+
+            {:noreply, socket}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to duplicate workflow")}
+        end
+    end
+  end
+
+  @impl true
+  def handle_event("archive_workflow", %{"workflow_id" => workflow_id}, socket) do
+    scope = socket.assigns.current_scope
+
+    case Workflows.get_workflow(scope, workflow_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Workflow not found")}
+
+      workflow ->
+        case Workflows.archive_workflow(scope, workflow) do
+          {:ok, archived_workflow} ->
+            socket =
+              socket
+              |> put_flash(:info, "Workflow archived successfully")
+              |> stream_insert(:workflows, archived_workflow)
+
+            {:noreply, socket}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to archive workflow")}
+        end
+    end
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
@@ -124,6 +177,8 @@ defmodule ImgdWeb.WorkflowLive.Index do
               rows={@streams.workflows}
               rows_empty?={@workflows_empty?}
               tbody_class="divide-y divide-base-200"
+              row_click={&navigate_to_workflow/1}
+              row_class="cursor-pointer hover:bg-neutral/10"
             >
               <:col :let={workflow} label="Workflow">
                 <div class="space-y-2">
@@ -167,6 +222,60 @@ defmodule ImgdWeb.WorkflowLive.Index do
               <:col :let={workflow} label="Created" width="18%">
                 <div class="text-xs text-base-content/60">
                   {formatted_timestamp(workflow.inserted_at)}
+                </div>
+              </:col>
+
+              <:col :let={workflow} label="Actions" width="12%" align="center">
+                <div class="relative">
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm btn-circle"
+                    popovertarget={"workflow-actions-#{workflow.id}"}
+                    style={"anchor-name:--workflow-actions-#{workflow.id}"}
+                    @click.stop
+                  >
+                    <.icon name="hero-ellipsis-horizontal" class="size-4" />
+                  </button>
+                  <ul
+                    class="dropdown menu w-52 rounded-box bg-base-100 shadow-sm"
+                    popover
+                    id={"workflow-actions-#{workflow.id}"}
+                    style={"position-anchor:--workflow-actions-#{workflow.id}"}
+                  >
+                    <li>
+                      <button
+                        type="button"
+                        phx-click="open_workflow"
+                        phx-value-workflow_id={workflow.id}
+                        class="flex items-center gap-2"
+                      >
+                        <.icon name="hero-eye" class="size-4" />
+                        <span>Open</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        phx-click="duplicate_workflow"
+                        phx-value-workflow_id={workflow.id}
+                        class="flex items-center gap-2"
+                      >
+                        <.icon name="hero-document-duplicate" class="size-4" />
+                        <span>Duplicate</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        phx-click="archive_workflow"
+                        phx-value-workflow_id={workflow.id}
+                        class="flex items-center gap-2 text-error"
+                      >
+                        <.icon name="hero-archive-box" class="size-4" />
+                        <span>Archive</span>
+                      </button>
+                    </li>
+                  </ul>
                 </div>
               </:col>
 
@@ -269,4 +378,7 @@ defmodule ImgdWeb.WorkflowLive.Index do
       {:desc, DateTime}
     )
   end
+
+  defp navigate_to_workflow({_, workflow}), do: JS.navigate(~p"/workflows/#{workflow.id}")
+  defp navigate_to_workflow(workflow), do: JS.navigate(~p"/workflows/#{workflow.id}")
 end

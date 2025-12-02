@@ -98,6 +98,7 @@ defmodule Imgd.Workflows do
   def create_workflow(%Scope{} = scope, attrs) do
     # Normalize all keys to strings for Ecto compatibility
     attrs = Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
+
     %Workflow{}
     |> Workflow.changeset(Map.put(attrs, "user_id", scope.user.id))
     |> Repo.insert()
@@ -153,6 +154,28 @@ defmodule Imgd.Workflows do
       workflow
       |> Workflow.archive_changeset()
       |> Repo.update()
+    end
+  end
+
+  @doc """
+  Creates a duplicate of a workflow with a new name.
+
+  The duplicated workflow will be a draft with "- Copy" appended to the name.
+  """
+  def duplicate_workflow(%Scope{} = scope, %Workflow{} = workflow) do
+    with :ok <- authorize_workflow(scope, workflow) do
+      attrs = %{
+        name: "#{workflow.name} Copy",
+        description: workflow.description,
+        definition: workflow.definition,
+        trigger_config: workflow.trigger_config,
+        settings: workflow.settings,
+        user_id: scope.user.id
+      }
+
+      %Workflow{}
+      |> Workflow.changeset(attrs)
+      |> Repo.insert()
     end
   end
 
