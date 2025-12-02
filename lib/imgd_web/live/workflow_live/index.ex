@@ -187,7 +187,7 @@ defmodule ImgdWeb.WorkflowLive.Index do
                     <span class="badge badge-ghost badge-xs">v{workflow.version}</span>
                   </div>
                   <p class="text-xs leading-relaxed text-base-content/70">
-                    {workflow.description }
+                    {workflow.description}
                   </p>
                   <p class="text-[11px] font-mono uppercase tracking-wide text-base-content/50">
                     {short_id(workflow.id)}

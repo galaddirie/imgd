@@ -1,10 +1,12 @@
 defmodule ImgdWeb.WorkflowLive.Show do
   @moduledoc """
-  LiveView for showing a workflow.
+  LiveView for showing a workflow with graph visualization and execution.
   """
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
+  alias Imgd.Workflows.Executor
+  alias ImgdWeb.WorkflowLive.Components.WorkflowGraph
   import ImgdWeb.Formatters
 
   @impl true
@@ -13,11 +15,17 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
     try do
       workflow = Workflows.get_workflow!(scope, id)
+      executions = Workflows.list_executions(scope, workflow, limit: 10)
 
       socket =
         socket
         |> assign(:page_title, workflow.name)
         |> assign(:workflow, workflow)
+        |> assign(:executions, executions)
+        |> assign(:show_run_modal, false)
+        |> assign(:execution_result, nil)
+        |> assign(:running, false)
+        |> assign_run_form("5")
 
       {:ok, socket}
     rescue
@@ -28,6 +36,98 @@ defmodule ImgdWeb.WorkflowLive.Show do
           |> redirect(to: ~p"/workflows")
 
         {:ok, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("open_run_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(show_run_modal: true, execution_result: nil, running: false)
+     |> assign_run_form("5")}
+  end
+
+  @impl true
+  def handle_event("close_run_modal", _params, socket) do
+    {:noreply, assign(socket, show_run_modal: false)}
+  end
+
+  @impl true
+  def handle_event("update_input", %{"run" => %{"input" => input}}, socket) do
+    {:noreply, assign_run_form(socket, input)}
+  end
+
+  def handle_event("update_input", %{"input" => input}, socket) do
+    {:noreply, assign_run_form(socket, input)}
+  end
+
+  @impl true
+  def handle_event("run_workflow", %{"run" => %{"input" => input}}, socket) do
+    socket =
+      socket
+      |> assign(running: true, execution_result: nil)
+      |> assign_run_form(input)
+
+    # Parse the input (try as integer, then float, then keep as string)
+    input = parse_input(input)
+
+    # Run the workflow
+    result =
+      case Executor.run_and_record(
+             socket.assigns.current_scope,
+             socket.assigns.workflow,
+             input
+           ) do
+        {:ok, execution} ->
+          execution = Imgd.Repo.preload(execution, [])
+          %{status: :completed, execution: execution}
+
+        {:error, execution} when is_struct(execution) ->
+          %{status: :failed, execution: execution}
+
+        {:error, reason} ->
+          %{status: :failed, error: reason}
+      end
+
+    # Refresh executions list
+    executions =
+      Workflows.list_executions(
+        socket.assigns.current_scope,
+        socket.assigns.workflow,
+        limit: 10
+      )
+
+    {:noreply,
+     assign(socket,
+       running: false,
+       execution_result: result,
+       executions: executions
+     )}
+  end
+
+  def handle_event("run_workflow", _params, socket) do
+    handle_event("run_workflow", %{"run" => %{"input" => socket.assigns.run_input}}, socket)
+  end
+
+  defp assign_run_form(socket, input) do
+    assign(socket,
+      run_input: input,
+      run_form: to_form(%{"input" => input}, as: :run)
+    )
+  end
+
+  defp parse_input(input) do
+    cond do
+      match?({_int, ""}, Integer.parse(input)) ->
+        {int, ""} = Integer.parse(input)
+        int
+
+      match?({_float, ""}, Float.parse(input)) ->
+        {float, ""} = Float.parse(input)
+        float
+
+      true ->
+        input
     end
   end
 
@@ -62,10 +162,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
                   <.icon name="hero-clock" class="size-4" />
                   <span>Updated {formatted_timestamp(@workflow.updated_at)}</span>
                 </div>
-                <div class="flex items-center gap-1">
-                  <.icon name="hero-calendar" class="size-4" />
-                  <span>Created {formatted_timestamp(@workflow.inserted_at)}</span>
-                </div>
                 <div class="text-[11px] font-mono uppercase tracking-wide">
                   {short_id(@workflow.id)}
                 </div>
@@ -73,13 +169,13 @@ defmodule ImgdWeb.WorkflowLive.Show do
             </div>
 
             <div class="flex gap-3">
-              <button class="btn btn-outline btn-sm gap-2">
+              <button
+                phx-click="open_run_modal"
+                class="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none"
+                disabled={@workflow.status != :published}
+              >
                 <.icon name="hero-play" class="size-4" />
                 <span>Run Workflow</span>
-              </button>
-              <button class="btn btn-primary btn-sm gap-2">
-                <.icon name="hero-pencil-square" class="size-4" />
-                <span>Edit</span>
               </button>
             </div>
           </div>
@@ -87,9 +183,82 @@ defmodule ImgdWeb.WorkflowLive.Show do
       </:page_header>
 
       <div class="space-y-8">
+        <%!-- Workflow Graph Section --%>
         <section>
-          <div class="card relative overflow-hidden transition-all duration-300 border border-base-300 rounded-2xl shadow-sm ring-1 ring-base-300/70 bg-base-100 p-6">
-            <h2 class="text-lg font-semibold text-base-content mb-4">Workflow Details</h2>
+          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
+            <h2 class="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
+              <.icon name="hero-share" class="size-5" /> Workflow Graph
+            </h2>
+            <.live_component
+              module={WorkflowGraph}
+              id={"workflow-graph-#{@workflow.id}"}
+              workflow={@workflow}
+            />
+          </div>
+        </section>
+
+        <%!-- Recent Executions Section --%>
+        <section>
+          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
+            <h2 class="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
+              <.icon name="hero-clock" class="size-5" /> Recent Executions
+            </h2>
+
+            <%= if Enum.empty?(@executions) do %>
+              <div class="text-center py-8 text-base-content/60">
+                <.icon name="hero-inbox" class="size-8 mx-auto mb-2" />
+                <p class="text-sm">No executions yet</p>
+                <p class="text-xs mt-1">Run the workflow to see results here</p>
+              </div>
+            <% else %>
+              <div class="overflow-x-auto">
+                <table class="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Status</th>
+                      <th>Input</th>
+                      <th>Output</th>
+                      <th>Duration</th>
+                      <th>Started</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <%= for execution <- @executions do %>
+                      <tr class="hover">
+                        <td class="font-mono text-xs">{short_id(execution.id)}</td>
+                        <td>
+                          <span class={["badge badge-xs", execution_status_class(execution.status)]}>
+                            {execution.status}
+                          </span>
+                        </td>
+                        <td class="max-w-32 truncate text-xs">
+                          {format_execution_value(execution.input)}
+                        </td>
+                        <td class="max-w-48 truncate text-xs">
+                          {format_execution_value(execution.output)}
+                        </td>
+                        <td class="text-xs">
+                          {format_duration(get_duration_from_stats(execution.stats))}
+                        </td>
+                        <td class="text-xs text-base-content/60">
+                          {format_relative_time(execution.started_at)}
+                        </td>
+                      </tr>
+                    <% end %>
+                  </tbody>
+                </table>
+              </div>
+            <% end %>
+          </div>
+        </section>
+
+        <%!-- Workflow Details Section --%>
+        <section>
+          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
+            <h2 class="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
+              <.icon name="hero-information-circle" class="size-5" /> Workflow Details
+            </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div class="space-y-4">
@@ -148,7 +317,206 @@ defmodule ImgdWeb.WorkflowLive.Show do
           </div>
         </section>
       </div>
+
+      <%!-- Run Workflow Modal --%>
+      <div
+        :if={@show_run_modal}
+        id="run-workflow-modal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-base-900/70 backdrop-blur-sm px-4"
+      >
+        <div
+          class="relative w-full max-w-xl overflow-hidden rounded-2xl border border-base-300/70 bg-base-100/95 shadow-2xl"
+          phx-click-away="close_run_modal"
+        >
+          <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary via-amber-400 to-secondary" />
+
+          <div class="flex items-start justify-between gap-4 border-b border-base-200/80 px-6 pb-4 pt-6">
+            <div class="space-y-1">
+              <h3 class="text-lg font-semibold text-base-content">Run Workflow</h3>
+              <p class="text-sm text-base-content/70">
+                Enter an input value to execute the workflow
+              </p>
+            </div>
+            <button
+              type="button"
+              phx-click="close_run_modal"
+              class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-base-300/80 text-base-content/70 transition hover:-translate-y-0.5 hover:border-base-400 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              aria-label="Close"
+            >
+              <.icon name="hero-x-mark" class="size-5" />
+            </button>
+          </div>
+
+          <.form
+            for={@run_form}
+            id="run-workflow-form"
+            phx-change="update_input"
+            phx-submit="run_workflow"
+            phx-debounce="300"
+            class="space-y-6 px-6 py-6"
+          >
+            <div class="space-y-2">
+              <.input
+                field={@run_form[:input]}
+                type="text"
+                placeholder="Enter a number or value..."
+                inputmode="decimal"
+                label="Input Value"
+                class="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-base shadow-inner transition focus:border-primary focus:ring-2 focus:ring-primary/25"
+              />
+              <p class="text-xs text-base-content/70 leading-relaxed">
+                Numbers will be parsed automatically. Try: 5, 10, 15
+              </p>
+            </div>
+
+            <%!-- Execution Result --%>
+            <%= if @execution_result do %>
+              <div class={[
+                "rounded-xl border p-4 shadow-sm",
+                if(@execution_result.status == :completed,
+                  do: "border-success/30 bg-success/10",
+                  else: "border-error/30 bg-error/10"
+                )
+              ]}>
+                <div class="flex items-start gap-3">
+                  <%= if @execution_result.status == :completed do %>
+                    <.icon name="hero-check-circle" class="size-5 text-success flex-shrink-0 mt-0.5" />
+                  <% else %>
+                    <.icon name="hero-x-circle" class="size-5 text-error flex-shrink-0 mt-0.5" />
+                  <% end %>
+                  <div class="flex-1 min-w-0 space-y-2">
+                    <p class={[
+                      "font-medium text-sm",
+                      if(@execution_result.status == :completed,
+                        do: "text-success",
+                        else: "text-error"
+                      )
+                    ]}>
+                      {if @execution_result.status == :completed,
+                        do: "Execution Completed",
+                        else: "Execution Failed"}
+                    </p>
+
+                    <%= if @execution_result[:execution] do %>
+                      <div class="space-y-2">
+                        <div>
+                          <span class="text-xs font-medium text-base-content/70">Output</span>
+                          <pre class="mt-1 text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto"><code>{format_output(@execution_result.execution.output)}</code></pre>
+                        </div>
+                        <div class="flex flex-wrap gap-4 text-xs text-base-content/70">
+                          <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
+                            <.icon name="hero-clock" class="size-4" />
+                            {format_duration(
+                              get_duration_from_stats(@execution_result.execution.stats)
+                            )}
+                          </span>
+                          <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
+                            <.icon name="hero-bolt" class="size-4" />
+                            {get_generation(@execution_result.execution.output)} generations
+                          </span>
+                        </div>
+                      </div>
+                    <% end %>
+
+                    <%= if @execution_result[:error] do %>
+                      <div>
+                        <pre class="text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto text-error"><code>{inspect(@execution_result.error, pretty: true)}</code></pre>
+                      </div>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+
+            <div class="flex flex-wrap items-center justify-end gap-3 border-t border-base-200/80 pt-4">
+              <button
+                type="button"
+                phx-click="close_run_modal"
+                class="inline-flex items-center gap-2 rounded-xl border border-base-300/80 px-4 py-2 text-sm font-semibold text-base-content/80 transition hover:border-base-400 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                Close
+              </button>
+              <button
+                type="submit"
+                id="run-workflow-submit"
+                class="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none"
+                disabled={@running}
+              >
+                <%= if @running do %>
+                  <span class="flex h-4 w-4 items-center justify-center">
+                    <span class="h-4 w-4 animate-spin rounded-full border-2 border-primary-content/30 border-t-primary-content">
+                    </span>
+                  </span>
+                  <span>Running...</span>
+                <% else %>
+                  <.icon name="hero-play" class="size-4" />
+                  <span>Run</span>
+                <% end %>
+              </button>
+            </div>
+          </.form>
+        </div>
+      </div>
     </Layouts.app>
     """
+  end
+
+  # Helper functions
+
+  defp execution_status_class(:completed), do: "badge-success"
+  defp execution_status_class(:failed), do: "badge-error"
+  defp execution_status_class(:running), do: "badge-info"
+  defp execution_status_class(:pending), do: "badge-warning"
+  defp execution_status_class(:paused), do: "badge-warning"
+  defp execution_status_class(:cancelled), do: "badge-neutral"
+  defp execution_status_class(:timeout), do: "badge-error"
+  defp execution_status_class(_), do: "badge-ghost"
+
+  defp format_execution_value(nil), do: "-"
+  defp format_execution_value(%{"value" => value}), do: inspect(value)
+  defp format_execution_value(%{"productions" => prods}) when is_list(prods), do: inspect(prods)
+  defp format_execution_value(value) when is_map(value), do: inspect(value)
+  defp format_execution_value(value), do: inspect(value)
+
+  defp format_output(nil), do: "No output"
+
+  defp format_output(%{"productions" => productions}) when is_list(productions) do
+    productions
+    |> Enum.map(&inspect/1)
+    |> Enum.join("\n")
+  end
+
+  defp format_output(output) when is_map(output) do
+    inspect(output, pretty: true, limit: 50)
+  end
+
+  defp format_output(output), do: inspect(output)
+
+  defp format_duration(nil), do: "-"
+  defp format_duration(ms) when is_number(ms) and ms < 1000, do: "#{ms}ms"
+  defp format_duration(ms) when is_number(ms), do: "#{Float.round(ms / 1000, 2)}s"
+  defp format_duration(_), do: "-"
+
+  defp get_duration_from_stats(nil), do: nil
+  defp get_duration_from_stats(%{"total_duration_ms" => ms}), do: ms
+  defp get_duration_from_stats(%{total_duration_ms: ms}), do: ms
+  defp get_duration_from_stats(_), do: nil
+
+  defp get_generation(nil), do: 0
+  defp get_generation(%{"generation" => gen}), do: gen
+  defp get_generation(%{generation: gen}), do: gen
+  defp get_generation(_), do: 0
+
+  defp format_relative_time(nil), do: "-"
+
+  defp format_relative_time(datetime) do
+    diff = DateTime.diff(DateTime.utc_now(), datetime, :second)
+
+    cond do
+      diff < 60 -> "just now"
+      diff < 3600 -> "#{div(diff, 60)}m ago"
+      diff < 86400 -> "#{div(diff, 3600)}h ago"
+      true -> formatted_timestamp(datetime)
+    end
   end
 end

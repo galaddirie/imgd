@@ -117,7 +117,7 @@ defmodule ImgdWeb.Layouts do
                 alt="Imgd logo"
                 class="dark:invert"
               />
-              <span class="font-semibold text-lg">Imgd</span>
+              <span class="font-semibold text-lg">imgd.io</span>
             </a>
           </div>
 
@@ -136,7 +136,7 @@ defmodule ImgdWeb.Layouts do
                 </li>
               <% end %>
             </ul>
-
+            
     <!-- Auth Navigation -->
             <%= if @current_scope do %>
               <div class="dropdown dropdown-end hidden lg:block">
@@ -204,7 +204,7 @@ defmodule ImgdWeb.Layouts do
                 </div>
               </div>
             <% end %>
-
+            
     <!-- Content Area with secondary background -->
             <div class="flex-1 p-6">
               <!-- Flash messages positioned here -->
