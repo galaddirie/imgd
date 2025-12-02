@@ -1,0 +1,115 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    tenant_id: imgd
+
+scrape_configs:
+  - job_name: imgd_app
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: imgd
+          app: imgd
+          env: development
+          __path__: /var/log/imgd/*.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            message: message
+            timestamp: time
+            # Workflow context
+            execution_id: execution_id
+            workflow_id: workflow_id
+            workflow_name: workflow_name
+            step_hash: step_hash
+            step_name: step_name
+            step_type: step_type
+            generation: generation
+            attempt: attempt
+            event: event
+            # Trace context
+            trace_id: trace_id
+            span_id: span_id
+            # Request context
+            request_id: request_id
+            # Duration
+            duration_ms: duration_ms
+
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+          fallback_formats:
+            - RFC3339
+
+      - labels:
+          level:
+          event:
+          workflow_id:
+          step_type:
+
+      - structured_metadata:
+          execution_id:
+          workflow_name:
+          step_hash:
+          step_name:
+          generation:
+          attempt:
+          trace_id:
+          span_id:
+          request_id:
+          duration_ms:
+
+      - output:
+          source: message
+
+  - job_name: imgd_phoenix
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: imgd_phoenix
+          app: imgd
+          component: phoenix
+          __path__: /var/log/imgd/phoenix.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            message: message
+            timestamp: time
+            request_id: request_id
+            method: method
+            path: path
+            status: status
+            duration_us: duration_us
+            trace_id: trace_id
+            span_id: span_id
+
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      - labels:
+          level:
+          method:
+          status:
+
+      - structured_metadata:
+          request_id:
+          path:
+          duration_us:
+          trace_id:
+          span_id:
+
+      - output:
+          source: message

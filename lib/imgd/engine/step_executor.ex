@@ -5,30 +5,22 @@ defmodule Imgd.Engine.StepExecutor do
   This module wraps Runic's `invoke/3` and `invoke_with_events/3` with:
   - Timeout enforcement
   - Exception catching and normalization
-  - Telemetry events and spans
-  - Structured logging
+  - Telemetry events and OpenTelemetry spans
+  - Structured logging with trace context
   - Step record persistence
 
-  ## Execution Flow
+  ## Observability
 
-  1. Create `ExecutionStep` record in `:running` status
-  2. Emit telemetry start event and begin span
-  3. Execute the step via Runic with timeout
-  4. Update step record with results
-  5. Emit telemetry stop event and end span
-  6. Return result for checkpoint/continuation
-
-  ## Error Handling
-
-  Errors are captured and normalized into a consistent format:
-  - Exceptions are caught and converted to error maps
-  - Timeouts are handled gracefully
-  - All errors include structured metadata for debugging
+  Each step execution:
+  - Creates an OpenTelemetry span with workflow/step attributes
+  - Emits telemetry events for metrics collection
+  - Logs structured JSON with trace_id for Loki correlation
   """
 
   alias Imgd.Repo
   alias Imgd.Workflows
   alias Imgd.Workflows.{Execution, ExecutionStep}
+  alias Imgd.Observability.{Telemetry, StructuredLogger}
 
   require Logger
 
@@ -52,6 +44,7 @@ defmodule Imgd.Engine.StepExecutor do
   Executes a single step within a workflow.
 
   Creates a step record, executes via Runic with timeout, and persists results.
+  All execution is wrapped in OpenTelemetry spans and emits telemetry events.
 
   Returns `{:ok, updated_workflow, events}` or `{:error, reason, workflow}`.
   """
@@ -62,19 +55,20 @@ defmodule Imgd.Engine.StepExecutor do
     attempt = opts[:attempt] || 1
     generation = opts[:generation] || workflow.generations
 
-    # Build execution context for observability
-    ctx = build_context(execution, workflow, node, fact, attempt, generation)
+    # Set logging context for this step
+    Telemetry.set_step_log_context(execution, node, generation: generation, attempt: attempt)
 
     # Create step record
     {:ok, step} = create_step_record(execution, node, fact, generation, attempt)
 
-    # Execute with telemetry and tracing
-    result = execute_with_observability(ctx, step, fn ->
-      execute_with_timeout(workflow, node, fact, timeout_ms)
-    end)
+    # Execute with full observability (spans, metrics, logs)
+    Telemetry.with_step_span(execution, node, fact, [generation: generation, attempt: attempt], fn ->
+      StructuredLogger.step_started(execution, node, fact, generation: generation, attempt: attempt)
 
-    # Persist results and return
-    handle_result(result, step, ctx)
+      result = execute_with_timeout(workflow, node, fact, timeout_ms)
+
+      handle_result(result, execution, step, node, fact, timeout_ms)
+    end)
   end
 
   @doc """
@@ -148,51 +142,39 @@ defmodule Imgd.Engine.StepExecutor do
     end
   end
 
-  defp execute_with_observability(ctx, step, fun) do
-    start_time = System.monotonic_time()
-
-    # TODO: add observability
-
-    # TODO: add observability
-
-    try do
-      result = fun.()
-      duration_ms = duration_since(start_time)
-
-      case result do
-        {:ok, workflow, events} ->
-          # TODO: add observability
-          {:ok, workflow, events, duration_ms}
-
-        {:error, reason} ->
-          # TODO: add observability
-          {:error, reason, duration_ms}
-      end
-    rescue
-      e ->
-        duration_ms = duration_since(start_time)
-        # TODO: add observability
-        {:error, {:exception, e, __STACKTRACE__}, duration_ms}
-    end
-  end
-
-  defp handle_result({:ok, workflow, events, duration_ms}, step, ctx) do
-    # Extract the output fact from events
+  defp handle_result({:ok, workflow, events}, execution, step, node, _fact, _timeout_ms) do
     output_fact = extract_output_fact(events)
+    duration_ms = calculate_duration(step.started_at)
 
     # Update step record
     {:ok, _step} = Workflows.complete_step(step, output_fact, duration_ms)
 
-    # TODO: add observability
+    # Log completion
+    StructuredLogger.step_completed(execution, node, duration_ms, output_fact)
 
     {:ok, workflow, events}
   end
 
-  defp handle_result({:error, reason, duration_ms}, step, ctx) do
+  defp handle_result({:error, {:timeout, timeout_ms} = reason}, execution, step, node, _fact, _timeout_ms) do
+    duration_ms = calculate_duration(step.started_at)
+
     # Update step record with error
     {:ok, _step} = Workflows.fail_step(step, normalize_error(reason), duration_ms)
 
-    # TODO: add observability
+    # Log timeout
+    StructuredLogger.step_timeout(execution, node, timeout_ms)
+
+    {:error, reason, nil}
+  end
+
+  defp handle_result({:error, reason}, execution, step, node, _fact, _timeout_ms) do
+    duration_ms = calculate_duration(step.started_at)
+
+    # Update step record with error
+    {:ok, _step} = Workflows.fail_step(step, normalize_error(reason), duration_ms)
+
+    # Log failure
+    StructuredLogger.step_failed(execution, node, reason, duration_ms)
 
     {:error, reason, nil}
   end
@@ -220,21 +202,6 @@ defmodule Imgd.Engine.StepExecutor do
       error ->
         error
     end
-  end
-
-  defp build_context(execution, workflow, node, fact, attempt, generation) do
-    %{
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      workflow_name: workflow.name,
-      step_name: node.name || "step_#{node.hash}",
-      step_hash: node.hash,
-      step_type: node.__struct__ |> Module.split() |> List.last(),
-      fact_hash: fact.hash,
-      attempt: attempt,
-      generation: generation,
-      triggered_by_user_id: execution.triggered_by_user_id
-    }
   end
 
   defp extract_output_fact(events) do
@@ -286,7 +253,6 @@ defmodule Imgd.Engine.StepExecutor do
   end
 
   defp get_step_timeout(%Execution{} = execution, node) do
-    # Check node-level timeout first, then execution settings
     node_timeout = Map.get(node, :timeout_ms)
     execution_timeout = get_in(execution.settings, [:timeout_ms])
 
@@ -300,9 +266,8 @@ defmodule Imgd.Engine.StepExecutor do
     end
   end
 
-  defp duration_since(start_time) do
-    System.monotonic_time()
-    |> Kernel.-(start_time)
-    |> System.convert_time_unit(:native, :millisecond)
+  defp calculate_duration(nil), do: 0
+  defp calculate_duration(started_at) do
+    DateTime.diff(DateTime.utc_now(), started_at, :millisecond)
   end
 end

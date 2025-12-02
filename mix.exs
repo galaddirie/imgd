@@ -68,7 +68,25 @@ defmodule Imgd.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:runic, git: "https://github.com/zblanco/runic.git", branch: "main"},
-      {:oban, "~> 2.20"}
+      {:oban, "~> 2.20"},
+
+      # OpenTelemetry & Auto-Instrumentation
+      {:opentelemetry, "~> 1.7"},
+      {:opentelemetry_api, "~> 1.5"},
+      {:opentelemetry_exporter, "~> 1.10"},
+      {:opentelemetry_phoenix, "~> 1.2"},
+      {:opentelemetry_cowboy, "~> 0.3"},
+      {:opentelemetry_ecto, "~> 1.2"},
+      {:opentelemetry_oban, "~> 1.0"},
+      {:opentelemetry_logger_metadata, "~> 0.2.0"},
+      {:opentelemetry_liveview, "~> 1.0.0-rc.4"},
+
+      # Metrics
+      {:prom_ex, "~> 1.11"},
+
+      # Structured Logging
+      {:logger_json, "~> 7.0"},
+      {:logger_file_backend, "~> 0.0.14"}
     ]
   end
 

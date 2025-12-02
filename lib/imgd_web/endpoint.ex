@@ -15,6 +15,11 @@ defmodule ImgdWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # PromEx Metrics Endpoint
+  # Exposes /metrics for Prometheus scraping
+  # This must come before other plugs to avoid auth requirements
+  plug PromEx.Plug, prom_ex_module: Imgd.Observability.PromEx
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

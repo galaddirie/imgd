@@ -66,19 +66,17 @@ defmodule Imgd.Workers.StepWorker do
 
   @impl Oban.Worker
   def timeout(%Oban.Job{args: args}) do
-    # Could make this configurable per-step
+    # TODO: Could make this configurable per-step
     timeout_ms = args["timeout_ms"] || :timer.minutes(5)
     timeout_ms
   end
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}) do
-    # Exponential backoff: 1s, 2s, 4s, 8s, 16s...
     base = 1
     max_delay = 60
     delay = min(base * :math.pow(2, attempt - 1), max_delay) |> round()
 
-    # Add jitter
     jitter = :rand.uniform(max(div(delay, 4), 1))
     delay + jitter
   end
