@@ -5,7 +5,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
-  alias Imgd.Workflows.Executor
   alias ImgdWeb.WorkflowLive.Components.WorkflowGraph
   import ImgdWeb.Formatters
 
@@ -22,7 +21,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
         |> assign(:page_title, workflow.name)
         |> assign(:workflow, workflow)
         |> assign(:executions, executions)
-        |> assign(:show_run_modal, false)
         |> assign(:execution_result, nil)
         |> assign(:running, false)
         |> assign_run_form("5")
@@ -39,18 +37,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
     end
   end
 
-  @impl true
-  def handle_event("open_run_modal", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(show_run_modal: true, execution_result: nil, running: false)
-     |> assign_run_form("5")}
-  end
-
-  @impl true
-  def handle_event("close_run_modal", _params, socket) do
-    {:noreply, assign(socket, show_run_modal: false)}
-  end
 
   @impl true
   def handle_event("update_input", %{"run" => %{"input" => input}}, socket) do
@@ -71,23 +57,8 @@ defmodule ImgdWeb.WorkflowLive.Show do
     # Parse the input (try as integer, then float, then keep as string)
     input = parse_input(input)
 
-    # Run the workflow
-    result =
-      case Executor.run_and_record(
-             socket.assigns.current_scope,
-             socket.assigns.workflow,
-             input
-           ) do
-        {:ok, execution} ->
-          execution = Imgd.Repo.preload(execution, [])
-          %{status: :completed, execution: execution}
-
-        {:error, execution} when is_struct(execution) ->
-          %{status: :failed, execution: execution}
-
-        {:error, reason} ->
-          %{status: :failed, error: reason}
-      end
+    # TODO: Implement workflow execution
+    result = %{status: :failed, error: "Workflow execution not yet implemented"}
 
     # Refresh executions list
     executions =
@@ -168,16 +139,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
               </div>
             </div>
 
-            <div class="flex gap-3">
-              <button
-                phx-click="open_run_modal"
-                class="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none"
-                disabled={@workflow.status != :published}
-              >
-                <.icon name="hero-play" class="size-4" />
-                <span>Run Workflow</span>
-              </button>
-            </div>
           </div>
         </div>
       </:page_header>
@@ -194,6 +155,122 @@ defmodule ImgdWeb.WorkflowLive.Show do
               id={"workflow-graph-#{@workflow.id}"}
               workflow={@workflow}
             />
+          </div>
+        </section>
+
+        <%!-- Run Workflow Section --%>
+        <section>
+          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
+            <h2 class="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
+              <.icon name="hero-play" class="size-5" /> Run Workflow
+            </h2>
+            <p class="text-sm text-base-content/70 mb-4">
+              Enter an input value to execute the workflow
+            </p>
+
+            <.form
+              for={@run_form}
+              id="run-workflow-form"
+              phx-change="update_input"
+              phx-submit="run_workflow"
+              phx-debounce="300"
+              class="space-y-4"
+            >
+              <div class="space-y-4">
+                <div class="flex gap-4 items-end">
+                  <div class="flex-1 space-y-2">
+                    <label class="text-sm font-medium text-base-content/80">Input Value</label>
+                    <input
+                      type="text"
+                      name="run[input]"
+                      value={Phoenix.HTML.Form.normalize_value("text", @run_form[:input].value)}
+                      placeholder="Enter a number or value..."
+                      inputmode="decimal"
+                      class="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-base shadow-inner transition focus:border-primary focus:ring-2 focus:ring-primary/25"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    id="run-workflow-submit"
+                    class="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-content shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none whitespace-nowrap"
+                    disabled={@running || @workflow.status != :published}
+                  >
+                    <%= if @running do %>
+                      <span class="flex h-4 w-4 items-center justify-center">
+                        <span class="h-4 w-4 animate-spin rounded-full border-2 border-primary-content/30 border-t-primary-content">
+                        </span>
+                      </span>
+                      <span>Running...</span>
+                    <% else %>
+                      <.icon name="hero-play" class="size-4" />
+                      <span>Run Workflow</span>
+                    <% end %>
+                  </button>
+                </div>
+                <p class="text-xs text-base-content/70 leading-relaxed">
+                  Numbers will be parsed automatically. Try: 5, 10, 15
+                </p>
+              </div>
+
+              <%!-- Execution Result --%>
+              <%= if @execution_result do %>
+                <div class={[
+                  "rounded-xl border p-4 shadow-sm mt-4",
+                  if(@execution_result.status == :completed,
+                    do: "border-success/30 bg-success/10",
+                    else: "border-error/30 bg-error/10"
+                  )
+                ]}>
+                  <div class="flex items-start gap-3">
+                    <%= if @execution_result.status == :completed do %>
+                      <.icon name="hero-check-circle" class="size-5 text-success flex-shrink-0 mt-0.5" />
+                    <% else %>
+                      <.icon name="hero-x-circle" class="size-5 text-error flex-shrink-0 mt-0.5" />
+                    <% end %>
+                    <div class="flex-1 min-w-0 space-y-2">
+                      <p class={[
+                        "font-medium text-sm",
+                        if(@execution_result.status == :completed,
+                          do: "text-success",
+                          else: "text-error"
+                        )
+                      ]}>
+                        {if @execution_result.status == :completed,
+                          do: "Execution Completed",
+                          else: "Execution Failed"}
+                      </p>
+
+                      <%= if @execution_result[:execution] do %>
+                        <div class="space-y-2">
+                          <div>
+                            <span class="text-xs font-medium text-base-content/70">Output</span>
+                            <pre class="mt-1 text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto"><code>{format_output(@execution_result.execution.output)}</code></pre>
+                          </div>
+                          <div class="flex flex-wrap gap-4 text-xs text-base-content/70">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
+                              <.icon name="hero-clock" class="size-4" />
+                              {format_duration(
+                                get_duration_from_stats(@execution_result.execution.stats)
+                              )}
+                            </span>
+                            <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
+                              <.icon name="hero-bolt" class="size-4" />
+                              {get_generation(@execution_result.execution.output)} generations
+                            </span>
+                          </div>
+                        </div>
+                      <% end %>
+
+                      <%= if @execution_result[:error] do %>
+                        <div>
+                          <pre class="text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto text-error"><code>{inspect(@execution_result.error, pretty: true)}</code></pre>
+                        </div>
+                      <% end %>
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+            </.form>
           </div>
         </section>
 
@@ -318,145 +395,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
         </section>
       </div>
 
-      <%!-- Run Workflow Modal --%>
-      <div
-        :if={@show_run_modal}
-        id="run-workflow-modal"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-base-900/70 backdrop-blur-sm px-4"
-      >
-        <div
-          class="relative w-full max-w-xl overflow-hidden rounded-2xl border border-base-300/70 bg-base-100/95 shadow-2xl"
-          phx-click-away="close_run_modal"
-        >
-          <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary via-amber-400 to-secondary" />
-
-          <div class="flex items-start justify-between gap-4 border-b border-base-200/80 px-6 pb-4 pt-6">
-            <div class="space-y-1">
-              <h3 class="text-lg font-semibold text-base-content">Run Workflow</h3>
-              <p class="text-sm text-base-content/70">
-                Enter an input value to execute the workflow
-              </p>
-            </div>
-            <button
-              type="button"
-              phx-click="close_run_modal"
-              class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-base-300/80 text-base-content/70 transition hover:-translate-y-0.5 hover:border-base-400 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              aria-label="Close"
-            >
-              <.icon name="hero-x-mark" class="size-5" />
-            </button>
-          </div>
-
-          <.form
-            for={@run_form}
-            id="run-workflow-form"
-            phx-change="update_input"
-            phx-submit="run_workflow"
-            phx-debounce="300"
-            class="space-y-6 px-6 py-6"
-          >
-            <div class="space-y-2">
-              <.input
-                field={@run_form[:input]}
-                type="text"
-                placeholder="Enter a number or value..."
-                inputmode="decimal"
-                label="Input Value"
-                class="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-base shadow-inner transition focus:border-primary focus:ring-2 focus:ring-primary/25"
-              />
-              <p class="text-xs text-base-content/70 leading-relaxed">
-                Numbers will be parsed automatically. Try: 5, 10, 15
-              </p>
-            </div>
-
-            <%!-- Execution Result --%>
-            <%= if @execution_result do %>
-              <div class={[
-                "rounded-xl border p-4 shadow-sm",
-                if(@execution_result.status == :completed,
-                  do: "border-success/30 bg-success/10",
-                  else: "border-error/30 bg-error/10"
-                )
-              ]}>
-                <div class="flex items-start gap-3">
-                  <%= if @execution_result.status == :completed do %>
-                    <.icon name="hero-check-circle" class="size-5 text-success flex-shrink-0 mt-0.5" />
-                  <% else %>
-                    <.icon name="hero-x-circle" class="size-5 text-error flex-shrink-0 mt-0.5" />
-                  <% end %>
-                  <div class="flex-1 min-w-0 space-y-2">
-                    <p class={[
-                      "font-medium text-sm",
-                      if(@execution_result.status == :completed,
-                        do: "text-success",
-                        else: "text-error"
-                      )
-                    ]}>
-                      {if @execution_result.status == :completed,
-                        do: "Execution Completed",
-                        else: "Execution Failed"}
-                    </p>
-
-                    <%= if @execution_result[:execution] do %>
-                      <div class="space-y-2">
-                        <div>
-                          <span class="text-xs font-medium text-base-content/70">Output</span>
-                          <pre class="mt-1 text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto"><code>{format_output(@execution_result.execution.output)}</code></pre>
-                        </div>
-                        <div class="flex flex-wrap gap-4 text-xs text-base-content/70">
-                          <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
-                            <.icon name="hero-clock" class="size-4" />
-                            {format_duration(
-                              get_duration_from_stats(@execution_result.execution.stats)
-                            )}
-                          </span>
-                          <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
-                            <.icon name="hero-bolt" class="size-4" />
-                            {get_generation(@execution_result.execution.output)} generations
-                          </span>
-                        </div>
-                      </div>
-                    <% end %>
-
-                    <%= if @execution_result[:error] do %>
-                      <div>
-                        <pre class="text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto text-error"><code>{inspect(@execution_result.error, pretty: true)}</code></pre>
-                      </div>
-                    <% end %>
-                  </div>
-                </div>
-              </div>
-            <% end %>
-
-            <div class="flex flex-wrap items-center justify-end gap-3 border-t border-base-200/80 pt-4">
-              <button
-                type="button"
-                phx-click="close_run_modal"
-                class="inline-flex items-center gap-2 rounded-xl border border-base-300/80 px-4 py-2 text-sm font-semibold text-base-content/80 transition hover:border-base-400 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              >
-                Close
-              </button>
-              <button
-                type="submit"
-                id="run-workflow-submit"
-                class="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none"
-                disabled={@running}
-              >
-                <%= if @running do %>
-                  <span class="flex h-4 w-4 items-center justify-center">
-                    <span class="h-4 w-4 animate-spin rounded-full border-2 border-primary-content/30 border-t-primary-content">
-                    </span>
-                  </span>
-                  <span>Running...</span>
-                <% else %>
-                  <.icon name="hero-play" class="size-4" />
-                  <span>Run</span>
-                <% end %>
-              </button>
-            </div>
-          </.form>
-        </div>
-      </div>
     </Layouts.app>
     """
   end
