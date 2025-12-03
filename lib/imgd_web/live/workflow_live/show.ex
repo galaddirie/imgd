@@ -238,18 +238,38 @@ defmodule ImgdWeb.WorkflowLive.Show do
     )
   end
 
-  defp parse_input(input) do
-    cond do
-      match?({_int, ""}, Integer.parse(input)) ->
-        {int, ""} = Integer.parse(input)
-        int
+  defp parse_input(nil), do: %{}
 
-      match?({_float, ""}, Float.parse(input)) ->
-        {float, ""} = Float.parse(input)
-        float
+  defp parse_input(input) when is_map(input), do: input
+
+  defp parse_input(input) do
+    trimmed = input |> to_string() |> String.trim()
+
+    cond do
+      trimmed == "" ->
+        %{}
+
+      decoded = decode_json_input(trimmed) ->
+        decoded
+
+      match?({_int, ""}, Integer.parse(trimmed)) ->
+        {int, ""} = Integer.parse(trimmed)
+        %{"value" => int}
+
+      match?({_float, ""}, Float.parse(trimmed)) ->
+        {float, ""} = Float.parse(trimmed)
+        %{"value" => float}
 
       true ->
-        input
+        %{"value" => trimmed}
+    end
+  end
+
+  defp decode_json_input(input) do
+    case Jason.decode(input) do
+      {:ok, value} when is_map(value) -> value
+      {:ok, value} -> %{"value" => value}
+      _ -> nil
     end
   end
 
@@ -305,8 +325,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                 </h2>
                 <%= if @running do %>
                   <span class="inline-flex items-center gap-2 text-sm text-primary">
-                    <span class="size-2 rounded-full bg-primary animate-pulse"></span>
-                    Executing...
+                    <span class="size-2 rounded-full bg-primary animate-pulse"></span> Executing...
                   </span>
                 <% end %>
               </div>
@@ -395,7 +414,10 @@ defmodule ImgdWeb.WorkflowLive.Show do
                 ]}>
                   <div class="flex items-start gap-3">
                     <%= if @current_execution.status == :completed do %>
-                      <.icon name="hero-check-circle" class="size-5 text-success flex-shrink-0 mt-0.5" />
+                      <.icon
+                        name="hero-check-circle"
+                        class="size-5 text-success flex-shrink-0 mt-0.5"
+                      />
                     <% else %>
                       <.icon name="hero-x-circle" class="size-5 text-error flex-shrink-0 mt-0.5" />
                     <% end %>
