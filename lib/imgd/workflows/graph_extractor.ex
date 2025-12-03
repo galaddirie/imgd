@@ -24,7 +24,7 @@ defmodule Imgd.Workflows.GraphExtractor do
   @type graph_data :: %{
           nodes: [workflow_node()],
           edges: [edge()],
-          layout: %{integer() => {number(), number()}}
+          layout: %{integer() => {number(), number(), number(), number()}}
         }
 
   @doc """
@@ -51,23 +51,19 @@ defmodule Imgd.Workflows.GraphExtractor do
   @spec extract_from_runic(Runic.Workflow.t()) :: graph_data()
   def extract_from_runic(runic_workflow) do
     graph = runic_workflow.graph
-
     rule_internal_names = rule_internal_names(runic_workflow)
 
-    # Extract nodes (steps, rules, etc. - not facts)
     nodes =
       graph
       |> extract_nodes(rule_internal_names)
       |> merge_rule_nodes(runic_workflow)
 
-    # Extract edges between nodes
     edges =
       graph
       |> extract_edges(nodes)
       |> add_linear_edges(runic_workflow, nodes)
       |> add_rule_edges(runic_workflow, nodes)
 
-    # Compute layout positions
     layout = compute_layout(nodes, edges)
 
     %{
@@ -77,7 +73,6 @@ defmodule Imgd.Workflows.GraphExtractor do
     }
   end
 
-  # Extract only the "runnable" nodes (steps, rules, etc.)
   defp extract_nodes(graph, ignore_names) do
     graph
     |> Graph.vertices()
@@ -110,12 +105,9 @@ defmodule Imgd.Workflows.GraphExtractor do
   defp node_type(%Runic.Workflow.StateMachine{}), do: :state_machine
   defp node_type(_), do: :unknown
 
-  # Extract edges between runnable nodes
-  # We need to trace through facts to find node-to-node connections
   defp extract_edges(graph, nodes) do
     node_hashes = MapSet.new(nodes, & &1.id)
 
-    # Get all edges and find paths between nodes through facts
     graph
     |> Graph.edges()
     |> Enum.flat_map(fn edge ->
@@ -124,17 +116,14 @@ defmodule Imgd.Workflows.GraphExtractor do
     |> Enum.uniq()
   end
 
-  # Trace connections between nodes through fact vertices
   defp find_node_connections(graph, edge, node_hashes) do
     from_hash = vertex_hash(edge.v1)
     to_hash = vertex_hash(edge.v2)
 
     cond do
-      # Direct node-to-node edge
       MapSet.member?(node_hashes, from_hash) and MapSet.member?(node_hashes, to_hash) ->
         [%{from: from_hash, to: to_hash, label: edge.label}]
 
-      # Node produces a fact - find what consumes that fact
       MapSet.member?(node_hashes, from_hash) and is_fact?(edge.v2) ->
         graph
         |> Graph.out_edges(edge.v2)
@@ -143,7 +132,6 @@ defmodule Imgd.Workflows.GraphExtractor do
           %{from: from_hash, to: vertex_hash(e.v2), label: :flows_to}
         end)
 
-      # Fact consumed by node - already covered by the above case
       true ->
         []
     end
@@ -155,42 +143,34 @@ defmodule Imgd.Workflows.GraphExtractor do
   defp is_fact?(%Runic.Workflow.Fact{}), do: true
   defp is_fact?(_), do: false
 
-  # Simple layered layout algorithm
-  # Places nodes in columns based on their dependency depth
+  # Updated layout with larger nodes for execution metrics
   defp compute_layout(nodes, edges) do
     if Enum.empty?(nodes) do
       %{}
     else
-      # Build adjacency map
       adjacency = build_adjacency_map(edges)
 
-      # Find root nodes (no incoming edges)
       all_ids = MapSet.new(nodes, & &1.id)
       targets = edges |> Enum.map(& &1.to) |> MapSet.new()
       roots = MapSet.difference(all_ids, targets) |> MapSet.to_list()
-
-      # If no roots found, pick the first node
       roots = if Enum.empty?(roots), do: [hd(nodes).id], else: roots
 
-      # Compute depths using BFS
       depths = compute_depths(roots, adjacency, %{})
 
-      # Assign any unvisited nodes to depth 0
       depths =
         Enum.reduce(nodes, depths, fn node, acc ->
           Map.put_new(acc, node.id, 0)
         end)
 
-      # Group nodes by depth
       nodes_by_depth =
         nodes
         |> Enum.group_by(fn node -> Map.get(depths, node.id, 0) end)
 
-      # Compute positions
-      node_width = 160
-      node_height = 60
-      h_spacing = 280
-      v_spacing = 100
+      # Larger node dimensions for execution metrics display
+      node_width = 180
+      node_height = 80
+      h_spacing = 300
+      v_spacing = 110
 
       Enum.reduce(nodes_by_depth, %{}, fn {depth, depth_nodes}, acc ->
         x = 50 + depth * h_spacing
