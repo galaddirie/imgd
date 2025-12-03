@@ -29,7 +29,7 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
 
     # Extract graph if workflow changed
     socket =
-      if changed?(assigns, :workflow) do
+      if Map.has_key?(assigns, :workflow) do
         case GraphExtractor.extract(assigns.workflow) do
           {:ok, data} -> assign(socket, graph_data: data, error: nil)
           {:error, reason} -> assign(socket, graph_data: nil, error: reason)
@@ -39,10 +39,6 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
       end
 
     {:ok, socket}
-  end
-
-  defp changed?(assigns, key) do
-    Map.has_key?(assigns, key)
   end
 
   @impl true

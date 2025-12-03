@@ -216,7 +216,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
     {:noreply, socket}
   end
 
-  def handle_info({:generation_started, generation, _count}, socket) do
+  def handle_info({:generation_started, _generation, _count}, socket) do
     # Could add a trace entry for generation start if desired
     {:noreply, socket}
   end
