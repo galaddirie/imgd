@@ -1,11 +1,14 @@
 defmodule ImgdWeb.WorkflowLive.Show do
   @moduledoc """
-  LiveView for showing a workflow with graph visualization and execution.
+  LiveView for showing a workflow with graph visualization and live execution tracking.
   """
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
+  alias Imgd.Workflows.ExecutionPubSub
+  alias Imgd.Workers.ExecutionWorker
   alias ImgdWeb.WorkflowLive.Components.WorkflowGraph
+  alias ImgdWeb.WorkflowLive.Components.TracePanel
   import ImgdWeb.Formatters
 
   @impl true
@@ -16,13 +19,20 @@ defmodule ImgdWeb.WorkflowLive.Show do
       workflow = Workflows.get_workflow!(scope, id)
       executions = Workflows.list_executions(scope, workflow, limit: 10)
 
+      # Subscribe to workflow execution updates
+      if connected?(socket) do
+        ExecutionPubSub.subscribe_workflow_executions(workflow.id)
+      end
+
       socket =
         socket
         |> assign(:page_title, workflow.name)
         |> assign(:workflow, workflow)
         |> assign(:executions, executions)
-        |> assign(:execution_result, nil)
         |> assign(:running, false)
+        |> assign(:current_execution, nil)
+        |> assign(:execution_steps, %{})
+        |> assign(:trace_steps, [])
         |> assign_run_form("5")
 
       {:ok, socket}
@@ -37,7 +47,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
     end
   end
 
-
   @impl true
   def handle_event("update_input", %{"run" => %{"input" => input}}, socket) do
     {:noreply, assign_run_form(socket, input)}
@@ -49,17 +58,56 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
   @impl true
   def handle_event("run_workflow", %{"run" => %{"input" => input}}, socket) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+
+    # Parse input
+    parsed_input = parse_input(input)
+
+    # Start execution via the Workflows context
+    case Workflows.start_execution(scope, workflow, input: parsed_input) do
+      {:ok, execution} ->
+        # Subscribe to this specific execution's updates
+        ExecutionPubSub.subscribe_execution(execution.id)
+
+        # Enqueue the execution worker
+        {:ok, _job} = ExecutionWorker.enqueue_start(execution.id)
+
+        socket =
+          socket
+          |> assign(running: true)
+          |> assign(current_execution: execution)
+          |> assign(execution_steps: %{})
+          |> assign(trace_steps: [])
+          |> assign_run_form(input)
+
+        {:noreply, socket}
+
+      {:error, :not_published} ->
+        {:noreply, put_flash(socket, :error, "Workflow must be published before running")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start execution: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("run_workflow", _params, socket) do
+    handle_event("run_workflow", %{"run" => %{"input" => socket.assigns.run_input}}, socket)
+  end
+
+  # PubSub message handlers for execution updates
+
+  @impl true
+  def handle_info({:execution_started, execution}, socket) do
     socket =
       socket
-      |> assign(running: true, execution_result: nil)
-      |> assign_run_form(input)
+      |> assign(current_execution: execution)
+      |> assign(running: true)
 
-    # Parse the input (try as integer, then float, then keep as string)
-    input = parse_input(input)
+    {:noreply, socket}
+  end
 
-    # TODO: Implement workflow execution
-    result = %{status: :failed, error: "Workflow execution not yet implemented"}
-
+  def handle_info({:execution_completed, execution}, socket) do
     # Refresh executions list
     executions =
       Workflows.list_executions(
@@ -68,17 +116,120 @@ defmodule ImgdWeb.WorkflowLive.Show do
         limit: 10
       )
 
-    {:noreply,
-     assign(socket,
-       running: false,
-       execution_result: result,
-       executions: executions
-     )}
+    socket =
+      socket
+      |> assign(current_execution: execution)
+      |> assign(running: false)
+      |> assign(executions: executions)
+
+    {:noreply, socket}
   end
 
-  def handle_event("run_workflow", _params, socket) do
-    handle_event("run_workflow", %{"run" => %{"input" => socket.assigns.run_input}}, socket)
+  def handle_info({:execution_failed, execution, _error}, socket) do
+    executions =
+      Workflows.list_executions(
+        socket.assigns.current_scope,
+        socket.assigns.workflow,
+        limit: 10
+      )
+
+    socket =
+      socket
+      |> assign(current_execution: execution)
+      |> assign(running: false)
+      |> assign(executions: executions)
+
+    {:noreply, socket}
   end
+
+  def handle_info({:step_started, step_info}, socket) do
+    # Update execution_steps map (keyed by step_hash)
+    execution_steps =
+      Map.put(socket.assigns.execution_steps, step_info.step_hash, :running)
+
+    # Add to trace steps
+    trace_step = Map.put(step_info, :status, :running)
+    trace_steps = socket.assigns.trace_steps ++ [trace_step]
+
+    socket =
+      socket
+      |> assign(execution_steps: execution_steps)
+      |> assign(trace_steps: trace_steps)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:step_completed, step_info}, socket) do
+    # Update execution_steps map
+    execution_steps =
+      Map.put(socket.assigns.execution_steps, step_info.step_hash, :completed)
+
+    # Update trace steps - find and update the matching step
+    trace_steps =
+      Enum.map(socket.assigns.trace_steps, fn trace_step ->
+        if trace_step.step_hash == step_info.step_hash &&
+             trace_step.generation == step_info.generation do
+          Map.merge(trace_step, %{
+            status: :completed,
+            duration_ms: step_info.duration_ms,
+            completed_at: step_info.completed_at
+          })
+        else
+          trace_step
+        end
+      end)
+
+    socket =
+      socket
+      |> assign(execution_steps: execution_steps)
+      |> assign(trace_steps: trace_steps)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:step_failed, step_info, error}, socket) do
+    # Update execution_steps map
+    execution_steps =
+      Map.put(socket.assigns.execution_steps, step_info.step_hash, :failed)
+
+    # Update trace steps
+    trace_steps =
+      Enum.map(socket.assigns.trace_steps, fn trace_step ->
+        if trace_step.step_hash == step_info.step_hash &&
+             trace_step.generation == step_info.generation do
+          Map.merge(trace_step, %{
+            status: step_info.status,
+            duration_ms: step_info.duration_ms,
+            error: error,
+            completed_at: step_info.completed_at
+          })
+        else
+          trace_step
+        end
+      end)
+
+    socket =
+      socket
+      |> assign(execution_steps: execution_steps)
+      |> assign(trace_steps: trace_steps)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:generation_started, generation, _count}, socket) do
+    # Could add a trace entry for generation start if desired
+    {:noreply, socket}
+  end
+
+  def handle_info({:generation_completed, _generation}, socket) do
+    # Could add a trace entry for generation completion if desired
+    {:noreply, socket}
+  end
+
+  # Catch-all for other messages
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
+  # Private helpers
 
   defp assign_run_form(socket, input) do
     assign(socket,
@@ -138,25 +289,46 @@ defmodule ImgdWeb.WorkflowLive.Show do
                 </div>
               </div>
             </div>
-
           </div>
         </div>
       </:page_header>
 
       <div class="space-y-8">
-        <%!-- Workflow Graph Section --%>
-        <section>
-          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
-            <h2 class="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
-              <.icon name="hero-share" class="size-5" /> Workflow Graph
-            </h2>
-            <.live_component
-              module={WorkflowGraph}
-              id={"workflow-graph-#{@workflow.id}"}
-              workflow={@workflow}
+        <%!-- Main Content Grid: Graph + Trace Panel --%>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <%!-- Workflow Graph (2/3 width on large screens) --%>
+          <div class="lg:col-span-2">
+            <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-base-content flex items-center gap-2">
+                  <.icon name="hero-share" class="size-5" /> Workflow Graph
+                </h2>
+                <%= if @running do %>
+                  <span class="inline-flex items-center gap-2 text-sm text-primary">
+                    <span class="size-2 rounded-full bg-primary animate-pulse"></span>
+                    Executing...
+                  </span>
+                <% end %>
+              </div>
+              <.live_component
+                module={WorkflowGraph}
+                id={"workflow-graph-#{@workflow.id}"}
+                workflow={@workflow}
+                execution_steps={@execution_steps}
+                current_execution={@current_execution}
+              />
+            </div>
+          </div>
+
+          <%!-- Trace Panel (1/3 width on large screens) --%>
+          <div class="lg:col-span-1">
+            <TracePanel.trace_panel
+              execution={@current_execution}
+              steps={@trace_steps}
+              running={@running}
             />
           </div>
-        </section>
+        </div>
 
         <%!-- Run Workflow Section --%>
         <section>
@@ -212,17 +384,17 @@ defmodule ImgdWeb.WorkflowLive.Show do
                 </p>
               </div>
 
-              <%!-- Execution Result --%>
-              <%= if @execution_result do %>
+              <%!-- Current Execution Result --%>
+              <%= if @current_execution && @current_execution.status in [:completed, :failed] do %>
                 <div class={[
                   "rounded-xl border p-4 shadow-sm mt-4",
-                  if(@execution_result.status == :completed,
+                  if(@current_execution.status == :completed,
                     do: "border-success/30 bg-success/10",
                     else: "border-error/30 bg-error/10"
                   )
                 ]}>
                   <div class="flex items-start gap-3">
-                    <%= if @execution_result.status == :completed do %>
+                    <%= if @current_execution.status == :completed do %>
                       <.icon name="hero-check-circle" class="size-5 text-success flex-shrink-0 mt-0.5" />
                     <% else %>
                       <.icon name="hero-x-circle" class="size-5 text-error flex-shrink-0 mt-0.5" />
@@ -230,42 +402,39 @@ defmodule ImgdWeb.WorkflowLive.Show do
                     <div class="flex-1 min-w-0 space-y-2">
                       <p class={[
                         "font-medium text-sm",
-                        if(@execution_result.status == :completed,
+                        if(@current_execution.status == :completed,
                           do: "text-success",
                           else: "text-error"
                         )
                       ]}>
-                        {if @execution_result.status == :completed,
+                        {if @current_execution.status == :completed,
                           do: "Execution Completed",
                           else: "Execution Failed"}
                       </p>
 
-                      <%= if @execution_result[:execution] do %>
-                        <div class="space-y-2">
-                          <div>
-                            <span class="text-xs font-medium text-base-content/70">Output</span>
-                            <pre class="mt-1 text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto"><code>{format_output(@execution_result.execution.output)}</code></pre>
-                          </div>
-                          <div class="flex flex-wrap gap-4 text-xs text-base-content/70">
-                            <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
-                              <.icon name="hero-clock" class="size-4" />
-                              {format_duration(
-                                get_duration_from_stats(@execution_result.execution.stats)
-                              )}
-                            </span>
-                            <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
-                              <.icon name="hero-bolt" class="size-4" />
-                              {get_generation(@execution_result.execution.output)} generations
-                            </span>
-                          </div>
+                      <%= if @current_execution.output do %>
+                        <div>
+                          <span class="text-xs font-medium text-base-content/70">Output</span>
+                          <pre class="mt-1 text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto"><code>{format_output(@current_execution.output)}</code></pre>
                         </div>
                       <% end %>
 
-                      <%= if @execution_result[:error] do %>
+                      <%= if @current_execution.error do %>
                         <div>
-                          <pre class="text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto text-error"><code>{inspect(@execution_result.error, pretty: true)}</code></pre>
+                          <pre class="text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto text-error"><code>{inspect(@current_execution.error, pretty: true)}</code></pre>
                         </div>
                       <% end %>
+
+                      <div class="flex flex-wrap gap-4 text-xs text-base-content/70">
+                        <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
+                          <.icon name="hero-clock" class="size-4" />
+                          {format_duration(get_duration_from_stats(@current_execution.stats))}
+                        </span>
+                        <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
+                          <.icon name="hero-bolt" class="size-4" />
+                          {get_generation(@current_execution.output)} generations
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -302,7 +471,10 @@ defmodule ImgdWeb.WorkflowLive.Show do
                   </thead>
                   <tbody>
                     <%= for execution <- @executions do %>
-                      <tr class="hover">
+                      <tr class={[
+                        "hover",
+                        @current_execution && @current_execution.id == execution.id && "bg-primary/5"
+                      ]}>
                         <td class="font-mono text-xs">{short_id(execution.id)}</td>
                         <td>
                           <span class={["badge badge-xs", execution_status_class(execution.status)]}>
@@ -394,7 +566,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
           </div>
         </section>
       </div>
-
     </Layouts.app>
     """
   end
