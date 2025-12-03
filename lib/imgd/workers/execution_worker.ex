@@ -38,7 +38,7 @@ defmodule Imgd.Workers.ExecutionWorker do
 
   alias Imgd.Repo
   alias Imgd.Workflows
-  alias Imgd.Workflows.Execution
+  alias Imgd.Workflows.{Execution, ExecutionPubSub}
   alias Imgd.Engine.Runner
   alias Imgd.Observability.{Telemetry, StructuredLogger}
   alias Imgd.Workers.StepWorker
@@ -62,13 +62,10 @@ defmodule Imgd.Workers.ExecutionWorker do
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}) do
-    # Exponential backoff: 10s, 20s, 40s
     min(10 * :math.pow(2, attempt - 1), 120) |> round()
   end
 
-  # ============================================================================
   # Public API for job creation
-  # ============================================================================
 
   @doc """
   Enqueues a job to start a new execution.
@@ -101,7 +98,6 @@ defmodule Imgd.Workers.ExecutionWorker do
   """
   @spec enqueue_continue(String.t(), keyword()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue_continue(execution_id, opts \\ []) do
-    # Small delay to allow concurrent step completions to settle
     opts = Keyword.put_new(opts, :schedule_in, 1)
 
     %{
@@ -127,9 +123,7 @@ defmodule Imgd.Workers.ExecutionWorker do
     |> Oban.insert()
   end
 
-  # ============================================================================
   # Execution Modes
-  # ============================================================================
 
   defp execute(execution, :start, _args) do
     execution = Repo.preload(execution, :workflow)
@@ -137,6 +131,9 @@ defmodule Imgd.Workers.ExecutionWorker do
 
     Telemetry.with_execution_span(execution, workflow_def, fn ->
       StructuredLogger.execution_started(execution, workflow_def)
+
+      # Broadcast execution started
+      ExecutionPubSub.broadcast_execution_started(execution)
 
       with {:ok, state} <- Runner.prepare(execution, :start) do
         state = Runner.plan_input(state, execution.input)
@@ -191,9 +188,7 @@ defmodule Imgd.Workers.ExecutionWorker do
     end
   end
 
-  # ============================================================================
   # Dispatch Logic
-  # ============================================================================
 
   defp dispatch_or_complete(state) do
     if Runner.has_runnables?(state) do
@@ -210,6 +205,9 @@ defmodule Imgd.Workers.ExecutionWorker do
     runnables = Runner.get_runnables(state)
 
     StructuredLogger.runnables_found(execution, generation, runnables)
+
+    # Broadcast generation started
+    ExecutionPubSub.broadcast_generation_started(execution.id, generation, length(runnables))
 
     results =
       Enum.map(runnables, fn {node, fact} ->
@@ -250,15 +248,21 @@ defmodule Imgd.Workers.ExecutionWorker do
     duration_ms = calculate_duration(execution)
 
     StructuredLogger.execution_completed(execution, workflow, duration_ms)
-
     emit_generation_complete(execution, state.generation)
 
-    Runner.complete(state)
+    result = Runner.complete(state)
+
+    # Broadcast completion after updating DB
+    case result do
+      {:ok, updated_execution} ->
+        ExecutionPubSub.broadcast_execution_completed(updated_execution)
+        {:ok, updated_execution}
+      error ->
+        error
+    end
   end
 
-  # ============================================================================
   # Error Handling
-  # ============================================================================
 
   defp handle_preparation_failure(execution, workflow, reason) do
     Logger.error(
@@ -270,11 +274,9 @@ defmodule Imgd.Workers.ExecutionWorker do
 
     case reason do
       {:invalid_status, _} ->
-        # Don't fail the execution, just stop processing
         {:error, reason}
 
       _ ->
-        # Attempt to fail the execution gracefully
         if workflow do
           StructuredLogger.execution_failed(execution, workflow, reason, 0)
         end
@@ -282,16 +284,23 @@ defmodule Imgd.Workers.ExecutionWorker do
         scope = get_scope(execution)
 
         if scope do
-          Workflows.fail_execution(scope, execution, normalize_error(reason))
+          result = Workflows.fail_execution(scope, execution, normalize_error(reason))
+
+          # Broadcast failure
+          case result do
+            {:ok, failed_execution} ->
+              ExecutionPubSub.broadcast_execution_failed(failed_execution, reason)
+              result
+            _ ->
+              result
+          end
         else
           {:error, reason}
         end
     end
   end
 
-  # ============================================================================
   # Helper Functions
-  # ============================================================================
 
   defp load_execution(execution_id) do
     case Repo.get(Execution, execution_id) do
@@ -301,27 +310,15 @@ defmodule Imgd.Workers.ExecutionWorker do
   end
 
   defp validate_execution(%Execution{status: status}, :start) do
-    if status in [:pending, :running] do
-      :ok
-    else
-      {:error, {:invalid_status_for_start, status}}
-    end
+    if status in [:pending, :running], do: :ok, else: {:error, {:invalid_status_for_start, status}}
   end
 
   defp validate_execution(%Execution{status: status}, :continue) do
-    if status == :running do
-      :ok
-    else
-      {:error, {:invalid_status_for_continue, status}}
-    end
+    if status == :running, do: :ok, else: {:error, {:invalid_status_for_continue, status}}
   end
 
   defp validate_execution(%Execution{status: status}, :resume) do
-    if status in [:paused, :failed] do
-      :ok
-    else
-      {:error, {:invalid_status_for_resume, status}}
-    end
+    if status in [:paused, :failed], do: :ok, else: {:error, {:invalid_status_for_resume, status}}
   end
 
   defp resume_execution_status(execution) do
@@ -330,7 +327,6 @@ defmodule Imgd.Workers.ExecutionWorker do
     if scope do
       Workflows.resume_execution(scope, execution)
     else
-      # If no scope available, update directly
       execution
       |> Execution.resume_changeset()
       |> Repo.update()
@@ -396,5 +392,7 @@ defmodule Imgd.Workers.ExecutionWorker do
         generation: generation
       }
     )
+
+    ExecutionPubSub.broadcast_generation_completed(execution.id, generation)
   end
 end
