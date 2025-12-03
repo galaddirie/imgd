@@ -11,6 +11,8 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
   use Phoenix.Component
 
   import ImgdWeb.CoreComponents
+  import ImgdWeb.Formatters
+
 
   attr :execution, :map, default: nil
   attr :steps, :list, default: []
