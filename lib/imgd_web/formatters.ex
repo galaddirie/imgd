@@ -1,41 +1,62 @@
 defmodule ImgdWeb.Formatters do
   @moduledoc """
-  View helpers for formatting data across the UI.
+  Shared formatting helpers for LiveViews and templates.
   """
 
-  alias Imgd.Workflows.Workflow
+  @doc """
+  Formats a timestamp for display.
+  """
+  def formatted_timestamp(nil), do: "-"
 
-  def formatted_timestamp(nil), do: "moments ago"
-
-  def formatted_timestamp(%DateTime{} = datetime) do
-    Calendar.strftime(datetime, "%b %-d, %Y at %H:%M")
+  def formatted_timestamp(datetime) do
+    Calendar.strftime(datetime, "%b %d, %Y at %H:%M")
   end
 
-  def trigger_label(%Workflow{trigger_config: %{"type" => type}}), do: format_trigger(type)
-  def trigger_label(%Workflow{trigger_config: %{type: type}}), do: format_trigger(type)
-  def trigger_label(_workflow), do: "Manual"
+  @doc """
+  Returns a shortened ID for display.
+  """
+  def short_id(nil), do: "-"
 
+  def short_id(id) when is_binary(id) do
+    String.slice(id, 0, 8)
+  end
+
+  @doc """
+  Returns the CSS class for a workflow status badge.
+  """
   def status_badge_class(:draft), do: "badge-warning"
   def status_badge_class(:published), do: "badge-success"
   def status_badge_class(:archived), do: "badge-neutral"
-  def status_badge_class(_status), do: "badge-ghost"
+  def status_badge_class(_), do: "badge-ghost"
 
+  @doc """
+  Returns a human-readable label for a workflow status.
+  """
   def status_label(:draft), do: "Draft"
   def status_label(:published), do: "Published"
   def status_label(:archived), do: "Archived"
-  def status_label(_status), do: "Unknown"
+  def status_label(status), do: to_string(status)
 
-  def short_id(id) do
-    id
-    |> to_string()
-    |> String.slice(0, 8)
-    |> Kernel.<>("…")
+  @doc """
+  Returns a human-readable label for the workflow trigger type.
+  """
+  def trigger_label(%{trigger_config: %{"type" => type}}) do
+    trigger_type_label(type)
   end
 
-  defp format_trigger(type) do
-    type
-    |> to_string()
-    |> String.replace("_", " ")
-    |> String.capitalize()
+  def trigger_label(%{trigger_config: %{type: type}}) do
+    trigger_type_label(type)
   end
+
+  def trigger_label(_), do: "Manual"
+
+  defp trigger_type_label("manual"), do: "Manual"
+  defp trigger_type_label(:manual), do: "Manual"
+  defp trigger_type_label("schedule"), do: "Scheduled"
+  defp trigger_type_label(:schedule), do: "Scheduled"
+  defp trigger_type_label("webhook"), do: "Webhook"
+  defp trigger_type_label(:webhook), do: "Webhook"
+  defp trigger_type_label("event"), do: "Event"
+  defp trigger_type_label(:event), do: "Event"
+  defp trigger_type_label(type), do: to_string(type)
 end
