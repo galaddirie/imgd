@@ -38,8 +38,9 @@ defmodule Imgd.Workers.StepWorker do
     priority: 1
 
   alias Imgd.Repo
-  alias Imgd.Workflows.{Execution, ExecutionStep}
+  alias Imgd.Workflows.{Execution, ExecutionStep, ExecutionPubSub}
   alias Imgd.Engine.{Runner, StepExecutor}
+  alias Imgd.Observability.StructuredLogger
 
   require Logger
 
@@ -64,9 +65,7 @@ defmodule Imgd.Workers.StepWorker do
 
   @impl Oban.Worker
   def timeout(%Oban.Job{args: args}) do
-    # TODO: Could make this configurable per-step
-    timeout_ms = args["timeout_ms"] || :timer.minutes(5)
-    timeout_ms
+    args["timeout_ms"] || :timer.minutes(5)
   end
 
   @impl Oban.Worker
@@ -74,14 +73,11 @@ defmodule Imgd.Workers.StepWorker do
     base = 1
     max_delay = 60
     delay = min(base * :math.pow(2, attempt - 1), max_delay) |> round()
-
     jitter = :rand.uniform(max(div(delay, 4), 1))
     delay + jitter
   end
 
-  # ============================================================================
-  # Public API for job creation
-  # ============================================================================
+  # Public API
 
   @doc """
   Enqueues a job to execute a specific step.
@@ -107,9 +103,7 @@ defmodule Imgd.Workers.StepWorker do
     |> Oban.insert()
   end
 
-  # ============================================================================
   # Private Implementation
-  # ============================================================================
 
   defp load_execution(execution_id) do
     case Repo.get(Execution, execution_id) do
@@ -133,6 +127,20 @@ defmodule Imgd.Workers.StepWorker do
   defp execute_step(state, node, fact, generation, generation_id, attempt) do
     %{execution: execution, workflow: workflow} = state
 
+    # Build step info for broadcast
+    step_info = %{
+      step_hash: node.hash,
+      step_name: node.name || "step_#{node.hash}",
+      step_type: node.__struct__ |> Module.split() |> List.last(),
+      generation: generation,
+      attempt: attempt,
+      input_fact_hash: fact.hash,
+      started_at: DateTime.utc_now()
+    }
+
+    # Broadcast step started
+    ExecutionPubSub.broadcast_step_started(execution.id, step_info)
+
     opts = [
       timeout_ms: get_step_timeout(execution, node),
       attempt: attempt,
@@ -140,16 +148,31 @@ defmodule Imgd.Workers.StepWorker do
     ]
 
     case StepExecutor.execute(execution, workflow, node, fact, opts) do
-      {:ok, updated_workflow, _events} ->
-        handle_step_success(state, updated_workflow, generation, generation_id)
+      {:ok, updated_workflow, events} ->
+        handle_step_success(state, updated_workflow, generation, generation_id, step_info, events)
 
       {:error, reason, _workflow} ->
-        handle_step_failure(state, node, fact, reason, attempt, generation, generation_id)
+        handle_step_failure(state, node, fact, reason, attempt, generation, generation_id, step_info)
     end
   end
 
-  defp handle_step_success(state, updated_workflow, generation, generation_id) do
-    %{execution: _execution} = state
+  defp handle_step_success(state, updated_workflow, generation, generation_id, step_info, events) do
+    %{execution: execution} = state
+
+    # Extract output info
+    output_fact = extract_output_fact(events)
+    duration_ms = DateTime.diff(DateTime.utc_now(), step_info.started_at, :millisecond)
+
+    completed_step_info =
+      Map.merge(step_info, %{
+        status: :completed,
+        duration_ms: duration_ms,
+        output_fact_hash: output_fact && output_fact.hash,
+        completed_at: DateTime.utc_now()
+      })
+
+    # Broadcast step completed
+    ExecutionPubSub.broadcast_step_completed(execution.id, completed_step_info)
 
     # Advance the runner state
     {:ok, new_state} = Runner.advance(state, updated_workflow)
@@ -158,22 +181,39 @@ defmodule Imgd.Workers.StepWorker do
     check_generation_completion(new_state, generation, generation_id)
   end
 
-  defp handle_step_failure(state, node, _fact, reason, attempt, _generation, _generation_id) do
+  defp handle_step_failure(state, node, _fact, reason, attempt, _generation, _generation_id, step_info) do
     %{execution: execution} = state
+
+    duration_ms = DateTime.diff(DateTime.utc_now(), step_info.started_at, :millisecond)
+
+    failed_step_info =
+      Map.merge(step_info, %{
+        status: :failed,
+        duration_ms: duration_ms,
+        error: normalize_error(reason),
+        completed_at: DateTime.utc_now()
+      })
 
     # Check if we should retry
     if StepExecutor.should_retry?(node, attempt, reason) do
-      # Let Oban handle the retry
-      # TODO: Restore observability - StructuredLogger.step_will_retry(execution, node, attempt, reason)
+      StructuredLogger.step_will_retry(execution, node, attempt, reason)
+
+      # Broadcast as retrying
+      retrying_step_info = Map.put(failed_step_info, :status, :retrying)
+      ExecutionPubSub.broadcast_step_failed(execution.id, retrying_step_info, reason)
+
       {:snooze, StepExecutor.retry_delay_ms(attempt)}
     else
-      # Permanent failure - fail the execution
-      Imgd.Observability.StructuredLogger.step_permanently_failed(execution, node, reason)
+      # Permanent failure
+      StructuredLogger.step_permanently_failed(execution, node, reason)
+
+      # Broadcast failure
+      ExecutionPubSub.broadcast_step_failed(execution.id, failed_step_info, reason)
 
       # Mark execution as failed
       Runner.fail(state, reason)
 
-      # Cancel any pending steps for this execution
+      # Cancel any pending steps
       cancel_pending_steps(execution)
 
       {:error, {:step_failed, reason}}
@@ -183,11 +223,9 @@ defmodule Imgd.Workers.StepWorker do
   defp check_generation_completion(state, generation, _generation_id) do
     %{execution: execution} = state
 
-    # Count pending/running steps for this generation
     pending_count = count_pending_steps(execution.id, generation)
 
     if pending_count <= 1 do
-      # This is the last step (or only step) - trigger next generation
       trigger_next_generation(execution)
     end
 
@@ -202,12 +240,10 @@ defmodule Imgd.Workers.StepWorker do
   end
 
   defp trigger_next_generation(%Execution{id: execution_id}) do
-    # Small delay to allow concurrent steps to finish checkpoint writes
     Imgd.Workers.ExecutionWorker.enqueue_continue(execution_id, schedule_in: 1)
   end
 
   defp cancel_pending_steps(%Execution{id: execution_id}) do
-    # Find and cancel any pending Oban jobs for this execution
     Oban.Job
     |> where([j], j.queue == "steps")
     |> where([j], j.state in ["available", "scheduled"])
@@ -221,4 +257,26 @@ defmodule Imgd.Workers.StepWorker do
     execution_timeout = get_in(execution.workflow.settings, [:timeout_ms])
     node_timeout || execution_timeout || :timer.minutes(5)
   end
+
+  defp extract_output_fact(events) do
+    Enum.find_value(events, fn
+      %Runic.Workflow.ReactionOccurred{reaction: :produced, to: fact} -> fact
+      _ -> nil
+    end)
+  end
+
+  defp normalize_error({:exception, e, stacktrace}) do
+    %{
+      type: e.__struct__ |> Module.split() |> List.last(),
+      message: Exception.message(e),
+      stacktrace: Exception.format_stacktrace(stacktrace) |> String.slice(0, 1000)
+    }
+  end
+
+  defp normalize_error({:timeout, timeout_ms}) do
+    %{type: "timeout", message: "Timed out after #{timeout_ms}ms"}
+  end
+
+  defp normalize_error(reason) when is_map(reason), do: reason
+  defp normalize_error(reason), do: %{message: inspect(reason)}
 end
