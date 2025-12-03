@@ -11,8 +11,6 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
   use Phoenix.Component
 
   import ImgdWeb.CoreComponents
-  import ImgdWeb.Formatters
-
 
   attr :execution, :map, default: nil
   attr :steps, :list, default: []
@@ -28,8 +26,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
         </div>
         <%= if @running do %>
           <span class="inline-flex items-center gap-1.5 text-xs text-primary">
-            <span class="size-2 rounded-full bg-primary animate-pulse"></span>
-            Running
+            <span class="size-2 rounded-full bg-primary animate-pulse"></span> Running
           </span>
         <% end %>
       </div>
@@ -83,7 +80,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
     ~H"""
     <div class="px-4 py-3 flex items-start gap-3 hover:bg-base-50 transition-colors">
       <div class="flex-shrink-0 mt-0.5">
-        <.icon name={@icon} class={["size-5", @icon_class]} />
+        <.icon name={@icon} class={["size-5", @icon_class] |> Enum.join(" ")} />
       </div>
       <div class="flex-1 min-w-0">
         <div class="flex items-center justify-between gap-2">
@@ -120,7 +117,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
       <div class="flex-shrink-0 mt-0.5 relative">
         <%!-- Connecting line --%>
         <div class="absolute left-1/2 -top-3 w-px h-3 bg-base-300"></div>
-        <.icon name={@icon} class={["size-5", @icon_class]} />
+        <.icon name={@icon} class={["size-5", @icon_class] |> Enum.join(" ")} />
         <%= if @step.status == :running do %>
           <span class="absolute -right-1 -top-1 size-2 rounded-full bg-primary animate-ping"></span>
         <% end %>

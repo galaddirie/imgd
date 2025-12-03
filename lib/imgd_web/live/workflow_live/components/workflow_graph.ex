@@ -44,7 +44,10 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
   @impl true
   def render(assigns) do
     ~H"""
-    <div id={@id} class="workflow-graph-container rounded-xl border border-base-300 bg-base-200/60 p-3">
+    <div
+      id={@id}
+      class="workflow-graph-container rounded-xl border border-base-300 bg-base-200/60 p-3"
+    >
       <%= if @error do %>
         <.error_state error={@error} />
       <% else %>
@@ -390,7 +393,8 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
 
     ~H"""
     <div class="inline-flex items-center gap-1 rounded-full border border-base-300 bg-base-100 px-2 py-0.5">
-      <span class="inline-block size-2.5 rounded-full" style={"background-color: #{@colors.badge};"}></span>
+      <span class="inline-block size-2.5 rounded-full" style={"background-color: #{@colors.badge};"}>
+      </span>
       <span>{@label}</span>
     </div>
     """

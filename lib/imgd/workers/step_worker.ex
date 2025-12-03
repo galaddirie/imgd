@@ -152,7 +152,16 @@ defmodule Imgd.Workers.StepWorker do
         handle_step_success(state, updated_workflow, generation, generation_id, step_info, events)
 
       {:error, reason, _workflow} ->
-        handle_step_failure(state, node, fact, reason, attempt, generation, generation_id, step_info)
+        handle_step_failure(
+          state,
+          node,
+          fact,
+          reason,
+          attempt,
+          generation,
+          generation_id,
+          step_info
+        )
     end
   end
 
@@ -181,7 +190,16 @@ defmodule Imgd.Workers.StepWorker do
     check_generation_completion(new_state, generation, generation_id)
   end
 
-  defp handle_step_failure(state, node, _fact, reason, attempt, _generation, _generation_id, step_info) do
+  defp handle_step_failure(
+         state,
+         node,
+         _fact,
+         reason,
+         attempt,
+         _generation,
+         _generation_id,
+         step_info
+       ) do
     %{execution: execution} = state
 
     duration_ms = DateTime.diff(DateTime.utc_now(), step_info.started_at, :millisecond)

@@ -12,6 +12,8 @@ defmodule Imgd.Workflows do
   alias Imgd.Accounts.Scope
   alias Imgd.Workflows.{Workflow, WorkflowVersion, Execution, ExecutionCheckpoint, ExecutionStep}
 
+  require Logger
+
   # ============================================================================
   # Workflows
   # ============================================================================
@@ -136,11 +138,13 @@ defmodule Imgd.Workflows do
   def publish_workflow(%Scope{} = scope, %Workflow{} = workflow, attrs \\ %{}) do
     with :ok <- authorize_workflow(scope, workflow) do
       Repo.transact(fn ->
-        with {:ok, workflow} <- workflow |> Workflow.publish_changeset(attrs) |> Repo.update(),
-             version_changeset =
-               WorkflowVersion.from_workflow(workflow, published_by: scope.user.id),
-             {:ok, _version} <- Repo.insert(version_changeset) do
-          {:ok, workflow}
+        with {:ok, workflow} <- workflow |> Workflow.publish_changeset(attrs) |> Repo.update() do
+          version_changeset = WorkflowVersion.from_workflow(workflow, published_by: scope.user.id)
+
+          case Repo.insert(version_changeset) do
+            {:ok, _version} -> {:ok, workflow}
+            {:error, changeset} -> {:error, changeset}
+          end
         end
       end)
     end
@@ -479,12 +483,45 @@ defmodule Imgd.Workflows do
   def create_checkpoint(%Execution{} = execution, workflow, opts \\ []) do
     Repo.transact(fn ->
       # Mark previous checkpoints as not current
-      ExecutionCheckpoint.mark_previous_not_current(execution.id)
-      |> Repo.update_all([])
+      {updated_count, _} =
+        ExecutionCheckpoint.mark_previous_not_current(execution.id)
+        |> Repo.update_all([])
+
+      Logger.debug("Marked #{updated_count} previous checkpoints as not current",
+        execution_id: execution.id
+      )
+
+      # Build the changeset
+      changeset = ExecutionCheckpoint.from_workflow_state(execution.id, workflow, opts)
+
+      # Log changeset validity for debugging
+      if not changeset.valid? do
+        Logger.error("Checkpoint changeset invalid",
+          execution_id: execution.id,
+          errors: inspect(changeset.errors)
+        )
+      end
 
       # Create new checkpoint
-      ExecutionCheckpoint.from_workflow_state(execution.id, workflow, opts)
-      |> Repo.insert()
+      case Repo.insert(changeset) do
+        {:ok, checkpoint} ->
+          Logger.debug("Created checkpoint",
+            execution_id: execution.id,
+            checkpoint_id: checkpoint.id,
+            generation: checkpoint.generation
+          )
+
+          {:ok, checkpoint}
+
+        {:error, changeset} ->
+          Logger.error("Failed to insert checkpoint",
+            execution_id: execution.id,
+            errors: inspect(changeset.errors),
+            changes: inspect(changeset.changes, limit: 500)
+          )
+
+          {:error, changeset}
+      end
     end)
   end
 

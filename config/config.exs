@@ -134,8 +134,10 @@ config :imgd, Oban,
   engine: Oban.Engines.Basic,
   queues: [
     default: 10,
-    executions: 5,  # ExecutionWorker - coordination jobs
-    steps: 20       # StepWorker - individual step execution
+    # ExecutionWorker - coordination jobs
+    executions: 5,
+    # StepWorker - individual step execution
+    steps: 20
   ],
   repo: Imgd.Repo
 

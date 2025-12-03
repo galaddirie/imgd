@@ -101,22 +101,35 @@ defmodule Imgd.Workflows.ExecutionCheckpoint do
   Creates a checkpoint from current workflow state.
   """
   def from_workflow_state(execution_id, workflow, opts \\ []) do
+    require Logger
+
     # Serialize the full workflow log for reconstruction
     workflow_state = serialize_workflow(workflow)
 
-    # Extract pending runnables
+    # Extract pending runnables with string keys for JSONB compatibility
     pending =
       workflow
       |> Runic.Workflow.next_runnables()
       |> Enum.map(fn {node, fact} ->
-        %{node_hash: node.hash, fact_hash: fact.hash}
+        # Use string keys for PostgreSQL JSONB compatibility
+        %{"node_hash" => node.hash, "fact_hash" => fact.hash}
       end)
 
-    # Extract accumulator states
-    accumulator_states = extract_accumulator_states(workflow)
+    # Extract accumulator states with string keys
+    accumulator_states =
+      extract_accumulator_states(workflow)
+      |> stringify_keys()
 
     # Get completed step hashes from the reaction events
     completed = extract_completed_steps(workflow)
+
+    Logger.debug("Building checkpoint changeset",
+      execution_id: execution_id,
+      generation: workflow.generations,
+      pending_count: length(pending),
+      completed_count: length(completed),
+      state_size: byte_size(workflow_state)
+    )
 
     %__MODULE__{}
     |> changeset(%{
@@ -139,9 +152,15 @@ defmodule Imgd.Workflows.ExecutionCheckpoint do
 
   @doc """
   Returns pending runnables as {node, fact} tuples for a given workflow.
+
+  Handles both atom and string keys from database storage.
   """
   def pending_runnables(%__MODULE__{pending_runnables: pending}, workflow) do
-    Enum.map(pending, fn %{node_hash: nh, fact_hash: fh} ->
+    Enum.map(pending, fn runnable ->
+      # Handle both atom and string keys (JSONB stores as strings)
+      nh = runnable["node_hash"] || runnable[:node_hash]
+      fh = runnable["fact_hash"] || runnable[:fact_hash]
+
       node = Map.get(workflow.graph.vertices, nh)
       fact = Map.get(workflow.graph.vertices, fh)
       {node, fact}
@@ -192,6 +211,20 @@ defmodule Imgd.Workflows.ExecutionCheckpoint do
       state -> put_change(changeset, :size_bytes, byte_size(state))
     end
   end
+
+  # Convert atom keys to string keys for JSONB storage
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), stringify_keys(v)}
+      {k, v} -> {k, stringify_keys(v)}
+    end)
+  end
+
+  defp stringify_keys(list) when is_list(list) do
+    Enum.map(list, &stringify_keys/1)
+  end
+
+  defp stringify_keys(value), do: value
 
   @doc """
   Marks all other checkpoints for this execution as not current.

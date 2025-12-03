@@ -138,13 +138,33 @@ defmodule Imgd.Workers.ExecutionWorker do
       with {:ok, state} <- Runner.prepare(execution, :start) do
         state = Runner.plan_input(state, execution.input)
 
+        # Log the workflow state for debugging
+        Logger.debug("Planned workflow state",
+          execution_id: execution.id,
+          generations: state.workflow.generations,
+          runnables_count: length(Runner.get_runnables(state))
+        )
+
         case Runner.create_checkpoint(state, :generation) do
           {:ok, checkpoint} ->
+            Logger.info("Initial checkpoint created successfully",
+              execution_id: execution.id,
+              checkpoint_id: checkpoint.id
+            )
+
             state = %{state | checkpoint: checkpoint}
             dispatch_or_complete(state)
 
           {:error, reason} ->
-            Logger.warning("Failed to create initial checkpoint: #{inspect(reason)}")
+            # Log the full error for debugging
+            Logger.error("Failed to create initial checkpoint - continuing without checkpoint",
+              execution_id: execution.id,
+              workflow_id: execution.workflow_id,
+              error: inspect(reason, pretty: true, limit: :infinity)
+            )
+
+            # Still try to dispatch runnables even if checkpoint failed
+            # This allows execution to proceed (though without recovery capability)
             dispatch_or_complete(state)
         end
       else
@@ -257,6 +277,7 @@ defmodule Imgd.Workers.ExecutionWorker do
       {:ok, updated_execution} ->
         ExecutionPubSub.broadcast_execution_completed(updated_execution)
         {:ok, updated_execution}
+
       error ->
         error
     end
@@ -291,6 +312,7 @@ defmodule Imgd.Workers.ExecutionWorker do
             {:ok, failed_execution} ->
               ExecutionPubSub.broadcast_execution_failed(failed_execution, reason)
               result
+
             _ ->
               result
           end
@@ -310,7 +332,9 @@ defmodule Imgd.Workers.ExecutionWorker do
   end
 
   defp validate_execution(%Execution{status: status}, :start) do
-    if status in [:pending, :running], do: :ok, else: {:error, {:invalid_status_for_start, status}}
+    if status in [:pending, :running],
+      do: :ok,
+      else: {:error, {:invalid_status_for_start, status}}
   end
 
   defp validate_execution(%Execution{status: status}, :continue) do
