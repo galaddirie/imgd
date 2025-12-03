@@ -201,11 +201,9 @@ defmodule Imgd.Workers.StepWorker do
     |> Repo.aggregate(:count)
   end
 
-  defp trigger_next_generation(%Execution{id: _execution_id}) do
+  defp trigger_next_generation(%Execution{id: execution_id}) do
     # Small delay to allow concurrent steps to finish checkpoint writes
-    # TODO: Implement ExecutionWorker.enqueue_continue/2
-    # ExecutionWorker.enqueue_continue(execution_id, schedule_in: 1)
-    :ok
+    Imgd.Workers.ExecutionWorker.enqueue_continue(execution_id, schedule_in: 1)
   end
 
   defp cancel_pending_steps(%Execution{id: execution_id}) do

@@ -132,7 +132,11 @@ config :phoenix, :json_library, Jason
 # Configure Oban
 config :imgd, Oban,
   engine: Oban.Engines.Basic,
-  queues: [default: 10],
+  queues: [
+    default: 10,
+    executions: 5,  # ExecutionWorker - coordination jobs
+    steps: 20       # StepWorker - individual step execution
+  ],
   repo: Imgd.Repo
 
 # Import environment specific config. This must remain at the bottom
