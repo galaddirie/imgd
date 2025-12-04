@@ -10,6 +10,8 @@ defmodule Imgd.Workflows do
   alias Imgd.Repo
 
   alias Imgd.Accounts.Scope
+  alias Imgd.Engine.DataFlow
+  alias Imgd.Engine.DataFlow.{Envelope, ValidationError}
   alias Imgd.Workflows.{Workflow, WorkflowVersion, Execution, ExecutionCheckpoint, ExecutionStep}
 
   require Logger
@@ -335,14 +337,21 @@ defmodule Imgd.Workflows do
   """
   def start_execution(%Scope{} = scope, %Workflow{} = workflow, opts \\ []) do
     with :ok <- authorize_workflow(scope, workflow),
-         :ok <- validate_executable(workflow) do
+         :ok <- validate_executable(workflow),
+         {:ok, envelope} <-
+           DataFlow.prepare_input(opts[:input],
+             schema: workflow_input_schema(workflow),
+             metadata: %{workflow_id: workflow.id}
+           ) do
+      trace_id = envelope.metadata.trace_id
+
       attrs = %{
         workflow_id: workflow.id,
         workflow_version: workflow.version,
         triggered_by_user_id: scope.user.id,
         trigger_type: opts[:trigger_type] || :manual,
-        input: opts[:input],
-        metadata: opts[:metadata] || %{}
+        input: Envelope.to_map(envelope),
+        metadata: build_execution_metadata(opts[:metadata], trace_id)
       }
 
       Repo.transact(fn ->
@@ -351,6 +360,12 @@ defmodule Imgd.Workflows do
           {:ok, execution}
         end
       end)
+    else
+      {:error, %ValidationError{} = error} ->
+        {:error, {:invalid_input, error}}
+
+      other ->
+        other
     end
   end
 
@@ -608,9 +623,9 @@ defmodule Imgd.Workflows do
   @doc """
   Marks a step as completed with output.
   """
-  def complete_step(%ExecutionStep{} = step, output_fact, duration_ms) do
+  def complete_step(%ExecutionStep{} = step, output_fact, duration_ms, opts \\ []) do
     step
-    |> ExecutionStep.complete_changeset(output_fact, duration_ms)
+    |> ExecutionStep.complete_changeset(output_fact, duration_ms, opts)
     |> Repo.update()
   end
 
@@ -668,6 +683,7 @@ defmodule Imgd.Workflows do
     |> ExecutionStep.by_execution(execution.id)
     |> ExecutionStep.slowest(limit)
     |> Repo.all()
+    |> Enum.sort_by(&(&1.duration_ms || 0), :desc)
   end
 
   # ============================================================================
@@ -739,6 +755,20 @@ defmodule Imgd.Workflows do
 
   defp validate_executable(%Workflow{status: :published}), do: :ok
   defp validate_executable(_), do: {:error, :not_published}
+
+  defp workflow_input_schema(%Workflow{settings: settings}) when is_map(settings) do
+    settings[:input_schema] || settings["input_schema"]
+  end
+
+  defp workflow_input_schema(_), do: nil
+
+  defp build_execution_metadata(nil, trace_id), do: %{"trace_id" => trace_id}
+
+  defp build_execution_metadata(metadata, trace_id) when is_map(metadata) do
+    Map.put(metadata, "trace_id", trace_id)
+  end
+
+  defp build_execution_metadata(_metadata, trace_id), do: %{"trace_id" => trace_id}
 
   defp validate_pausable(%Execution{status: :running}), do: :ok
   defp validate_pausable(_), do: {:error, :not_running}

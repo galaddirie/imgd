@@ -36,6 +36,8 @@ defmodule Imgd.Workflows.ExecutionStep do
   import Ecto.Query
 
   alias Imgd.Workflows.Execution
+  alias Imgd.Engine.DataFlow
+  alias Imgd.Engine.DataFlow.Envelope
 
   @type status :: :pending | :running | :completed | :failed | :skipped | :retrying
 
@@ -124,12 +126,15 @@ defmodule Imgd.Workflows.ExecutionStep do
     })
   end
 
-  def complete_changeset(step, output_fact, duration_ms) do
+  def complete_changeset(step, output_fact, duration_ms, opts \\ []) do
+    trace_id = opts[:trace_id] || default_trace_id(step.execution_id)
+    output_snapshot = fact_snapshot(output_fact, trace_id, step.step_hash, step.step_name)
+
     step
     |> change(%{
       status: :completed,
-      output_fact_hash: output_fact.hash,
-      output_snapshot: snapshot_value(output_fact.value),
+      output_fact_hash: fact_hash(output_fact),
+      output_snapshot: output_snapshot,
       duration_ms: duration_ms,
       completed_at: DateTime.utc_now()
     })
@@ -229,6 +234,7 @@ defmodule Imgd.Workflows.ExecutionStep do
   Creates a step record from a Runic node and fact.
   """
   def from_runnable(execution_id, node, fact, opts \\ []) do
+    trace_id = opts[:trace_id] || default_trace_id(execution_id)
     parent_hash =
       case fact.ancestry do
         {parent, _} -> parent
@@ -242,9 +248,9 @@ defmodule Imgd.Workflows.ExecutionStep do
       step_name: step_name(node),
       step_type: node.__struct__ |> Module.split() |> List.last(),
       generation: opts[:generation] || 0,
-      input_fact_hash: fact.hash,
+      input_fact_hash: fact_hash(fact),
       parent_step_hash: parent_hash,
-      input_snapshot: snapshot_value(fact.value),
+      input_snapshot: fact_snapshot(fact, trace_id, node.hash, step_name(node)),
       max_attempts: get_max_attempts(node),
       idempotency_key: compute_idempotency_key(node, fact)
     })
@@ -252,29 +258,11 @@ defmodule Imgd.Workflows.ExecutionStep do
 
   # Helpers
 
-  defp snapshot_value(value) do
-    # Limit snapshot size to prevent huge DB records
-    try do
-      encoded = Jason.encode!(value)
-
-      cond do
-        byte_size(encoded) > 10_000 ->
-          %{
-            _truncated: true,
-            _size: byte_size(encoded),
-            _preview: String.slice(encoded, 0, 1000)
-          }
-
-        is_map(value) ->
-          value
-
-        true ->
-          # Wrap non-map values to satisfy the :map field type
-          %{value: value}
-      end
-    rescue
-      _ -> %{_type: inspect(value.__struct__ || :unknown), _not_json_encodable: true}
-    end
+  defp fact_snapshot(fact, trace_id, step_hash, step_name) do
+    fact
+    |> Envelope.from_fact(:step, trace_id, %{step_hash: step_hash, step_name: step_name})
+    |> Envelope.to_map()
+    |> DataFlow.snapshot()
   end
 
   defp truncate_snapshots(changeset) do
@@ -312,6 +300,13 @@ defmodule Imgd.Workflows.ExecutionStep do
         end
     end
   end
+
+  defp fact_hash(%Runic.Workflow.Fact{hash: hash}), do: hash
+  defp fact_hash(%{hash: hash}), do: hash
+  defp fact_hash(_), do: nil
+
+  defp default_trace_id(nil), do: DataFlow.generate_trace_id()
+  defp default_trace_id(execution_id), do: "exec-#{execution_id}"
 
   defp normalize_error(%{__exception__: true} = e) do
     %{

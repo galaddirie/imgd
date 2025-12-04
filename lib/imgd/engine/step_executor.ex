@@ -20,6 +20,8 @@ defmodule Imgd.Engine.StepExecutor do
   alias Imgd.Repo
   alias Imgd.Workflows
   alias Imgd.Workflows.{Execution, ExecutionStep}
+  alias Imgd.Engine.DataFlow
+  alias Imgd.Engine.DataFlow.Envelope
   alias Imgd.Observability.{Telemetry, StructuredLogger}
 
   require Logger
@@ -54,11 +56,12 @@ defmodule Imgd.Engine.StepExecutor do
     timeout_ms = opts[:timeout_ms] || get_step_timeout(execution, node)
     attempt = opts[:attempt] || 1
     generation = opts[:generation] || workflow.generations
+    trace_id = trace_id_for_execution(execution)
 
     # Set logging context for this step
     Telemetry.set_step_log_context(execution, node, generation: generation, attempt: attempt)
 
-    with {:ok, step} <- create_step_record(execution, node, fact, generation, attempt) do
+    with {:ok, step} <- create_step_record(execution, node, fact, generation, attempt, trace_id) do
       # Execute with full observability (spans, metrics, logs)
       Telemetry.with_step_span(
         execution,
@@ -73,7 +76,7 @@ defmodule Imgd.Engine.StepExecutor do
 
           result = execute_with_timeout(workflow, node, fact, timeout_ms)
 
-          handle_result(result, execution, step, node, fact, timeout_ms)
+          handle_result(result, execution, step, node, fact, timeout_ms, trace_id)
         end
       )
     else
@@ -160,12 +163,13 @@ defmodule Imgd.Engine.StepExecutor do
     end
   end
 
-  defp handle_result({:ok, workflow, events}, execution, step, node, _fact, _timeout_ms) do
+  defp handle_result({:ok, workflow, events}, execution, step, node, _fact, _timeout_ms, trace_id) do
     output_fact = extract_output_fact(events)
     duration_ms = calculate_duration(step.started_at)
 
     # Update step record
-    {:ok, _step} = Workflows.complete_step(step, output_fact, duration_ms)
+    {:ok, _step} =
+      Workflows.complete_step(step, output_fact, duration_ms, trace_id: trace_id)
 
     # Log completion
     StructuredLogger.step_completed(execution, node, duration_ms, output_fact)
@@ -179,7 +183,8 @@ defmodule Imgd.Engine.StepExecutor do
          step,
          node,
          _fact,
-         _timeout_ms
+         _timeout_ms,
+         _trace_id
        ) do
     duration_ms = calculate_duration(step.started_at)
 
@@ -192,7 +197,7 @@ defmodule Imgd.Engine.StepExecutor do
     {:error, reason, nil}
   end
 
-  defp handle_result({:error, reason}, execution, step, node, _fact, _timeout_ms) do
+  defp handle_result({:error, reason}, execution, step, node, _fact, _timeout_ms, _trace_id) do
     duration_ms = calculate_duration(step.started_at)
 
     # Update step record with error
@@ -204,8 +209,9 @@ defmodule Imgd.Engine.StepExecutor do
     {:error, reason, nil}
   end
 
-  defp create_step_record(execution, node, fact, generation, attempt) do
+  defp create_step_record(execution, node, fact, generation, attempt, trace_id) do
     step_name = ExecutionStep.step_name(node)
+    input_snapshot = snapshot_fact(fact, trace_id, %{step_hash: node.hash, step_name: step_name})
 
     step_attrs = %{
       execution_id: execution.id,
@@ -213,8 +219,8 @@ defmodule Imgd.Engine.StepExecutor do
       step_name: step_name,
       step_type: node.__struct__ |> Module.split() |> List.last(),
       generation: generation,
-      input_fact_hash: fact.hash,
-      input_snapshot: snapshot_value(fact.value),
+      input_fact_hash: fact_hash(fact),
+      input_snapshot: input_snapshot,
       attempt: attempt,
       max_attempts: get_max_attempts(node)
     }
@@ -265,25 +271,22 @@ defmodule Imgd.Engine.StepExecutor do
   defp normalize_error(reason) when is_map(reason), do: reason
   defp normalize_error(reason), do: %{message: inspect(reason)}
 
-  defp snapshot_value(value) do
-    try do
-      encoded = Jason.encode!(value)
-
-      cond do
-        byte_size(encoded) > 10_000 ->
-          %{_truncated: true, _size: byte_size(encoded), _preview: String.slice(encoded, 0, 1000)}
-
-        is_map(value) ->
-          value
-
-        true ->
-          # Wrap non-map values to satisfy the :map field type
-          %{value: value}
-      end
-    rescue
-      _ -> %{_type: "non_json_encodable", _inspect: inspect(value) |> String.slice(0, 1000)}
-    end
+  defp snapshot_fact(fact, trace_id, metadata) do
+    fact
+    |> Envelope.from_fact(:step, trace_id, metadata)
+    |> Envelope.to_map()
+    |> DataFlow.snapshot()
   end
+
+  defp fact_hash(%Runic.Workflow.Fact{hash: hash}), do: hash
+  defp fact_hash(%{hash: hash}), do: hash
+  defp fact_hash(_), do: nil
+
+  defp trace_id_for_execution(%Execution{metadata: metadata}) do
+    metadata["trace_id"] || metadata[:trace_id] || DataFlow.generate_trace_id()
+  end
+
+  defp trace_id_for_execution(_), do: DataFlow.generate_trace_id()
 
   defp get_step_timeout(%Execution{} = execution, node) do
     node_timeout = Map.get(node, :timeout_ms)

@@ -70,7 +70,7 @@ defmodule Imgd.MixProject do
       {:bandit, "~> 1.5"},
       {:runic, git: "https://github.com/zblanco/runic.git", branch: "main"},
       {:oban, "~> 2.20"},
-
+      {:jsv, "~> 0.13.1"},
       # OpenTelemetry & Auto-Instrumentation
       {:opentelemetry, "~> 1.7"},
       {:opentelemetry_api, "~> 1.5"},

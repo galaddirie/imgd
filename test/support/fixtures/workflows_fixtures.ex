@@ -7,6 +7,8 @@ defmodule Imgd.WorkflowsFixtures do
   alias Imgd.Workflows
   alias Imgd.Workflows.{Execution, ExecutionCheckpoint, ExecutionStep}
   alias Imgd.Repo
+  alias Imgd.Engine.DataFlow
+  alias Imgd.Engine.DataFlow.Envelope
 
   def valid_workflow_attributes(attrs \\ %{}) do
     Enum.into(attrs, %{
@@ -54,12 +56,16 @@ defmodule Imgd.WorkflowsFixtures do
   end
 
   def valid_execution_attributes(workflow, attrs \\ %{}) do
+    trace_id = attrs[:trace_id] || "test-trace-#{System.unique_integer([:positive])}"
+    raw_input = attrs[:input] || %{test: "input"}
+    input_envelope = DataFlow.wrap(raw_input, source: :input, trace_id: trace_id)
+
     Enum.into(attrs, %{
       workflow_id: workflow.id,
       workflow_version: workflow.version,
       trigger_type: :manual,
-      input: %{test: "input"},
-      metadata: %{trace_id: "test-trace-#{System.unique_integer([:positive])}"}
+      input: Envelope.to_map(input_envelope),
+      metadata: Map.put(attrs[:metadata] || %{}, "trace_id", trace_id)
     })
   end
 
@@ -130,6 +136,7 @@ defmodule Imgd.WorkflowsFixtures do
 
   def valid_step_attributes(execution, attrs \\ %{}) do
     step_hash = attrs[:step_hash] || :erlang.phash2("step-#{System.unique_integer()}")
+    snapshot_value = attrs[:input_snapshot] || DataFlow.snapshot(%{"value" => "test_input"})
 
     Enum.into(attrs, %{
       execution_id: execution.id,
@@ -139,7 +146,7 @@ defmodule Imgd.WorkflowsFixtures do
       generation: attrs[:generation] || 0,
       input_fact_hash:
         attrs[:input_fact_hash] || :erlang.phash2("fact-#{System.unique_integer()}"),
-      input_snapshot: %{value: "test_input"},
+      input_snapshot: snapshot_value,
       status: :pending
     })
   end

@@ -7,6 +7,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
   alias Imgd.Workflows
   alias Imgd.Workflows.ExecutionPubSub
   alias Imgd.Workers.ExecutionWorker
+  alias Imgd.Engine.DataFlow.ValidationError
   alias ImgdWeb.WorkflowLive.Components.WorkflowGraph
   alias ImgdWeb.WorkflowLive.Components.TracePanel
   import ImgdWeb.Formatters
@@ -85,6 +86,9 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
       {:error, :not_published} ->
         {:noreply, put_flash(socket, :error, "Workflow must be published before running")}
+
+      {:error, {:invalid_input, %ValidationError{} = error}} ->
+        {:noreply, put_flash(socket, :error, format_validation_error(error))}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to start execution: #{inspect(reason)}")}
@@ -250,19 +254,18 @@ defmodule ImgdWeb.WorkflowLive.Show do
         nil
 
       decoded = decode_json_input(trimmed) ->
-        # If JSON decoded to a non-map, wrap it
-        if is_map(decoded), do: decoded, else: %{"value" => decoded}
+        decoded
 
       match?({_int, ""}, Integer.parse(trimmed)) ->
         {int, ""} = Integer.parse(trimmed)
-        %{"value" => int}
+        int
 
       match?({_float, ""}, Float.parse(trimmed)) ->
         {float, ""} = Float.parse(trimmed)
-        %{"value" => float}
+        float
 
       true ->
-        %{"value" => trimmed}
+        trimmed
     end
   end
 
@@ -271,6 +274,28 @@ defmodule ImgdWeb.WorkflowLive.Show do
       {:ok, value} -> value
       _ -> nil
     end
+  end
+
+  defp format_validation_error(%ValidationError{} = error) do
+    err_map = ValidationError.to_map(error)
+    path = if err_map["path"] in [nil, ""], do: "", else: " at #{err_map["path"]}"
+    "Invalid input#{path}: #{err_map["message"]}"
+  end
+
+  defp workflow_input_schema(workflow) do
+    workflow.settings[:input_schema] || workflow.settings["input_schema"]
+  end
+
+  defp node_schemas(workflow) do
+    workflow.settings[:node_schemas] || workflow.settings["node_schemas"]
+  end
+
+  defp render_schema(nil), do: "Not provided"
+
+  defp render_schema(schema) do
+    inspect(schema, pretty: true, limit: :infinity, printable_limit: :infinity)
+  rescue
+    _ -> "Unable to render schema"
   end
 
   @impl true
@@ -593,6 +618,36 @@ defmodule ImgdWeb.WorkflowLive.Show do
                     <code class="text-xs bg-base-200 px-2 py-1 rounded">{@workflow.id}</code>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <%!-- Workflow Schemas Section --%>
+        <section>
+          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
+            <div class="flex items-center gap-2 mb-4">
+              <.icon name="hero-brackets-curly" class="size-5" />
+              <h2 class="text-lg font-semibold text-base-content">Schemas</h2>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60 mb-2">
+                  Input Schema
+                </p>
+                <pre class="rounded-xl bg-base-200/60 p-3 text-xs font-mono text-base-content/90 shadow-inner whitespace-pre-wrap min-h-[120px]">
+                  <code><%= render_schema(workflow_input_schema(@workflow)) %></code>
+                </pre>
+              </div>
+
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60 mb-2">
+                  Node Schemas
+                </p>
+                <pre class="rounded-xl bg-base-200/60 p-3 text-xs font-mono text-base-content/90 shadow-inner whitespace-pre-wrap min-h-[120px]">
+                  <code><%= render_schema(node_schemas(@workflow)) %></code>
+                </pre>
               </div>
             </div>
           </div>

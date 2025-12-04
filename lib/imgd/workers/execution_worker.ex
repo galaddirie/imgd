@@ -39,7 +39,7 @@ defmodule Imgd.Workers.ExecutionWorker do
   alias Imgd.Repo
   alias Imgd.Workflows
   alias Imgd.Workflows.{Execution, ExecutionPubSub}
-  alias Imgd.Engine.Runner
+  alias Imgd.Engine.{DataFlow, Runner}
   alias Imgd.Observability.{Telemetry, StructuredLogger}
   alias Imgd.Workers.StepWorker
 
@@ -137,7 +137,7 @@ defmodule Imgd.Workers.ExecutionWorker do
 
       with {:ok, state} <- Runner.prepare(execution, :start) do
         # Unwrap the input value if it's in our wrapper format
-        raw_input = unwrap_input(execution.input)
+        raw_input = DataFlow.unwrap(execution.input)
         state = Runner.plan_input(state, raw_input)
 
         # Log the workflow state for debugging
@@ -421,8 +421,4 @@ defmodule Imgd.Workers.ExecutionWorker do
 
     ExecutionPubSub.broadcast_generation_completed(execution.id, generation)
   end
-
-  # Unwraps input from storage format to raw value for workflow execution
-  defp unwrap_input(%{"value" => value}), do: value
-  defp unwrap_input(input), do: input
 end

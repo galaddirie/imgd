@@ -30,6 +30,8 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
         |> assign(:steps_empty?, steps == [])
         |> assign(:checkpoints_empty?, checkpoints == [])
         |> assign(:trace_steps, steps)
+        |> assign(:input_schema, workflow_input_schema(execution.workflow))
+        |> assign(:node_schemas, node_schemas(execution.workflow))
         |> stream(:steps, steps, reset: true)
         |> stream(:checkpoints, checkpoints, reset: true)
 
@@ -220,6 +222,32 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                     </p>
                     <pre class="rounded-xl bg-base-200/60 p-3 text-xs font-mono text-base-content/90 shadow-inner whitespace-pre-wrap">
                       <code><%= pretty_data(@execution.metadata) %></code>
+                    </pre>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
+                <div class="flex items-center gap-2 mb-4">
+                  <.icon name="hero-brackets-curly" class="size-5" />
+                  <h3 class="text-lg font-semibold text-base-content">Schemas</h3>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60 mb-2">
+                      Input Schema
+                    </p>
+                    <pre class="rounded-xl bg-base-200/60 p-3 text-xs font-mono text-base-content/90 shadow-inner whitespace-pre-wrap min-h-[120px]">
+                      <code><%= render_schema(@input_schema) %></code>
+                    </pre>
+                  </div>
+                  <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60 mb-2">
+                      Node Schemas
+                    </p>
+                    <pre class="rounded-xl bg-base-200/60 p-3 text-xs font-mono text-base-content/90 shadow-inner whitespace-pre-wrap min-h-[120px]">
+                      <code><%= render_schema(@node_schemas) %></code>
                     </pre>
                   </div>
                 </div>
@@ -568,6 +596,22 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
     Enum.reduce(steps, 0, fn step, acc ->
       acc + max(step.attempt - 1, 0)
     end)
+  end
+
+  defp workflow_input_schema(workflow) do
+    workflow.settings[:input_schema] || workflow.settings["input_schema"]
+  end
+
+  defp node_schemas(workflow) do
+    workflow.settings[:node_schemas] || workflow.settings["node_schemas"]
+  end
+
+  defp render_schema(nil), do: "Not provided"
+
+  defp render_schema(schema) do
+    inspect(schema, pretty: true, limit: :infinity, printable_limit: :infinity)
+  rescue
+    _ -> "Unable to render schema"
   end
 
   defp pretty_data(nil), do: "-"

@@ -6,6 +6,7 @@ alias Imgd.Repo
 alias Imgd.Accounts
 alias Imgd.Accounts.User
 alias Imgd.Workflows
+alias JSV.Schema.Helpers, as: JSONSchema
 
 IO.puts("🌱 Seeding database...")
 
@@ -33,6 +34,9 @@ scope = Imgd.Accounts.Scope.for_user(user)
 # Build a simple Runic workflow with branching
 require Runic
 import Runic
+
+# Shared input schema: numeric input
+input_schema = JSONSchema.number()
 
 # Example 1: Linear pipeline
 linear_workflow =
@@ -83,19 +87,22 @@ workflows_to_create = [
   %{
     name: "Linear Pipeline",
     description: "A simple sequential workflow: doubles input, adds 10, then formats as string",
-    runic: linear_workflow
+    runic: linear_workflow,
+    input_schema: input_schema
   },
   %{
     name: "Branching Pipeline",
     description:
       "Doubles input, then branches to three parallel operations: add 5, subtract 3, and square",
-    runic: branching_workflow
+    runic: branching_workflow,
+    input_schema: input_schema
   },
   %{
     name: "Conditional Pipeline",
     description:
       "Doubles input, then applies rules to categorize as 'large' (>20) or 'small' (<=20)",
-    runic: rule_workflow
+    runic: rule_workflow,
+    input_schema: input_schema
   }
 ]
 
@@ -114,7 +121,8 @@ for wf_config <- workflows_to_create do
     {:ok, workflow} =
       Workflows.create_workflow(scope, %{
         name: wf_config.name,
-        description: wf_config.description
+        description: wf_config.description,
+        settings: %{input_schema: wf_config.input_schema}
       })
 
     # Publish with definition

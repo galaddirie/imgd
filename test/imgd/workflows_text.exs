@@ -1,8 +1,9 @@
 defmodule Imgd.WorkflowsTest do
   use Imgd.DataCase
 
+  alias Imgd.Engine.DataFlow
   alias Imgd.Workflows
-  alias Imgd.Workflows.{Workflow, WorkflowVersion, Execution, ExecutionCheckpoint, ExecutionStep}
+  alias Imgd.Workflows.{Workflow, Execution}
 
   import Imgd.AccountsFixtures
   import Imgd.WorkflowsFixtures
@@ -160,7 +161,7 @@ defmodule Imgd.WorkflowsTest do
 
       # Verify version was created
       versions = Workflows.list_workflow_versions(scope, published)
-      assert {:ok, [version]} = versions
+      assert [version] = versions
       assert version.version == 2
     end
 
@@ -212,7 +213,7 @@ defmodule Imgd.WorkflowsTest do
       # Reset to draft to test execution constraint
       workflow = %{workflow | status: :draft}
 
-      assert {:error, :not_draft} = Workflows.delete_workflow(scope, workflow)
+      assert {:error, :has_executions} = Workflows.delete_workflow(scope, workflow)
     end
 
     test "returns error for unauthorized access", %{scope: scope} do
@@ -238,7 +239,7 @@ defmodule Imgd.WorkflowsTest do
     test "returns all versions for a workflow", %{scope: scope} do
       workflow = published_workflow_fixture(scope)
 
-      assert {:ok, versions} = Workflows.list_workflow_versions(scope, workflow)
+      versions = Workflows.list_workflow_versions(scope, workflow)
       assert length(versions) == 1
     end
 
@@ -254,7 +255,7 @@ defmodule Imgd.WorkflowsTest do
     test "returns a specific version", %{scope: scope} do
       workflow = published_workflow_fixture(scope)
 
-      assert {:ok, version} = Workflows.get_workflow_version!(scope, workflow, 2)
+      version = Workflows.get_workflow_version!(scope, workflow, 2)
       assert version.version == 2
     end
   end
@@ -267,14 +268,14 @@ defmodule Imgd.WorkflowsTest do
       {:ok, workflow} =
         Workflows.publish_workflow(scope, workflow, %{definition: valid_workflow_definition()})
 
-      assert {:ok, version} = Workflows.get_latest_workflow_version(scope, workflow)
+      version = Workflows.get_latest_workflow_version(scope, workflow)
       assert version.version == 3
     end
 
     test "returns nil for unpublished workflow", %{scope: scope} do
       workflow = workflow_fixture(scope)
 
-      assert {:ok, nil} = Workflows.get_latest_workflow_version(scope, workflow)
+      assert Workflows.get_latest_workflow_version(scope, workflow) == nil
     end
   end
 
@@ -287,7 +288,7 @@ defmodule Imgd.WorkflowsTest do
       workflow = published_workflow_fixture(scope)
       execution = execution_fixture(scope, workflow)
 
-      assert {:ok, [found]} = Workflows.list_executions(scope, workflow)
+      assert [found] = Workflows.list_executions(scope, workflow)
       assert found.id == execution.id
     end
 
@@ -296,7 +297,7 @@ defmodule Imgd.WorkflowsTest do
       _running = execution_fixture(scope, workflow)
       completed = completed_execution_fixture(scope, workflow)
 
-      assert {:ok, [found]} = Workflows.list_executions(scope, workflow, status: :completed)
+      assert [found] = Workflows.list_executions(scope, workflow, status: :completed)
       assert found.id == completed.id
     end
 
@@ -305,8 +306,7 @@ defmodule Imgd.WorkflowsTest do
       running = execution_fixture(scope, workflow)
       completed = completed_execution_fixture(scope, workflow)
 
-      assert {:ok, found} =
-               Workflows.list_executions(scope, workflow, status: [:running, :completed])
+      found = Workflows.list_executions(scope, workflow, status: [:running, :completed])
 
       assert length(found) == 2
       ids = Enum.map(found, & &1.id)
@@ -386,7 +386,8 @@ defmodule Imgd.WorkflowsTest do
       assert execution.status == :running
       assert execution.workflow_id == workflow.id
       assert execution.workflow_version == workflow.version
-      assert execution.input == %{key: "value"}
+      assert DataFlow.unwrap(execution.input) == %{key: "value"}
+      assert execution.metadata["trace_id"]
       assert execution.started_at != nil
       assert execution.expires_at != nil
     end
@@ -538,7 +539,7 @@ defmodule Imgd.WorkflowsTest do
       execution = execution_fixture(scope, workflow)
       checkpoint = checkpoint_fixture(execution)
 
-      assert {:ok, [found]} = Workflows.list_checkpoints(scope, execution)
+      assert [found] = Workflows.list_checkpoints(scope, execution)
       assert found.id == checkpoint.id
     end
   end
@@ -550,7 +551,7 @@ defmodule Imgd.WorkflowsTest do
       _old = checkpoint_fixture(execution, %{generation: 1, is_current: false})
       current = checkpoint_fixture(execution, %{generation: 2, is_current: true})
 
-      assert {:ok, found} = Workflows.get_current_checkpoint(scope, execution)
+      found = Workflows.get_current_checkpoint(scope, execution)
       assert found.id == current.id
     end
 
@@ -558,7 +559,7 @@ defmodule Imgd.WorkflowsTest do
       workflow = published_workflow_fixture(scope)
       execution = execution_fixture(scope, workflow)
 
-      assert {:ok, nil} = Workflows.get_current_checkpoint(scope, execution)
+      assert Workflows.get_current_checkpoint(scope, execution) == nil
     end
   end
 
@@ -573,7 +574,7 @@ defmodule Imgd.WorkflowsTest do
 
       assert {:ok, 5} = Workflows.prune_checkpoints(execution, 5)
 
-      {:ok, remaining} = Workflows.list_checkpoints(scope, execution)
+      remaining = Workflows.list_checkpoints(scope, execution)
       assert length(remaining) == 5
     end
   end
@@ -588,7 +589,7 @@ defmodule Imgd.WorkflowsTest do
       execution = execution_fixture(scope, workflow)
       step = execution_step_fixture(execution)
 
-      assert {:ok, [found]} = Workflows.list_execution_steps(scope, execution)
+      assert [found] = Workflows.list_execution_steps(scope, execution)
       assert found.id == step.id
     end
 
@@ -598,7 +599,7 @@ defmodule Imgd.WorkflowsTest do
       _pending = execution_step_fixture(execution)
       completed = completed_step_fixture(execution)
 
-      assert {:ok, [found]} = Workflows.list_execution_steps(scope, execution, status: :completed)
+      assert [found] = Workflows.list_execution_steps(scope, execution, status: :completed)
       assert found.id == completed.id
     end
 
@@ -608,7 +609,7 @@ defmodule Imgd.WorkflowsTest do
       _gen0 = execution_step_fixture(execution, %{generation: 0})
       gen1 = execution_step_fixture(execution, %{generation: 1})
 
-      assert {:ok, [found]} = Workflows.list_execution_steps(scope, execution, generation: 1)
+      assert [found] = Workflows.list_execution_steps(scope, execution, generation: 1)
       assert found.id == gen1.id
     end
   end
@@ -619,7 +620,7 @@ defmodule Imgd.WorkflowsTest do
       execution = execution_fixture(scope, workflow)
       step = execution_step_fixture(execution)
 
-      assert {:ok, found} = Workflows.get_execution_step!(scope, execution, step.id)
+      found = Workflows.get_execution_step!(scope, execution, step.id)
       assert found.id == step.id
     end
   end
