@@ -79,11 +79,15 @@ defmodule Imgd.Engine.DataFlow.Schema do
 
   # Null
   def validate(nil, %{type: :null}, _path), do: :ok
-  def validate(value, %{type: :null}, path), do: {:error, ValidationError.type_mismatch(path, :null, value)}
+
+  def validate(value, %{type: :null}, path),
+    do: {:error, ValidationError.type_mismatch(path, :null, value)}
 
   # Boolean
   def validate(value, %{type: :boolean}, _path) when is_boolean(value), do: :ok
-  def validate(value, %{type: :boolean}, path), do: {:error, ValidationError.type_mismatch(path, :boolean, value)}
+
+  def validate(value, %{type: :boolean}, path),
+    do: {:error, ValidationError.type_mismatch(path, :boolean, value)}
 
   # Integer
   def validate(value, %{type: :integer} = schema, path) when is_integer(value) do
@@ -166,7 +170,8 @@ defmodule Imgd.Engine.DataFlow.Schema do
     end
   end
 
-  defp validate_minimum(value, %{minimum: min, exclusive_minimum: true}, path) when value <= min do
+  defp validate_minimum(value, %{minimum: min, exclusive_minimum: true}, path)
+       when value <= min do
     {:error, ValidationError.constraint_violated(path, "exclusive minimum", min, value)}
   end
 
@@ -176,7 +181,8 @@ defmodule Imgd.Engine.DataFlow.Schema do
 
   defp validate_minimum(_, _, _), do: :ok
 
-  defp validate_maximum(value, %{maximum: max, exclusive_maximum: true}, path) when value >= max do
+  defp validate_maximum(value, %{maximum: max, exclusive_maximum: true}, path)
+       when value >= max do
     {:error, ValidationError.constraint_violated(path, "exclusive maximum", max, value)}
   end
 
@@ -324,7 +330,11 @@ defmodule Imgd.Engine.DataFlow.Schema do
 
   defp validate_properties(_, _, _), do: :ok
 
-  defp validate_additional_properties(value, %{additional_properties: false, properties: props}, path)
+  defp validate_additional_properties(
+         value,
+         %{additional_properties: false, properties: props},
+         path
+       )
        when is_map(props) do
     defined_keys = Map.keys(props) |> Enum.map(&normalize_key/1) |> MapSet.new()
 

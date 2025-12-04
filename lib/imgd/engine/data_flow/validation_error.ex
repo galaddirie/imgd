@@ -101,12 +101,12 @@ defmodule Imgd.Engine.DataFlow.ValidationError do
       normalized[:details] ||
         normalized["details"] ||
         []
-      |> List.first()
+        |> List.first()
 
     jsv_error =
       (detail && (detail[:errors] || detail["errors"])) ||
         []
-      |> List.first() || %{}
+        |> List.first() || %{}
 
     path =
       detail
@@ -169,6 +169,7 @@ defmodule Imgd.Engine.DataFlow.ValidationError do
   defp type_name(_), do: "unknown"
 
   defp instance_location_to_path(nil), do: []
+
   defp instance_location_to_path(location) when is_binary(location) do
     location
     |> String.trim_leading("#/")

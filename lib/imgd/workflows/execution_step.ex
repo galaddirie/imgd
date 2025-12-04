@@ -235,6 +235,7 @@ defmodule Imgd.Workflows.ExecutionStep do
   """
   def from_runnable(execution_id, node, fact, opts \\ []) do
     trace_id = opts[:trace_id] || default_trace_id(execution_id)
+
     parent_hash =
       case fact.ancestry do
         {parent, _} -> parent
