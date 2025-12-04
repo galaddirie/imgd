@@ -5,6 +5,26 @@ defmodule Imgd.Workflows.Execution do
   Tracks the runtime state of a single workflow execution including
   status, timing, inputs, outputs, and error information.
   """
+  @derive {Jason.Encoder,
+           only: [
+             :id,
+             :workflow_version,
+             :status,
+             :trigger_type,
+             :input,
+             :output,
+             :error,
+             :current_generation,
+             :started_at,
+             :completed_at,
+             :expires_at,
+             :metadata,
+             :stats,
+             :workflow_id,
+             :triggered_by_user_id,
+             :inserted_at,
+             :updated_at
+           ]}
   use Imgd.Schema
   import Ecto.Query
 

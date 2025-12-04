@@ -201,7 +201,7 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
       </text>
 
       <%!-- Execution metrics (if available) --%>
-      <%= if @status && @status[:duration_ms] do %>
+      <%= if is_map(@status) && @status[:duration_ms] do %>
         <text x={@x + 10} y={@y + @h - 10} font-size="10" fill={@colors.subtext}>
           ⏱ {@status.duration_ms}ms
         </text>

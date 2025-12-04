@@ -5,6 +5,19 @@ defmodule Imgd.Workflows.ExecutionCheckpoint do
   Stores serialized workflow state at a point in time, enabling
   recovery from crashes, pauses, and resumption of long-running workflows.
   """
+  @derive {Jason.Encoder,
+           only: [
+             :id,
+             :generation,
+             :pending_runnables,
+             :accumulator_states,
+             :completed_step_hashes,
+             :reason,
+             :is_current,
+             :size_bytes,
+             :execution_id,
+             :inserted_at
+           ]}
   use Imgd.Schema
   import Ecto.Query
 

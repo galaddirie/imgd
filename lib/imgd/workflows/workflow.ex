@@ -5,6 +5,22 @@ defmodule Imgd.Workflows.Workflow do
   Stores the design-time workflow configuration including
   the serialized Runic build log and trigger configuration.
   """
+  @derive {Jason.Encoder,
+           only: [
+             :id,
+             :name,
+             :description,
+             :version,
+             :status,
+             :definition,
+             :definition_hash,
+             :trigger_config,
+             :settings,
+             :published_at,
+             :user_id,
+             :inserted_at,
+             :updated_at
+           ]}
   use Imgd.Schema
   import Ecto.Query
 

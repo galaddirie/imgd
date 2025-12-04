@@ -489,6 +489,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                       <th>Output</th>
                       <th>Duration</th>
                       <th>Started</th>
+                      <th>Details</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -514,6 +515,15 @@ defmodule ImgdWeb.WorkflowLive.Show do
                         </td>
                         <td class="text-xs text-base-content/60">
                           {format_relative_time(execution.started_at)}
+                        </td>
+                        <td>
+                          <.link
+                            navigate={~p"/workflows/#{@workflow.id}/executions/#{execution.id}"}
+                            class="btn btn-ghost btn-xs gap-1"
+                          >
+                            <.icon name="hero-magnifying-glass" class="size-4" />
+                            <span>Inspect</span>
+                          </.link>
                         </td>
                       </tr>
                     <% end %>

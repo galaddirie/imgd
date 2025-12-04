@@ -6,6 +6,32 @@ defmodule Imgd.Workflows.ExecutionStep do
   including timing, inputs, outputs, errors, and logs.
   Used for debugging, observability, and waterfall visualization.
   """
+  @derive {Jason.Encoder,
+           only: [
+             :id,
+             :step_hash,
+             :step_name,
+             :step_type,
+             :generation,
+             :status,
+             :input_fact_hash,
+             :output_fact_hash,
+             :parent_step_hash,
+             :input_snapshot,
+             :output_snapshot,
+             :error,
+             :logs,
+             :duration_ms,
+             :started_at,
+             :completed_at,
+             :attempt,
+             :max_attempts,
+             :next_retry_at,
+             :idempotency_key,
+             :execution_id,
+             :inserted_at,
+             :updated_at
+           ]}
   use Imgd.Schema
   import Ecto.Query
 
