@@ -111,6 +111,15 @@ defmodule Imgd.Engine.Runner do
           {:ok, runner_state()} | {:error, term()}
   def advance(%{execution: execution, generation: prev_gen} = state, updated_workflow) do
     new_gen = updated_workflow.generations
+
+    Logger.debug("Runner.advance - workflow.generations value",
+      execution_id: execution.id,
+      prev_generation: prev_gen,
+      new_generation: new_gen,
+      new_generation_type: inspect(new_gen.__struct__),
+      new_generation_inspect: inspect(new_gen, limit: 100)
+    )
+
     runnables = Runic.Workflow.next_runnables(updated_workflow)
 
     new_state = %{
@@ -146,10 +155,28 @@ defmodule Imgd.Engine.Runner do
   """
   @spec merge_results(runner_state(), [Runic.Workflow.t()]) :: runner_state()
   def merge_results(%{workflow: base_workflow} = state, step_workflows) do
+    Logger.debug("Runner.merge_results - before merging",
+      base_generations: base_workflow.generations,
+      base_generations_type: inspect(base_workflow.generations.__struct__),
+      step_workflows_count: length(step_workflows)
+    )
+
     merged_workflow =
       Enum.reduce(step_workflows, base_workflow, fn step_workflow, acc ->
+        Logger.debug("Runner.merge_results - merging step workflow",
+          step_generations: step_workflow.generations,
+          step_generations_type: inspect(step_workflow.generations.__struct__),
+          acc_generations: acc.generations,
+          acc_generations_type: inspect(acc.generations.__struct__)
+        )
+
         Runic.Workflow.merge(acc, step_workflow)
       end)
+
+    Logger.debug("Runner.merge_results - after merging",
+      merged_generations: merged_workflow.generations,
+      merged_generations_type: inspect(merged_workflow.generations.__struct__)
+    )
 
     %{state | workflow: merged_workflow}
   end

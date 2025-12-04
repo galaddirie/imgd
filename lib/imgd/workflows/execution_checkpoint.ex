@@ -116,6 +116,14 @@ defmodule Imgd.Workflows.ExecutionCheckpoint do
   def from_workflow_state(execution_id, workflow, opts \\ []) do
     require Logger
 
+    Logger.debug("ExecutionCheckpoint.from_workflow_state - inspecting workflow.generations",
+      execution_id: execution_id,
+      generations_value: workflow.generations,
+      generations_type: inspect(workflow.generations.__struct__),
+      generations_inspect: inspect(workflow.generations, limit: 100),
+      workflow_inspect: inspect(workflow, limit: 200)
+    )
+
     # Serialize the full workflow log for reconstruction
     workflow_state = serialize_workflow(workflow)
 

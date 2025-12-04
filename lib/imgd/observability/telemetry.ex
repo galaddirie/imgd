@@ -160,18 +160,18 @@ defmodule Imgd.Observability.Telemetry do
             )
 
             Span.set_status(Tracer.current_span_ctx(), :ok)
-            emit_step_stop(execution, node, fact, :completed, duration_ms, output_fact)
+            emit_step_stop(execution, node, fact, :completed, duration_ms, output_fact, opts)
             {:ok, workflow, events}
 
           {:error, reason} = error ->
             Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
             Span.set_attribute(Tracer.current_span_ctx(), :"error.message", inspect(reason))
-            emit_step_stop(execution, node, fact, :failed, duration_ms, nil)
+            emit_step_stop(execution, node, fact, :failed, duration_ms, nil, opts)
             error
 
           {:error, reason, workflow} ->
             Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
-            emit_step_stop(execution, node, fact, :failed, duration_ms, nil)
+            emit_step_stop(execution, node, fact, :failed, duration_ms, nil, opts)
             {:error, reason, workflow}
         end
       rescue
@@ -370,7 +370,7 @@ defmodule Imgd.Observability.Telemetry do
     )
   end
 
-  defp emit_step_stop(execution, node, fact, status, duration_ms, output_fact) do
+  defp emit_step_stop(execution, node, fact, status, duration_ms, output_fact, opts) do
     step_name = ExecutionStep.step_name(node)
 
     :telemetry.execute(
@@ -386,8 +386,8 @@ defmodule Imgd.Observability.Telemetry do
         input_fact_hash: fact.hash,
         output_fact_hash: output_fact && output_fact.hash,
         status: status,
-        generation: 0,
-        attempt: 1
+        generation: opts[:generation] || 0,
+        attempt: opts[:attempt] || 1
       }
     )
   end

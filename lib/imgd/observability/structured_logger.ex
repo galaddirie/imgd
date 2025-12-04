@@ -134,7 +134,7 @@ defmodule Imgd.Observability.StructuredLogger do
   @doc """
   Logs successful step completion.
   """
-  def step_completed(execution, node, duration_ms, output_fact) do
+  def step_completed(execution, node, duration_ms, output_fact, opts \\ []) do
     Logger.info("Step execution completed",
       event: "step.completed",
       execution_id: execution.id,
@@ -143,7 +143,9 @@ defmodule Imgd.Observability.StructuredLogger do
       step_name: node.name,
       step_type: node.__struct__ |> Module.split() |> List.last(),
       duration_ms: duration_ms,
-      output_fact_hash: output_fact && output_fact.hash
+      output_fact_hash: output_fact && output_fact.hash,
+      generation: opts[:generation],
+      attempt: opts[:attempt] || 1
     )
   end
 
