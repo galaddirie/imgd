@@ -238,7 +238,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
     )
   end
 
-  defp parse_input(nil), do: %{}
+  defp parse_input(nil), do: nil
 
   defp parse_input(input) when is_map(input), do: input
 
@@ -247,10 +247,11 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
     cond do
       trimmed == "" ->
-        %{}
+        nil
 
       decoded = decode_json_input(trimmed) ->
-        decoded
+        # If JSON decoded to a non-map, wrap it
+        if is_map(decoded), do: decoded, else: %{"value" => decoded}
 
       match?({_int, ""}, Integer.parse(trimmed)) ->
         {int, ""} = Integer.parse(trimmed)
@@ -267,8 +268,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
   defp decode_json_input(input) do
     case Jason.decode(input) do
-      {:ok, value} when is_map(value) -> value
-      {:ok, value} -> %{"value" => value}
+      {:ok, value} -> value
       _ -> nil
     end
   end
@@ -450,7 +450,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                       <div class="flex flex-wrap gap-4 text-xs text-base-content/70">
                         <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
                           <.icon name="hero-clock" class="size-4" />
-                          {format_duration(execution_duration_ms(@current_execution))}
+                          {format_duration(get_duration_from_stats(@current_execution))}
                         </span>
                         <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
                           <.icon name="hero-bolt" class="size-4" />
@@ -489,7 +489,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                       <th>Output</th>
                       <th>Duration</th>
                       <th>Started</th>
-                      <th>Details</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -511,7 +511,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                           {format_execution_value(execution.output)}
                         </td>
                         <td class="text-xs">
-                          {format_duration(execution_duration_ms(execution))}
+                          {format_duration(get_duration_from_stats(execution))}
                         </td>
                         <td class="text-xs text-base-content/60">
                           {format_relative_time(execution.started_at)}
@@ -519,10 +519,10 @@ defmodule ImgdWeb.WorkflowLive.Show do
                         <td>
                           <.link
                             navigate={~p"/workflows/#{@workflow.id}/executions/#{execution.id}"}
-                            class="btn btn-ghost btn-xs gap-1"
+                            class="btn btn-ghost btn-xs"
+                            title="Inspect execution"
                           >
-                            <.icon name="hero-magnifying-glass" class="size-4" />
-                            <span>Inspect</span>
+                            <.icon name="hero-eye" class="size-4" />
                           </.link>
                         </td>
                       </tr>
@@ -638,6 +638,11 @@ defmodule ImgdWeb.WorkflowLive.Show do
   defp format_duration(ms) when is_number(ms), do: "#{Float.round(ms / 1000, 2)}s"
   defp format_duration(_), do: "-"
 
+  defp get_duration_from_stats(execution) do
+    execution_duration_ms(execution)
+  end
+
+  # Copied from execution_show.ex to ensure consistent duration calculation
   defp execution_duration_ms(%{started_at: started, completed_at: completed})
        when not is_nil(started) and not is_nil(completed) do
     DateTime.diff(completed, started, :millisecond)
@@ -645,6 +650,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
   defp execution_duration_ms(%{stats: %{"total_duration_ms" => ms}}) when is_number(ms), do: ms
   defp execution_duration_ms(%{stats: %{total_duration_ms: ms}}) when is_number(ms), do: ms
+
   defp execution_duration_ms(_), do: nil
 
   defp get_generation(nil), do: 0

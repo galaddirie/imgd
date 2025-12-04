@@ -257,17 +257,22 @@ defmodule Imgd.Workflows.ExecutionStep do
     try do
       encoded = Jason.encode!(value)
 
-      if byte_size(encoded) > 10_000 do
-        %{
-          _truncated: true,
-          _size: byte_size(encoded),
-          _preview: String.slice(encoded, 0, 1000)
-        }
-      else
-        value
+      cond do
+        byte_size(encoded) > 10_000 ->
+          %{
+            _truncated: true,
+            _size: byte_size(encoded),
+            _preview: String.slice(encoded, 0, 1000)
+          }
+
+        is_map(value) ->
+          value
+
+        true ->
+          # Wrap non-map values to satisfy the :map field type
+          %{value: value}
       end
     rescue
-      # TODO: silent failure is not good
       _ -> %{_type: inspect(value.__struct__ || :unknown), _not_json_encodable: true}
     end
   end

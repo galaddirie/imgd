@@ -570,14 +570,6 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
     end)
   end
 
-  defp stat_value(stats, key) do
-    cond do
-      is_map(stats) && Map.has_key?(stats, to_string(key)) -> stats[to_string(key)]
-      is_map(stats) && Map.has_key?(stats, key) -> stats[key]
-      true -> 0
-    end
-  end
-
   defp pretty_data(nil), do: "-"
 
   defp pretty_data(data) do

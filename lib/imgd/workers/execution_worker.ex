@@ -136,7 +136,9 @@ defmodule Imgd.Workers.ExecutionWorker do
       ExecutionPubSub.broadcast_execution_started(execution)
 
       with {:ok, state} <- Runner.prepare(execution, :start) do
-        state = Runner.plan_input(state, execution.input)
+        # Unwrap the input value if it's in our wrapper format
+        raw_input = unwrap_input(execution.input)
+        state = Runner.plan_input(state, raw_input)
 
         # Log the workflow state for debugging
         Logger.debug("Planned workflow state",
@@ -419,4 +421,8 @@ defmodule Imgd.Workers.ExecutionWorker do
 
     ExecutionPubSub.broadcast_generation_completed(execution.id, generation)
   end
+
+  # Unwraps input from storage format to raw value for workflow execution
+  defp unwrap_input(%{"value" => value}), do: value
+  defp unwrap_input(input), do: input
 end
