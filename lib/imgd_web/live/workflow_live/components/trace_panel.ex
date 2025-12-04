@@ -111,6 +111,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
       |> assign(:icon, icon)
       |> assign(:icon_class, icon_class)
       |> assign(:subtitle, subtitle)
+      |> assign(:duration_ms, Map.get(step, :duration_ms))
 
     ~H"""
     <div class="px-4 py-3 flex items-start gap-3 hover:bg-base-50 transition-colors">
@@ -127,8 +128,8 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
           <span class="font-medium text-sm text-base-content truncate">
             {@step.step_name}
           </span>
-          <%= if @step[:duration_ms] do %>
-            <span class="text-xs text-base-content/50 font-mono">{@step[:duration_ms]}ms</span>
+          <%= if @duration_ms do %>
+            <span class="text-xs text-base-content/50 font-mono">{@duration_ms}ms</span>
           <% end %>
         </div>
         <div class="flex items-center gap-2 mt-0.5">
@@ -138,9 +139,9 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
           <span class="text-xs text-base-content/40">•</span>
           <span class="text-xs text-base-content/60">{@subtitle}</span>
         </div>
-        <%= if @step.status == :failed && @step[:error] do %>
+        <%= if @step.status == :failed && @step.error do %>
           <div class="mt-2 p-2 rounded bg-error/10 border border-error/20">
-            <p class="text-xs text-error font-mono truncate">{format_error(@step[:error])}</p>
+            <p class="text-xs text-error font-mono truncate">{format_error(@step.error)}</p>
           </div>
         <% end %>
       </div>
@@ -184,21 +185,21 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
     parts = []
 
     parts =
-      if step[:step_type] do
+      if step.step_type do
         [step.step_type | parts]
       else
         parts
       end
 
     parts =
-      if step[:generation] do
+      if step.generation do
         ["Gen #{step.generation}" | parts]
       else
         parts
       end
 
     parts =
-      if step[:attempt] && step.attempt > 1 do
+      if step.attempt && step.attempt > 1 do
         ["Attempt #{step.attempt}" | parts]
       else
         parts

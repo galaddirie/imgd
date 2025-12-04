@@ -450,7 +450,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                       <div class="flex flex-wrap gap-4 text-xs text-base-content/70">
                         <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
                           <.icon name="hero-clock" class="size-4" />
-                          {format_duration(get_duration_from_stats(@current_execution.stats))}
+                          {format_duration(execution_duration_ms(@current_execution))}
                         </span>
                         <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
                           <.icon name="hero-bolt" class="size-4" />
@@ -511,7 +511,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                           {format_execution_value(execution.output)}
                         </td>
                         <td class="text-xs">
-                          {format_duration(get_duration_from_stats(execution.stats))}
+                          {format_duration(execution_duration_ms(execution))}
                         </td>
                         <td class="text-xs text-base-content/60">
                           {format_relative_time(execution.started_at)}
@@ -638,10 +638,14 @@ defmodule ImgdWeb.WorkflowLive.Show do
   defp format_duration(ms) when is_number(ms), do: "#{Float.round(ms / 1000, 2)}s"
   defp format_duration(_), do: "-"
 
-  defp get_duration_from_stats(nil), do: nil
-  defp get_duration_from_stats(%{"total_duration_ms" => ms}), do: ms
-  defp get_duration_from_stats(%{total_duration_ms: ms}), do: ms
-  defp get_duration_from_stats(_), do: nil
+  defp execution_duration_ms(%{started_at: started, completed_at: completed})
+       when not is_nil(started) and not is_nil(completed) do
+    DateTime.diff(completed, started, :millisecond)
+  end
+
+  defp execution_duration_ms(%{stats: %{"total_duration_ms" => ms}}) when is_number(ms), do: ms
+  defp execution_duration_ms(%{stats: %{total_duration_ms: ms}}) when is_number(ms), do: ms
+  defp execution_duration_ms(_), do: nil
 
   defp get_generation(nil), do: 0
   defp get_generation(%{"generation" => gen}), do: gen

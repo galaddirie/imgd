@@ -58,26 +58,34 @@ defmodule Imgd.Engine.StepExecutor do
     # Set logging context for this step
     Telemetry.set_step_log_context(execution, node, generation: generation, attempt: attempt)
 
-    # Create step record
-    {:ok, step} = create_step_record(execution, node, fact, generation, attempt)
+    with {:ok, step} <- create_step_record(execution, node, fact, generation, attempt) do
+      # Execute with full observability (spans, metrics, logs)
+      Telemetry.with_step_span(
+        execution,
+        node,
+        fact,
+        [generation: generation, attempt: attempt],
+        fn ->
+          StructuredLogger.step_started(execution, node, fact,
+            generation: generation,
+            attempt: attempt
+          )
 
-    # Execute with full observability (spans, metrics, logs)
-    Telemetry.with_step_span(
-      execution,
-      node,
-      fact,
-      [generation: generation, attempt: attempt],
-      fn ->
-        StructuredLogger.step_started(execution, node, fact,
-          generation: generation,
-          attempt: attempt
+          result = execute_with_timeout(workflow, node, fact, timeout_ms)
+
+          handle_result(result, execution, step, node, fact, timeout_ms)
+        end
+      )
+    else
+      {:error, changeset} ->
+        Logger.error("Failed to create step record",
+          execution_id: execution.id,
+          step_hash: node.hash,
+          errors: inspect(changeset.errors)
         )
 
-        result = execute_with_timeout(workflow, node, fact, timeout_ms)
-
-        handle_result(result, execution, step, node, fact, timeout_ms)
-      end
-    )
+        {:error, %{type: "step_record_invalid", errors: changeset.errors}, workflow}
+    end
   end
 
   @doc """
@@ -197,10 +205,12 @@ defmodule Imgd.Engine.StepExecutor do
   end
 
   defp create_step_record(execution, node, fact, generation, attempt) do
+    step_name = ExecutionStep.step_name(node)
+
     step_attrs = %{
       execution_id: execution.id,
       step_hash: node.hash,
-      step_name: node.name || "step_#{node.hash}",
+      step_name: step_name,
       step_type: node.__struct__ |> Module.split() |> List.last(),
       generation: generation,
       input_fact_hash: fact.hash,

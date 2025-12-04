@@ -130,7 +130,7 @@ defmodule Imgd.Workers.StepWorker do
     # Build step info for broadcast
     step_info = %{
       step_hash: node.hash,
-      step_name: node.name || "step_#{node.hash}",
+      step_name: ExecutionStep.step_name(node),
       step_type: node.__struct__ |> Module.split() |> List.last(),
       generation: generation,
       attempt: attempt,

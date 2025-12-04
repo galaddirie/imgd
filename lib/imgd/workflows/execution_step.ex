@@ -239,7 +239,7 @@ defmodule Imgd.Workflows.ExecutionStep do
     |> changeset(%{
       execution_id: execution_id,
       step_hash: node.hash,
-      step_name: node.name || "step_#{node.hash}",
+      step_name: step_name(node),
       step_type: node.__struct__ |> Module.split() |> List.last(),
       generation: opts[:generation] || 0,
       input_fact_hash: fact.hash,
@@ -328,6 +328,20 @@ defmodule Imgd.Workflows.ExecutionStep do
 
   defp get_max_attempts(%{retry_policy: %{max_attempts: n}}), do: n
   defp get_max_attempts(_), do: 1
+
+  @doc """
+  Normalizes a step name to a string for persistence.
+  """
+  def step_name(%{name: name, hash: hash}) do
+    base = name || "step_#{hash}"
+
+    cond do
+      is_binary(base) -> base
+      is_atom(base) -> Atom.to_string(base)
+      is_number(base) -> to_string(base)
+      true -> inspect(base)
+    end
+  end
 
   defp compute_idempotency_key(node, fact) do
     # Deterministic key for detecting duplicate step executions

@@ -186,6 +186,7 @@ defmodule Imgd.Engine.Runner do
     case Workflows.fail_execution(scope, execution, normalize_error(error)) do
       {:ok, execution} ->
         # TODO: add observability
+        Imgd.Workflows.ExecutionPubSub.broadcast_execution_failed(execution, error)
         {:ok, execution}
 
       {:error, _} = error ->

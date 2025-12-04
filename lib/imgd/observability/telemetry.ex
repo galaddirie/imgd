@@ -29,6 +29,7 @@ defmodule Imgd.Observability.Telemetry do
   require Logger
   require OpenTelemetry.Tracer, as: Tracer
 
+  alias Imgd.Workflows.ExecutionStep
   alias OpenTelemetry.Span
 
   # ============================================================================
@@ -130,7 +131,7 @@ defmodule Imgd.Observability.Telemetry do
       end)
   """
   def with_step_span(execution, node, fact, opts \\ [], fun) when is_function(fun, 0) do
-    step_name = node.name || "step_#{node.hash}"
+    step_name = ExecutionStep.step_name(node)
     span_name = "step.execute #{step_name}"
 
     attributes =
@@ -282,12 +283,14 @@ defmodule Imgd.Observability.Telemetry do
   Sets step context in Logger metadata.
   """
   def set_step_log_context(execution, node, opts \\ []) do
+    step_name = ExecutionStep.step_name(node)
+
     metadata =
       [
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
         step_hash: node.hash,
-        step_name: node.name,
+        step_name: step_name,
         step_type: node.__struct__ |> Module.split() |> List.last(),
         generation: opts[:generation],
         attempt: opts[:attempt]
@@ -348,6 +351,8 @@ defmodule Imgd.Observability.Telemetry do
   end
 
   defp emit_step_start(execution, node, fact, opts) do
+    step_name = ExecutionStep.step_name(node)
+
     :telemetry.execute(
       [:imgd, :engine, :step, :start],
       %{system_time: System.system_time()},
@@ -356,7 +361,7 @@ defmodule Imgd.Observability.Telemetry do
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
         step_hash: node.hash,
-        step_name: node.name,
+        step_name: step_name,
         step_type: node.__struct__ |> Module.split() |> List.last(),
         input_fact_hash: fact.hash,
         generation: opts[:generation] || 0,
@@ -366,6 +371,8 @@ defmodule Imgd.Observability.Telemetry do
   end
 
   defp emit_step_stop(execution, node, fact, status, duration_ms, output_fact) do
+    step_name = ExecutionStep.step_name(node)
+
     :telemetry.execute(
       [:imgd, :engine, :step, :stop],
       %{duration_ms: duration_ms},
@@ -374,7 +381,7 @@ defmodule Imgd.Observability.Telemetry do
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
         step_hash: node.hash,
-        step_name: node.name,
+        step_name: step_name,
         step_type: node.__struct__ |> Module.split() |> List.last(),
         input_fact_hash: fact.hash,
         output_fact_hash: output_fact && output_fact.hash,
@@ -386,6 +393,8 @@ defmodule Imgd.Observability.Telemetry do
   end
 
   defp emit_step_exception(execution, node, fact, exception, stacktrace, duration_ms) do
+    step_name = ExecutionStep.step_name(node)
+
     :telemetry.execute(
       [:imgd, :engine, :step, :exception],
       %{duration_ms: duration_ms},
@@ -394,7 +403,7 @@ defmodule Imgd.Observability.Telemetry do
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
         step_hash: node.hash,
-        step_name: node.name,
+        step_name: step_name,
         step_type: node.__struct__ |> Module.split() |> List.last(),
         input_fact_hash: fact.hash,
         exception: exception,
@@ -422,12 +431,13 @@ defmodule Imgd.Observability.Telemetry do
 
   defp step_attributes(execution, node, fact) do
     step_type = node.__struct__ |> Module.split() |> List.last()
+    step_name = ExecutionStep.step_name(node)
 
     %{
       "workflow.id": execution.workflow_id,
       "execution.id": execution.id,
       "step.hash": node.hash,
-      "step.name": node.name || "step_#{node.hash}",
+      "step.name": step_name,
       "step.type": step_type,
       "step.input_fact_hash": fact.hash
     }

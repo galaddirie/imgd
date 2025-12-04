@@ -235,14 +235,14 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                 <div class="grid grid-cols-2 gap-3">
                   <.stat
                     title="Steps Completed"
-                    value={stat_value(@execution.stats, :steps_completed)}
+                    value={calculate_stat(@steps, :completed)}
                   />
-                  <.stat title="Steps Failed" value={stat_value(@execution.stats, :steps_failed)} />
-                  <.stat title="Steps Skipped" value={stat_value(@execution.stats, :steps_skipped)} />
-                  <.stat title="Retries" value={stat_value(@execution.stats, :retries)} />
+                  <.stat title="Steps Failed" value={calculate_stat(@steps, :failed)} />
+                  <.stat title="Steps Skipped" value={calculate_stat(@steps, :skipped)} />
+                  <.stat title="Retries" value={calculate_stat(@steps, :retries)} />
                   <.stat
                     title="Total Duration"
-                    value={format_duration(stat_value(@execution.stats, :total_duration_ms))}
+                    value={format_duration(@duration_ms)}
                   />
                   <.stat title="Current Generation" value={@execution.current_generation} />
                 </div>
@@ -541,15 +541,34 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   defp execution_status_badge(:timeout), do: "badge-error"
   defp execution_status_badge(_), do: "badge-ghost"
 
-  defp execution_duration_ms(%{stats: %{"total_duration_ms" => ms}}) when is_number(ms), do: ms
-  defp execution_duration_ms(%{stats: %{total_duration_ms: ms}}) when is_number(ms), do: ms
-
   defp execution_duration_ms(%{started_at: started, completed_at: completed})
        when not is_nil(started) and not is_nil(completed) do
     DateTime.diff(completed, started, :millisecond)
   end
 
+  defp execution_duration_ms(%{stats: %{"total_duration_ms" => ms}}) when is_number(ms), do: ms
+  defp execution_duration_ms(%{stats: %{total_duration_ms: ms}}) when is_number(ms), do: ms
+
   defp execution_duration_ms(_), do: nil
+
+  defp calculate_stat(steps, :completed) do
+    Enum.count(steps, &(&1.status == :completed))
+  end
+
+  defp calculate_stat(steps, :failed) do
+    Enum.count(steps, &(&1.status == :failed))
+  end
+
+  defp calculate_stat(steps, :skipped) do
+    Enum.count(steps, &(&1.status == :skipped))
+  end
+
+  defp calculate_stat(steps, :retries) do
+    # Total retries = sum of (attempt - 1) for all steps
+    Enum.reduce(steps, 0, fn step, acc ->
+      acc + max(step.attempt - 1, 0)
+    end)
+  end
 
   defp stat_value(stats, key) do
     cond do
