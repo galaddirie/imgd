@@ -113,7 +113,22 @@ for wf_config <- workflows_to_create do
     |> Enum.find(&(&1.name == wf_config.name))
 
   if existing do
-    IO.puts("⏭️  Skipping '#{wf_config.name}' (already exists)")
+    IO.puts("🔄 Updating existing '#{wf_config.name}'...")
+
+    # Update workflow attributes
+    {:ok, workflow} =
+      Workflows.update_workflow(scope, existing, %{
+        description: wf_config.description,
+        settings: %{input_schema: wf_config.input_schema}
+      })
+
+    # Publish new version with updated definition
+    definition = serialize_workflow.(wf_config.runic)
+
+    {:ok, workflow} =
+      Workflows.publish_workflow(scope, workflow, %{definition: definition})
+
+    IO.puts("✅ Updated and published: #{workflow.id}")
   else
     IO.puts("📦 Creating '#{wf_config.name}'...")
 
