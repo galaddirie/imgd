@@ -147,7 +147,7 @@ defmodule Imgd.Engine.StepExecutor do
             node_hash: node.hash,
             fact_hash: fact.hash,
             workflow_generations: workflow.generations,
-            workflow_generations_type: inspect(workflow.generations.__struct__)
+            workflow_generations_type: if(is_struct(workflow.generations), do: inspect(workflow.generations.__struct__), else: "integer")
           )
 
           {updated_workflow, events} = Runic.Workflow.invoke_with_events(workflow, node, fact)
@@ -156,7 +156,7 @@ defmodule Imgd.Engine.StepExecutor do
             node_hash: node.hash,
             fact_hash: fact.hash,
             updated_workflow_generations: updated_workflow.generations,
-            updated_workflow_generations_type: inspect(updated_workflow.generations.__struct__),
+            updated_workflow_generations_type: if(is_struct(updated_workflow.generations), do: inspect(updated_workflow.generations.__struct__), else: "integer"),
             events_count: length(events)
           )
 

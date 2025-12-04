@@ -119,7 +119,7 @@ defmodule Imgd.Workflows.ExecutionCheckpoint do
     Logger.debug("ExecutionCheckpoint.from_workflow_state - inspecting workflow.generations",
       execution_id: execution_id,
       generations_value: workflow.generations,
-      generations_type: inspect(workflow.generations.__struct__),
+      generations_type: if(is_struct(workflow.generations), do: inspect(workflow.generations.__struct__), else: "integer"),
       generations_inspect: inspect(workflow.generations, limit: 100),
       workflow_inspect: inspect(workflow, limit: 200)
     )
