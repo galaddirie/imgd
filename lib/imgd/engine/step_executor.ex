@@ -76,7 +76,10 @@ defmodule Imgd.Engine.StepExecutor do
 
           result = execute_with_timeout(workflow, node, fact, timeout_ms)
 
-          handle_result(result, execution, step, node, fact, timeout_ms, trace_id, [generation: generation, attempt: attempt])
+          handle_result(result, execution, step, node, fact, timeout_ms, trace_id,
+            generation: generation,
+            attempt: attempt
+          )
         end
       )
     else
@@ -147,7 +150,11 @@ defmodule Imgd.Engine.StepExecutor do
             node_hash: node.hash,
             fact_hash: fact.hash,
             workflow_generations: workflow.generations,
-            workflow_generations_type: if(is_struct(workflow.generations), do: inspect(workflow.generations.__struct__), else: "integer")
+            workflow_generations_type:
+              if(is_struct(workflow.generations),
+                do: inspect(workflow.generations.__struct__),
+                else: "integer"
+              )
           )
 
           {updated_workflow, events} = Runic.Workflow.invoke_with_events(workflow, node, fact)
@@ -156,7 +163,11 @@ defmodule Imgd.Engine.StepExecutor do
             node_hash: node.hash,
             fact_hash: fact.hash,
             updated_workflow_generations: updated_workflow.generations,
-            updated_workflow_generations_type: if(is_struct(updated_workflow.generations), do: inspect(updated_workflow.generations.__struct__), else: "integer"),
+            updated_workflow_generations_type:
+              if(is_struct(updated_workflow.generations),
+                do: inspect(updated_workflow.generations.__struct__),
+                else: "integer"
+              ),
             events_count: length(events)
           )
 
@@ -179,7 +190,16 @@ defmodule Imgd.Engine.StepExecutor do
     end
   end
 
-  defp handle_result({:ok, workflow, events}, execution, step, node, _fact, _timeout_ms, trace_id, opts) do
+  defp handle_result(
+         {:ok, workflow, events},
+         execution,
+         step,
+         node,
+         _fact,
+         _timeout_ms,
+         trace_id,
+         opts
+       ) do
     output_fact = extract_output_fact(events)
     duration_ms = calculate_duration(step.started_at)
 
@@ -214,7 +234,16 @@ defmodule Imgd.Engine.StepExecutor do
     {:error, reason, nil}
   end
 
-  defp handle_result({:error, reason}, execution, step, node, _fact, _timeout_ms, _trace_id, _opts) do
+  defp handle_result(
+         {:error, reason},
+         execution,
+         step,
+         node,
+         _fact,
+         _timeout_ms,
+         _trace_id,
+         _opts
+       ) do
     duration_ms = calculate_duration(step.started_at)
 
     # Update step record with error

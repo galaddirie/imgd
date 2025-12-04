@@ -157,7 +157,11 @@ defmodule Imgd.Engine.Runner do
   def merge_results(%{workflow: base_workflow} = state, step_workflows) do
     Logger.debug("Runner.merge_results - before merging",
       base_generations: base_workflow.generations,
-      base_generations_type: if(is_struct(base_workflow.generations), do: inspect(base_workflow.generations.__struct__), else: "integer"),
+      base_generations_type:
+        if(is_struct(base_workflow.generations),
+          do: inspect(base_workflow.generations.__struct__),
+          else: "integer"
+        ),
       step_workflows_count: length(step_workflows)
     )
 
@@ -165,9 +169,17 @@ defmodule Imgd.Engine.Runner do
       Enum.reduce(step_workflows, base_workflow, fn step_workflow, acc ->
         Logger.debug("Runner.merge_results - merging step workflow",
           step_generations: step_workflow.generations,
-          step_generations_type: if(is_struct(step_workflow.generations), do: inspect(step_workflow.generations.__struct__), else: "integer"),
+          step_generations_type:
+            if(is_struct(step_workflow.generations),
+              do: inspect(step_workflow.generations.__struct__),
+              else: "integer"
+            ),
           acc_generations: acc.generations,
-          acc_generations_type: if(is_struct(acc.generations), do: inspect(acc.generations.__struct__), else: "integer")
+          acc_generations_type:
+            if(is_struct(acc.generations),
+              do: inspect(acc.generations.__struct__),
+              else: "integer"
+            )
         )
 
         Runic.Workflow.merge(acc, step_workflow)
@@ -175,7 +187,11 @@ defmodule Imgd.Engine.Runner do
 
     Logger.debug("Runner.merge_results - after merging",
       merged_generations: merged_workflow.generations,
-      merged_generations_type: if(is_struct(merged_workflow.generations), do: inspect(merged_workflow.generations.__struct__), else: "integer")
+      merged_generations_type:
+        if(is_struct(merged_workflow.generations),
+          do: inspect(merged_workflow.generations.__struct__),
+          else: "integer"
+        )
     )
 
     %{state | workflow: merged_workflow}
