@@ -127,8 +127,8 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
           <span class="font-medium text-sm text-base-content truncate">
             {@step.step_name}
           </span>
-          <%= if @step.duration_ms do %>
-            <span class="text-xs text-base-content/50 font-mono">{@step.duration_ms}ms</span>
+          <%= if @step[:duration_ms] do %>
+            <span class="text-xs text-base-content/50 font-mono">{@step[:duration_ms]}ms</span>
           <% end %>
         </div>
         <div class="flex items-center gap-2 mt-0.5">
@@ -140,7 +140,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
         </div>
         <%= if @step.status == :failed && @step[:error] do %>
           <div class="mt-2 p-2 rounded bg-error/10 border border-error/20">
-            <p class="text-xs text-error font-mono truncate">{format_error(@step.error)}</p>
+            <p class="text-xs text-error font-mono truncate">{format_error(@step[:error])}</p>
           </div>
         <% end %>
       </div>
