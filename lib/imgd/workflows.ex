@@ -12,7 +12,7 @@ defmodule Imgd.Workflows do
   alias Imgd.Accounts.Scope
   alias Imgd.Engine.DataFlow
   alias Imgd.Engine.DataFlow.{Envelope, ValidationError}
-  alias Imgd.Workflows.{Workflow, WorkflowVersion, Execution, ExecutionStep}
+  alias Imgd.Workflows.{Workflow, WorkflowVersion, Execution, ExecutionPubSub, ExecutionStep}
 
   require Logger
 
@@ -515,6 +515,14 @@ defmodule Imgd.Workflows do
     step
     |> ExecutionStep.start_changeset()
     |> Repo.update()
+    |> case do
+      {:ok, started_step} = result ->
+        ExecutionPubSub.broadcast_step_started(started_step.execution_id, started_step)
+        result
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -524,6 +532,14 @@ defmodule Imgd.Workflows do
     step
     |> ExecutionStep.complete_changeset(output_fact, duration_ms, opts)
     |> Repo.update()
+    |> case do
+      {:ok, completed_step} = result ->
+        ExecutionPubSub.broadcast_step_completed(completed_step.execution_id, completed_step)
+        result
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -533,6 +549,14 @@ defmodule Imgd.Workflows do
     step
     |> ExecutionStep.fail_changeset(error, duration_ms)
     |> Repo.update()
+    |> case do
+      {:ok, failed_step} = result ->
+        ExecutionPubSub.broadcast_step_failed(failed_step.execution_id, failed_step, failed_step.error)
+        result
+
+      error ->
+        error
+    end
   end
 
   @doc """
