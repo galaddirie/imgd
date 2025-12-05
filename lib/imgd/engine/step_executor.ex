@@ -284,12 +284,75 @@ defmodule Imgd.Engine.StepExecutor do
   end
 
   defp extract_output_fact(events) do
-    events
+    # Log raw events for debugging
+    Logger.debug("extract_output_fact called",
+      events_count: length(events),
+      event_types: Enum.map(events, fn
+        %Runic.Workflow.ReactionOccurred{reaction: r, from: f, to: t} ->
+          %{
+            type: :reaction_occurred,
+            reaction: r,
+            from_type: struct_type(f),
+            to_type: struct_type(t),
+            to_value: if(match?(%Runic.Workflow.Fact{}, t), do: t.value, else: nil),
+            to_hash: if(match?(%Runic.Workflow.Fact{}, t), do: t.hash, else: nil)
+          }
+        %Graph.Edge{label: l, v1: v1, v2: v2} ->
+          %{
+            type: :graph_edge,
+            label: l,
+            v1_type: struct_type(v1),
+            v2_type: struct_type(v2),
+            v2_value: if(match?(%Runic.Workflow.Fact{}, v2), do: v2.value, else: nil),
+            v2_hash: if(match?(%Runic.Workflow.Fact{}, v2), do: v2.hash, else: nil)
+          }
+        other ->
+          %{type: :unknown, struct: struct_type(other), inspect: inspect(other, limit: 50)}
+      end)
+    )
+
+    result = events
     |> Enum.find_value(fn
-      %Runic.Workflow.ReactionOccurred{reaction: :produced, to: fact} -> fact
-      _ -> nil
-    end) || %Runic.Workflow.Fact{value: nil, hash: 0}
+      %Runic.Workflow.ReactionOccurred{reaction: :produced, to: %Runic.Workflow.Fact{} = fact} ->
+        {:found, :reaction_occurred_produced, fact}
+
+      %Graph.Edge{label: :produced, v2: %Runic.Workflow.Fact{} = fact} ->
+        {:found, :graph_edge_produced, fact}
+
+      %Runic.Workflow.ReactionOccurred{reaction: r, to: %Runic.Workflow.Fact{} = fact}
+      when r in [:state_produced, :reduced] ->
+        {:found, {:reaction_occurred, r}, fact}
+
+      %Graph.Edge{label: l, v2: %Runic.Workflow.Fact{} = fact}
+      when l in [:produced, :state_produced, :reduced] ->
+        {:found, {:graph_edge, l}, fact}
+
+      _ ->
+        nil
+    end)
+
+    case result do
+      {:found, pattern, fact} ->
+        Logger.info("extract_output_fact found fact",
+          pattern: pattern,
+          fact_hash: fact.hash,
+          fact_value: inspect(fact.value, limit: 100)
+        )
+        fact
+
+      nil ->
+        Logger.warning("extract_output_fact: NO OUTPUT FACT FOUND",
+          events_count: length(events),
+          hint: "Check if events are Graph.Edge vs ReactionOccurred structs"
+        )
+        %Runic.Workflow.Fact{value: nil, hash: 0}
+    end
   end
+
+  defp struct_type(%{__struct__: mod}), do: mod |> Module.split() |> Enum.join(".")
+  defp struct_type(other) when is_integer(other), do: "integer"
+  defp struct_type(other) when is_atom(other), do: "atom:#{other}"
+  defp struct_type(_), do: "unknown"
 
   defp normalize_error({:exception, e, stacktrace}) do
     %{
