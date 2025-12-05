@@ -377,6 +377,7 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
       <.legend_chip label="Step" type={:step} />
       <.legend_chip label="Rule" type={:rule} />
       <.legend_chip label="Accumulator" type={:accumulator} />
+      <.legend_chip label="State Machine" type={:state_machine} />
       <%= if @has_execution do %>
         <span class="mx-2 h-3 w-px bg-base-300"></span>
         <.status_legend_chip label="Running" status={:running} />
