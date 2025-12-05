@@ -5,10 +5,12 @@ defmodule Imgd.WorkflowsFixtures do
   """
 
   alias Imgd.Workflows
-  alias Imgd.Workflows.{Execution, ExecutionStep}
+  alias Imgd.Workflows.{Execution, ExecutionStep, Workflow}
   alias Imgd.Repo
   alias Imgd.Engine.DataFlow
   alias Imgd.Engine.DataFlow.Envelope
+  alias Runic.Workflow, as: RunicWorkflow
+  alias Runic.Workflow.{Components, Step}
 
   def valid_workflow_attributes(attrs \\ %{}) do
     Enum.into(attrs, %{
@@ -26,6 +28,82 @@ defmodule Imgd.WorkflowsFixtures do
     # A minimal encoded workflow definition for testing
     # In real usage, this would be a serialized Runic build log
     %{"encoded" => Base.encode64(:erlang.term_to_binary([]))}
+  end
+
+  def runic_workflow_with_single_step(opts \\ []) do
+    step_name = opts[:step_name] || "single_step"
+
+    work_fun =
+      case opts[:work] do
+        :mark_done ->
+          &__MODULE__.mark_done_step/1
+
+        :slow ->
+          &__MODULE__.slow_step/1
+
+        nil ->
+          &__MODULE__.default_step_work/1
+
+        fun when is_function(fun, 1) ->
+          case Function.info(fun, :type) do
+            {:type, :external} -> fun
+            _ -> raise ArgumentError, "work function must be a named function"
+          end
+      end
+
+    hash = Components.fact_hash(work_fun)
+
+    step_source =
+      quote do
+        Step.new(%{
+          name: unquote(step_name),
+          work: unquote(work_fun),
+          hash: unquote(hash),
+          bindings: %{}
+        })
+      end
+
+    step =
+      Step.new(%{
+        name: step_name,
+        work: work_fun,
+        hash: hash,
+        bindings: %{}
+      })
+      |> Map.put(:source, step_source)
+
+    runic_workflow =
+      RunicWorkflow.new(name: opts[:workflow_name] || "test-workflow")
+      |> RunicWorkflow.add(step)
+
+    %{workflow: runic_workflow, step: step}
+  end
+
+  def default_step_work(value), do: value
+
+  def mark_done_step(value), do: Map.put(value, :done, true)
+
+  def slow_step(value) do
+    Process.sleep(50)
+    value
+  end
+
+  def runic_definition(%RunicWorkflow{} = runic_workflow) do
+    encoded = Workflow.serialize_definition(RunicWorkflow.build_log(runic_workflow))
+    %{"encoded" => encoded}
+  end
+
+  def published_workflow_from_runic_fixture(
+        scope,
+        %RunicWorkflow{} = runic_workflow,
+        attrs \\ %{}
+      ) do
+    attrs = valid_workflow_attributes(attrs)
+
+    {:ok, workflow} = Workflows.create_workflow(scope, attrs)
+    definition = runic_definition(runic_workflow)
+    {:ok, workflow} = Workflows.publish_workflow(scope, workflow, %{definition: definition})
+    workflow
   end
 
   def workflow_fixture(scope, attrs \\ %{}) do
