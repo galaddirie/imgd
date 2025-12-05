@@ -61,8 +61,7 @@ defmodule Imgd.Observability.StructuredLogger do
       workflow_id: execution.workflow_id,
       workflow_name: workflow.name,
       duration_ms: duration_ms,
-      final_generation: execution.current_generation,
-      stats: execution.stats
+      final_generation: execution.current_generation
     )
   end
 

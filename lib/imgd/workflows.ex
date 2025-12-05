@@ -428,15 +428,6 @@ defmodule Imgd.Workflows do
   end
 
   @doc """
-  Updates execution statistics.
-  """
-  def update_execution_stats(%Execution{} = execution, stats_update) do
-    execution
-    |> Execution.update_stats_changeset(stats_update)
-    |> Repo.update()
-  end
-
-  @doc """
   Updates the current generation of an execution.
   """
   def update_execution_generation(%Execution{} = execution, generation) do

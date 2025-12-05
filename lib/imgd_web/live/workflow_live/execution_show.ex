@@ -458,9 +458,6 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
     DateTime.diff(completed, started, :millisecond)
   end
 
-  defp execution_duration_ms(%{stats: %{"total_duration_ms" => ms}}) when is_number(ms), do: ms
-  defp execution_duration_ms(%{stats: %{total_duration_ms: ms}}) when is_number(ms), do: ms
-
   defp execution_duration_ms(_), do: nil
 
   defp calculate_stat(steps, :completed) do

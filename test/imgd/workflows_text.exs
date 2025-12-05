@@ -506,19 +506,6 @@ defmodule Imgd.WorkflowsTest do
     end
   end
 
-  describe "update_execution_stats/2" do
-    test "updates execution statistics", %{scope: scope} do
-      workflow = published_workflow_fixture(scope)
-      execution = execution_fixture(scope, workflow)
-
-      assert {:ok, updated} =
-               Workflows.update_execution_stats(execution, %{steps_completed: 5, retries: 1})
-
-      assert updated.stats.steps_completed == 5
-      assert updated.stats.retries == 1
-    end
-  end
-
   describe "update_execution_generation/2" do
     test "updates the current generation", %{scope: scope} do
       workflow = published_workflow_fixture(scope)

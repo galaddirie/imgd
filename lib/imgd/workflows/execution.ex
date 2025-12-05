@@ -19,7 +19,6 @@ defmodule Imgd.Workflows.Execution do
              :completed_at,
              :expires_at,
              :metadata,
-             :stats,
              :workflow_id,
              :triggered_by_user_id,
              :inserted_at,
@@ -70,16 +69,6 @@ defmodule Imgd.Workflows.Execution do
     #   parent_execution_id: "..." (for sub-workflows)
     # }
 
-    # Statistics (updated as execution progresses)
-    field :stats, :map,
-      default: %{
-        steps_completed: 0,
-        steps_failed: 0,
-        steps_skipped: 0,
-        total_duration_ms: 0,
-        retries: 0
-      }
-
     belongs_to :workflow, Workflow
     belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
     has_many :steps, ExecutionStep
@@ -99,7 +88,6 @@ defmodule Imgd.Workflows.Execution do
     :completed_at,
     :expires_at,
     :metadata,
-    :stats,
     :triggered_by_user_id
   ]
 
@@ -129,7 +117,6 @@ defmodule Imgd.Workflows.Execution do
       output: normalize_output(output),
       completed_at: DateTime.utc_now()
     })
-    |> compute_total_duration()
   end
 
   def fail_changeset(execution, error) do
@@ -139,7 +126,6 @@ defmodule Imgd.Workflows.Execution do
       error: normalize_error(error),
       completed_at: DateTime.utc_now()
     })
-    |> compute_total_duration()
   end
 
   def pause_changeset(execution) do
@@ -156,7 +142,6 @@ defmodule Imgd.Workflows.Execution do
       status: :cancelled,
       completed_at: DateTime.utc_now()
     })
-    |> compute_total_duration()
   end
 
   def timeout_changeset(execution) do
@@ -166,16 +151,10 @@ defmodule Imgd.Workflows.Execution do
       error: %{type: "timeout", message: "Execution exceeded time limit"},
       completed_at: DateTime.utc_now()
     })
-    |> compute_total_duration()
   end
 
   def update_generation_changeset(execution, generation) do
     change(execution, current_generation: generation)
-  end
-
-  def update_stats_changeset(execution, stats_update) do
-    new_stats = Map.merge(execution.stats || %{}, stats_update)
-    change(execution, stats: new_stats)
   end
 
   # Queries
@@ -250,18 +229,6 @@ defmodule Imgd.Workflows.Execution do
 
   defp normalize_error(error) when is_map(error), do: error
   defp normalize_error(error), do: %{message: inspect(error)}
-
-  defp compute_total_duration(changeset) do
-    case {changeset.data.started_at, get_change(changeset, :completed_at)} do
-      {started, completed} when not is_nil(started) and not is_nil(completed) ->
-        duration_ms = DateTime.diff(completed, started, :millisecond)
-        stats = Map.put(changeset.data.stats || %{}, :total_duration_ms, duration_ms)
-        put_change(changeset, :stats, stats)
-
-      _ ->
-        changeset
-    end
-  end
 
   @doc """
   Checks if execution can be resumed.
