@@ -68,8 +68,7 @@ defmodule Imgd.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:runic, git: "https://github.com/galaddirie/runic.git", branch: "main"},
-      {:prana, git: "https://github.com/galaddirie/prana.git", branch: "main"},
+      {:runic, git: "https://github.com/zblanco/runic.git", branch: "main"},
       {:oban, "~> 2.20"},
       {:jsv, "~> 0.13.1"},
       # OpenTelemetry & Auto-Instrumentation
