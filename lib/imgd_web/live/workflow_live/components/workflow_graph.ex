@@ -19,6 +19,7 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
        graph_data: nil,
        error: nil,
        execution_steps: %{},
+       trace_steps: [],
        current_execution: nil
      )}
   end
@@ -81,6 +82,7 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
                   node={node}
                   layout={@graph_data.layout}
                   step_status={get_step_status(@execution_steps, node.id)}
+                  trace_steps={@trace_steps}
                 />
               <% end %>
             </svg>
@@ -140,6 +142,9 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
     status = assigns.step_status
     colors = node_colors(assigns.node.type, status)
 
+    # Find step data for this node
+    step_data = find_step_data(assigns.trace_steps, assigns.node.id)
+
     assigns =
       assigns
       |> assign(:x, x)
@@ -148,6 +153,7 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
       |> assign(:h, h)
       |> assign(:colors, colors)
       |> assign(:status, status)
+      |> assign(:step_data, step_data)
 
     ~H"""
     <g class="workflow-node" data-node-id={@node.id}>
@@ -200,16 +206,48 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
         {node_type_label(@node.type)}
       </text>
 
-      <%!-- Execution metrics (if available) --%>
-      <%= if is_map(@status) && @status[:duration_ms] do %>
-        <text x={@x + 10} y={@y + @h - 10} font-size="10" fill={@colors.subtext}>
-          ⏱ {@status.duration_ms}ms
-        </text>
-      <% else %>
-        <text x={@x + 10} y={@y + @h - 10} font-size="9" fill={@colors.subtext} opacity="0.6">
-          {truncate_name(to_string(@node.id), 16)}
+      <%!-- Input/Output data display --%>
+      <%= if @step_data do %>
+        <% input_val = format_step_value(@step_data.input_snapshot) %>
+        <% output_val = format_step_value(@step_data.output_snapshot) %>
+        <% duration = @step_data.duration_ms %>
+
+        <g class="execution-data">
+          <%!-- Input value (left) --%>
+          <text x={@x + 10} y={@y + @h - 26} font-size="10" fill={@colors.subtext} font-weight="500">
+            ← {input_val}
+          </text>
+
+          <%!-- Output value (right) --%>
+          <text
+            x={@x + @w - 10}
+            y={@y + @h - 26}
+            text-anchor="end"
+            font-size="10"
+            fill={@colors.subtext}
+            font-weight="500"
+          >
+            {output_val} →
+          </text>
+        </g>
+
+        <%!-- Duration (top right, outside node) --%>
+        <text
+          x={@x + @w}
+          y={@y - 8}
+          text-anchor="end"
+          font-size="10"
+          fill={@colors.subtext}
+          font-weight="500"
+        >
+{duration}ms
         </text>
       <% end %>
+
+      <%!-- Always show node hash at bottom --%>
+      <text x={@x + 10} y={@y + @h - 10} font-size="9" fill={@colors.subtext} opacity="0.6">
+        {truncate_name(to_string(@node.id), 16)}
+      </text>
 
       <%!-- Running animation --%>
       <%= if @status == :running do %>
@@ -516,6 +554,26 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
   end
 
   defp get_step_status(_, _), do: nil
+
+  # Find step data for a given node ID (step_hash)
+  defp find_step_data(trace_steps, node_id) do
+    Enum.find(trace_steps, fn step ->
+      step.step_hash == node_id
+    end)
+  end
+
+  # Format step value for display
+  defp format_step_value(nil), do: "?"
+
+  defp format_step_value(snapshot) do
+    # The data is nested under snapshot["value"]["value"]["data"]
+    case get_in(snapshot, ["value", "value", "data"]) do
+      nil -> "?"
+      value when is_number(value) -> to_string(value)
+      value when is_binary(value) and byte_size(value) <= 8 -> value
+      _ -> "⋯"
+    end
+  end
 
   defp node_icon(:step), do: "ƒ"
   defp node_icon(:rule), do: "?"

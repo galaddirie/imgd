@@ -265,7 +265,8 @@ defmodule Imgd.Engine.DataFlow do
 
   defp decode_payload_if_needed(%Payload{} = payload), do: decode_payload(payload)
 
-  defp decode_payload_if_needed(%{"encoding" => _} = payload_map), do: decode_payload_map(payload_map)
+  defp decode_payload_if_needed(%{"encoding" => _} = payload_map),
+    do: decode_payload_map(payload_map)
 
   defp decode_payload_if_needed(%{encoding: _} = payload_map) do
     payload_map
@@ -291,7 +292,13 @@ defmodule Imgd.Engine.DataFlow do
     }
   end
 
-  defp serialize_payload(%Payload{encoding: :reference, type: type, size: size, preview: preview, ref: ref}) do
+  defp serialize_payload(%Payload{
+         encoding: :reference,
+         type: type,
+         size: size,
+         preview: preview,
+         ref: ref
+       }) do
     %{
       "type" => type,
       "_truncated" => true,
@@ -309,7 +316,13 @@ defmodule Imgd.Engine.DataFlow do
     }
   end
 
-  defp serialize_payload(%Payload{encoding: encoding, type: type, preview: preview, data: data, size: size})
+  defp serialize_payload(%Payload{
+         encoding: encoding,
+         type: type,
+         preview: preview,
+         data: data,
+         size: size
+       })
        when encoding in [:term, :binary] do
     %{
       "type" => type,
@@ -346,7 +359,13 @@ defmodule Imgd.Engine.DataFlow do
     }
   end
 
-  defp snapshot_payload(%Payload{encoding: :reference, type: type, size: size, preview: preview, ref: ref}) do
+  defp snapshot_payload(%Payload{
+         encoding: :reference,
+         type: type,
+         size: size,
+         preview: preview,
+         ref: ref
+       }) do
     %{
       "_truncated" => true,
       "_original_size" => size,
@@ -369,7 +388,13 @@ defmodule Imgd.Engine.DataFlow do
     }
   end
 
-  defp snapshot_payload(%Payload{encoding: encoding, type: type, preview: preview, data: data, size: size})
+  defp snapshot_payload(%Payload{
+         encoding: encoding,
+         type: type,
+         preview: preview,
+         data: data,
+         size: size
+       })
        when encoding in [:term, :binary] do
     %{
       "_non_json" => true,

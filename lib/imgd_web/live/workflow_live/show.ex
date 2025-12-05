@@ -176,7 +176,8 @@ defmodule ImgdWeb.WorkflowLive.Show do
           Map.merge(trace_step, %{
             status: :completed,
             duration_ms: step_info.duration_ms,
-            completed_at: step_info.completed_at
+            completed_at: step_info.completed_at,
+            output_snapshot: step_info.output_snapshot
           })
         else
           trace_step
@@ -205,7 +206,8 @@ defmodule ImgdWeb.WorkflowLive.Show do
             status: step_info.status,
             duration_ms: step_info.duration_ms,
             error: error,
-            completed_at: step_info.completed_at
+            completed_at: step_info.completed_at,
+            output_snapshot: step_info.output_snapshot
           })
         else
           trace_step
@@ -298,6 +300,24 @@ defmodule ImgdWeb.WorkflowLive.Show do
     _ -> "Unable to render schema"
   end
 
+  defp render_workflow_definition(workflow) do
+    case workflow.definition do
+      nil ->
+        "No workflow definition available"
+
+      _definition ->
+        try do
+          # Rebuild the Runic workflow from the stored definition
+          runic_workflow = Imgd.Workflows.Workflow.to_runic_workflow(workflow)
+          # Use inspect to get a readable representation
+          inspect(runic_workflow, pretty: true, limit: :infinity, printable_limit: :infinity)
+        rescue
+          e ->
+            "Unable to render workflow definition: #{Exception.message(e)}"
+        end
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -359,6 +379,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                 id={"workflow-graph-#{@workflow.id}"}
                 workflow={@workflow}
                 execution_steps={@execution_steps}
+                trace_steps={@trace_steps}
                 current_execution={@current_execution}
               />
             </div>
@@ -619,6 +640,25 @@ defmodule ImgdWeb.WorkflowLive.Show do
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <%!-- Workflow Definition Section --%>
+        <section>
+          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
+            <div class="flex items-center gap-2 mb-4">
+              <.icon name="hero-code-bracket" class="size-5" />
+              <h2 class="text-lg font-semibold text-base-content">Workflow Definition</h2>
+            </div>
+
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60 mb-2">
+                Parsed Elixir Code
+              </p>
+              <pre class="rounded-xl bg-base-200/60 p-3 text-xs font-mono text-base-content/90 shadow-inner whitespace-pre-wrap min-h-[200px]">
+                <code><%= render_workflow_definition(@workflow) %></code>
+              </pre>
             </div>
           </div>
         </section>
