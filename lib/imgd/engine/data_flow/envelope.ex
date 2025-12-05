@@ -1,10 +1,35 @@
 defmodule Imgd.Engine.DataFlow.Envelope do
   @moduledoc """
-  Lightweight wrapper around values flowing through the workflow engine.
+  Lineage-tracking wrapper for values flowing through workflows.
 
-  Captures metadata for lineage, traceability, and persistence without
-  mutating the underlying values.
+  While `Payload` handles serialization and type metadata, `Envelope`
+  handles **lineage**: where data came from, when, and how it flows
+  through the workflow graph.
+
+  ## Relationship to Payload
+
+  - `Payload` = "How do I serialize this?" (encoding, type, size)
+  - `Envelope` = "Where did this come from?" (source, trace, ancestry)
+
+  When persisting, an Envelope's value is encoded as a Payload:
+
+      envelope
+      |> Envelope.to_map()  # value becomes a Payload internally
+      |> store_in_database()
+
+  ## Example
+
+      # Create from workflow input
+      envelope = Envelope.new(user_data, :input, trace_id)
+
+      # Transform through a step
+      result_envelope = Envelope.transform(envelope, step_output, %{step_name: "process"})
+
+      # The lineage is preserved
+      result_envelope.metadata.parent_hash  #=> original fact hash
   """
+
+  alias Imgd.Engine.DataFlow.Payload
 
   @type source :: :input | :step | :rule | :accumulator | :external | :unknown
 
@@ -43,41 +68,34 @@ defmodule Imgd.Engine.DataFlow.Envelope do
   end
 
   @doc """
-  Builds an envelope from a Runic fact (or fact-shaped map), preserving lineage.
+  Builds an envelope from a Runic fact, preserving lineage.
   """
   @spec from_fact(any(), source(), String.t(), map()) :: t()
   def from_fact(fact, source, trace_id, extra_metadata \\ %{})
 
-  def from_fact(nil, source, trace_id, extra_metadata),
-    do: new(nil, source, trace_id, extra_metadata)
+  def from_fact(nil, source, trace_id, extra_metadata) do
+    new(nil, source, trace_id, extra_metadata)
+  end
 
   def from_fact(%Runic.Workflow.Fact{} = fact, source, trace_id, extra_metadata) do
-    parent_hash =
-      case fact.ancestry do
-        {parent, _step} -> parent
-        _ -> nil
-      end
-
-    new(fact.value, source, trace_id, lineage_metadata(fact.hash, parent_hash, extra_metadata))
+    parent_hash = extract_parent_hash(fact.ancestry)
+    lineage = build_lineage(fact.hash, parent_hash, extra_metadata)
+    new(fact.value, source, trace_id, lineage)
   end
 
   def from_fact(%{value: value} = fact, source, trace_id, extra_metadata) when is_map(fact) do
-    parent_hash =
-      case Map.get(fact, :ancestry) do
-        {parent, _step} -> parent
-        _ -> nil
-      end
-
+    parent_hash = fact |> Map.get(:ancestry) |> extract_parent_hash()
     fact_hash = Map.get(fact, :hash)
-
-    new(value, source, trace_id, lineage_metadata(fact_hash, parent_hash, extra_metadata))
+    lineage = build_lineage(fact_hash, parent_hash, extra_metadata)
+    new(value, source, trace_id, lineage)
   end
 
-  def from_fact(value, source, trace_id, extra_metadata),
-    do: new(value, source, trace_id, extra_metadata)
+  def from_fact(value, source, trace_id, extra_metadata) do
+    new(value, source, trace_id, extra_metadata)
+  end
 
   @doc """
-  Updates the value while preserving lineage.
+  Transforms an envelope with a new value while preserving lineage.
   """
   @spec transform(t(), any(), map()) :: t()
   def transform(%__MODULE__{metadata: prev_meta}, new_value, new_metadata \\ %{}) do
@@ -91,65 +109,75 @@ defmodule Imgd.Engine.DataFlow.Envelope do
   end
 
   @doc """
-  Converts an envelope into a JSON-friendly map (string metadata keys).
+  Converts an envelope to a JSON-friendly map for storage.
+
+  The value is encoded as a Payload with explicit type metadata.
   """
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{value: value, metadata: metadata}) do
     %{
-      "value" => value,
-      "metadata" =>
-        metadata
-        |> Map.new(fn {k, v} -> {Atom.to_string(k), serialize_meta_value(v)} end)
+      "value" => Payload.encode(value) |> Payload.to_map(),
+      "metadata" => serialize_metadata(metadata)
     }
   end
 
   @doc """
-  Rebuilds an envelope from a serialized map.
+  Rebuilds an envelope from a stored map.
   """
   @spec from_map(map()) :: t()
-  def from_map(%{"value" => value, "metadata" => metadata}) do
-    parsed_metadata =
-      metadata
-      |> Map.new(fn {k, v} ->
-        key = parse_metadata_key(k)
-        {key, deserialize_meta_value(key, v)}
-      end)
-
-    %__MODULE__{value: value, metadata: parsed_metadata}
+  def from_map(%{"value" => value_map, "metadata" => metadata}) when is_map(metadata) do
+    parsed_value = parse_stored_value(value_map)
+    parsed_metadata = deserialize_metadata(metadata)
+    %__MODULE__{value: parsed_value, metadata: parsed_metadata}
   end
 
   def from_map(%{"value" => value}) do
-    # Legacy format without metadata
-    new(value, :unknown, "legacy-" <> generate_id())
+    new(value, :unknown, generate_legacy_id())
   end
 
   def from_map(value) when is_map(value) and not is_struct(value) do
-    # Raw map value (not an envelope)
-    new(value, :unknown, "raw-" <> generate_id())
+    new(value, :unknown, generate_legacy_id())
   end
 
   # ----------------------------------------------------------------------------
-  # Private helpers
+  # Private
   # ----------------------------------------------------------------------------
 
-  defp lineage_metadata(fact_hash, parent_hash, extra_metadata) do
+  defp extract_parent_hash({parent, _step}), do: parent
+  defp extract_parent_hash(_), do: nil
+
+  defp build_lineage(fact_hash, parent_hash, extra_metadata) do
     %{}
     |> maybe_put(:fact_hash, fact_hash)
     |> maybe_put(:parent_hash, parent_hash)
     |> Map.merge(extra_metadata)
   end
 
+  defp serialize_metadata(metadata) do
+    Map.new(metadata, fn {k, v} ->
+      {to_string(k), serialize_meta_value(v)}
+    end)
+  end
+
   defp serialize_meta_value(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp serialize_meta_value(value) when is_atom(value), do: to_string(value)
   defp serialize_meta_value(value), do: value
 
-  defp deserialize_meta_value("timestamp", value) when is_binary(value) do
+  defp deserialize_metadata(metadata) do
+    Map.new(metadata, fn {k, v} ->
+      key = parse_metadata_key(k)
+      {key, deserialize_meta_value(key, v)}
+    end)
+  end
+
+  defp deserialize_meta_value(:timestamp, value) when is_binary(value) do
     case DateTime.from_iso8601(value) do
       {:ok, dt, _} -> dt
       _ -> value
     end
   end
 
-  defp deserialize_meta_value("source", value) when is_binary(value) do
+  defp deserialize_meta_value(:source, value) when is_binary(value) do
     String.to_existing_atom(value)
   rescue
     _ -> :unknown
@@ -162,13 +190,22 @@ defmodule Imgd.Engine.DataFlow.Envelope do
   defp parse_metadata_key(key) when is_binary(key) do
     String.to_existing_atom(key)
   rescue
-    _ -> key
+    _ -> String.to_atom(key)
   end
+
+  defp parse_stored_value(%{"encoding" => _} = payload_map) do
+    case Payload.from_map(payload_map) |> Payload.decode() do
+      {:ok, value} -> value
+      {:error, _} -> payload_map
+    end
+  end
+
+  defp parse_stored_value(value), do: value
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
-  defp generate_id do
-    :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+  defp generate_legacy_id do
+    "legacy-" <> (:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower))
   end
 end
