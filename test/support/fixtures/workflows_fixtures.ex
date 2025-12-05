@@ -5,7 +5,7 @@ defmodule Imgd.WorkflowsFixtures do
   """
 
   alias Imgd.Workflows
-  alias Imgd.Workflows.{Execution, ExecutionCheckpoint, ExecutionStep}
+  alias Imgd.Workflows.{Execution, ExecutionStep}
   alias Imgd.Repo
   alias Imgd.Engine.DataFlow
   alias Imgd.Engine.DataFlow.Envelope
@@ -17,9 +17,7 @@ defmodule Imgd.WorkflowsFixtures do
       trigger_config: %{type: :manual, config: %{}},
       settings: %{
         timeout_ms: 300_000,
-        max_retries: 3,
-        checkpoint_strategy: :generation,
-        checkpoint_interval_ms: 60_000
+        max_retries: 3
       }
     })
   end
@@ -111,27 +109,6 @@ defmodule Imgd.WorkflowsFixtures do
     execution = execution_fixture(scope, workflow, attrs)
     {:ok, execution} = Workflows.pause_execution(scope, execution)
     execution
-  end
-
-  def valid_checkpoint_attributes(execution, attrs \\ %{}) do
-    Enum.into(attrs, %{
-      execution_id: execution.id,
-      generation: attrs[:generation] || 0,
-      workflow_state: :erlang.term_to_binary([]),
-      pending_runnables: [],
-      accumulator_states: %{},
-      completed_step_hashes: [],
-      reason: :generation,
-      is_current: true
-    })
-  end
-
-  def checkpoint_fixture(execution, attrs \\ %{}) do
-    attrs = valid_checkpoint_attributes(execution, attrs)
-
-    %ExecutionCheckpoint{}
-    |> ExecutionCheckpoint.changeset(attrs)
-    |> Repo.insert!()
   end
 
   def valid_step_attributes(execution, attrs \\ %{}) do

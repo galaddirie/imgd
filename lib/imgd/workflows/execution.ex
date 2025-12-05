@@ -28,7 +28,7 @@ defmodule Imgd.Workflows.Execution do
   use Imgd.Schema
   import Ecto.Query
 
-  alias Imgd.Workflows.{Workflow, ExecutionCheckpoint, ExecutionStep}
+  alias Imgd.Workflows.{Workflow, ExecutionStep}
   alias Imgd.Accounts.User
 
   @type status :: :pending | :running | :paused | :completed | :failed | :cancelled | :timeout
@@ -82,7 +82,6 @@ defmodule Imgd.Workflows.Execution do
 
     belongs_to :workflow, Workflow
     belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
-    has_many :checkpoints, ExecutionCheckpoint
     has_many :steps, ExecutionStep
 
     timestamps()
@@ -213,10 +212,6 @@ defmodule Imgd.Workflows.Execution do
     from e in query,
       where: e.status in [:pending, :running, :paused],
       where: e.expires_at < ^now
-  end
-
-  def with_checkpoints(query \\ __MODULE__) do
-    from e in query, preload: [:checkpoints]
   end
 
   def with_steps(query \\ __MODULE__) do

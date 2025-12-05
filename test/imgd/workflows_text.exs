@@ -530,56 +530,6 @@ defmodule Imgd.WorkflowsTest do
   end
 
   # ============================================================================
-  # Checkpoints
-  # ============================================================================
-
-  describe "list_checkpoints/2" do
-    test "returns checkpoints for an execution", %{scope: scope} do
-      workflow = published_workflow_fixture(scope)
-      execution = execution_fixture(scope, workflow)
-      checkpoint = checkpoint_fixture(execution)
-
-      assert [found] = Workflows.list_checkpoints(scope, execution)
-      assert found.id == checkpoint.id
-    end
-  end
-
-  describe "get_current_checkpoint/2" do
-    test "returns the current checkpoint", %{scope: scope} do
-      workflow = published_workflow_fixture(scope)
-      execution = execution_fixture(scope, workflow)
-      _old = checkpoint_fixture(execution, %{generation: 1, is_current: false})
-      current = checkpoint_fixture(execution, %{generation: 2, is_current: true})
-
-      found = Workflows.get_current_checkpoint(scope, execution)
-      assert found.id == current.id
-    end
-
-    test "returns nil when no current checkpoint", %{scope: scope} do
-      workflow = published_workflow_fixture(scope)
-      execution = execution_fixture(scope, workflow)
-
-      assert Workflows.get_current_checkpoint(scope, execution) == nil
-    end
-  end
-
-  describe "prune_checkpoints/2" do
-    test "keeps only the most recent checkpoints", %{scope: scope} do
-      workflow = published_workflow_fixture(scope)
-      execution = execution_fixture(scope, workflow)
-
-      for i <- 1..10 do
-        checkpoint_fixture(execution, %{generation: i, is_current: i == 10})
-      end
-
-      assert {:ok, 5} = Workflows.prune_checkpoints(execution, 5)
-
-      remaining = Workflows.list_checkpoints(scope, execution)
-      assert length(remaining) == 5
-    end
-  end
-
-  # ============================================================================
   # Execution Steps
   # ============================================================================
 

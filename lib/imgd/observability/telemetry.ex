@@ -9,7 +9,7 @@ defmodule Imgd.Observability.Telemetry do
 
   All events follow the pattern: `[:imgd, :domain, :action, :stage]`
 
-  - domain: `engine`, `workflow`, `step`, `checkpoint`
+  - domain: `engine`, `workflow`, `step`
   - action: specific operation being performed
   - stage: `start`, `stop`, `exception`
 
@@ -51,10 +51,6 @@ defmodule Imgd.Observability.Telemetry do
       [:imgd, :engine, :step, :stop],
       [:imgd, :engine, :step, :exception],
 
-      # Checkpointing
-      [:imgd, :engine, :checkpoint, :start],
-      [:imgd, :engine, :checkpoint, :stop],
-
       # Generation advancement
       [:imgd, :engine, :generation, :complete],
 
@@ -95,6 +91,18 @@ defmodule Imgd.Observability.Telemetry do
         duration_ms = duration_since(start_time)
 
         case result do
+          {:ok, {:failed, failure_reason}} = failure ->
+            Span.set_status(Tracer.current_span_ctx(), {:error, inspect(failure_reason)})
+
+            Span.set_attribute(
+              Tracer.current_span_ctx(),
+              :"error.message",
+              inspect(failure_reason)
+            )
+
+            emit_execution_stop(execution, workflow, :failed, duration_ms)
+            failure
+
           {:ok, _} = success ->
             Span.set_status(Tracer.current_span_ctx(), :ok)
             emit_execution_stop(execution, workflow, :completed, duration_ms)
@@ -185,38 +193,6 @@ defmodule Imgd.Observability.Telemetry do
     end
   end
 
-  @doc """
-  Wraps checkpoint creation in a traced span.
-  """
-  def with_checkpoint_span(execution, reason, fun) when is_function(fun, 0) do
-    span_name = "checkpoint.create"
-
-    attributes = %{
-      "execution.id": execution.id,
-      "checkpoint.reason": reason
-    }
-
-    Tracer.with_span span_name, %{attributes: attributes, kind: :internal} do
-      start_time = System.monotonic_time()
-
-      :telemetry.execute([:imgd, :engine, :checkpoint, :start], %{}, %{
-        execution: execution,
-        reason: reason
-      })
-
-      result = fun.()
-      duration_ms = duration_since(start_time)
-
-      :telemetry.execute([:imgd, :engine, :checkpoint, :stop], %{duration_ms: duration_ms}, %{
-        execution: execution,
-        reason: reason,
-        success: match?({:ok, _}, result)
-      })
-
-      result
-    end
-  end
-
   # ============================================================================
   # Context Propagation
   # ============================================================================
@@ -230,7 +206,7 @@ defmodule Imgd.Observability.Telemetry do
 
       trace_context = Telemetry.extract_trace_context()
       %{execution_id: id, trace_context: trace_context}
-      |> StepWorker.new()
+      |> Imgd.Workers.ExecutionWorker.new()
       |> Oban.insert()
   """
   def extract_trace_context do

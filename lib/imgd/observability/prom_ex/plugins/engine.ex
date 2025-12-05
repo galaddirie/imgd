@@ -14,11 +14,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
   - `imgd_engine_step_duration_milliseconds` - Histogram of step duration
   - `imgd_engine_step_retries_total` - Counter of step retries
 
-  ### Checkpoint Metrics
-  - `imgd_engine_checkpoint_total` - Counter of checkpoints by reason
-  - `imgd_engine_checkpoint_duration_milliseconds` - Histogram of checkpoint creation time
-  - `imgd_engine_checkpoint_size_bytes` - Histogram of checkpoint sizes
-
   ### Generation Metrics
   - `imgd_engine_generation_duration_milliseconds` - Histogram of generation completion time
   """
@@ -104,33 +99,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
               exception_type: exception_type(meta.exception)
             }
           end
-        ),
-
-        # ====================================================================
-        # Checkpoint Metrics
-        # ====================================================================
-
-        counter(
-          [:imgd, :engine, :checkpoint, :total],
-          event_name: [:imgd, :engine, :checkpoint, :stop],
-          description: "Total number of checkpoints created",
-          tags: [:reason, :success],
-          tag_values: fn meta ->
-            %{
-              reason: meta.reason || "unknown",
-              success: meta.success
-            }
-          end
-        ),
-        distribution(
-          [:imgd, :engine, :checkpoint, :duration, :milliseconds],
-          event_name: [:imgd, :engine, :checkpoint, :stop],
-          description: "Checkpoint creation duration in milliseconds",
-          measurement: :duration_ms,
-          tags: [:reason],
-          tag_values: fn meta -> %{reason: meta.reason || "unknown"} end,
-          reporter_options: [buckets: @step_duration_buckets],
-          unit: :millisecond
         ),
 
         # ====================================================================

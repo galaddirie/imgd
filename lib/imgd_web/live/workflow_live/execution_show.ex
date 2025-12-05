@@ -2,7 +2,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   @moduledoc """
   LiveView for inspecting a specific workflow execution.
 
-  Surfaces execution metadata, inputs/outputs, checkpoints, and individual step
+  Surfaces execution metadata, inputs/outputs, and individual step
   records to help debug and replay executions.
   """
   use ImgdWeb, :live_view
@@ -17,23 +17,19 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
 
     with {:ok, execution} <- fetch_execution(scope, workflow_id, execution_id) do
       steps = Workflows.list_execution_steps(scope, execution)
-      checkpoints = Workflows.list_checkpoints(scope, execution)
 
       socket =
         socket
         |> assign(:workflow, execution.workflow)
         |> assign(:execution, execution)
-        |> assign(:checkpoints, checkpoints)
         |> assign(:steps, steps)
         |> assign(:page_title, "Execution #{short_id(execution.id)}")
         |> assign(:duration_ms, execution_duration_ms(execution))
         |> assign(:steps_empty?, steps == [])
-        |> assign(:checkpoints_empty?, checkpoints == [])
         |> assign(:trace_steps, steps)
         |> assign(:input_schema, workflow_input_schema(execution.workflow))
         |> assign(:node_schemas, node_schemas(execution.workflow))
         |> stream(:steps, steps, reset: true)
-        |> stream(:checkpoints, checkpoints, reset: true)
 
       {:ok, socket}
     else
@@ -86,7 +82,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                 <span class="badge badge-ghost badge-xs">v{@execution.workflow_version}</span>
               </div>
               <p class="max-w-2xl text-sm text-muted">
-                Detailed run history for {@workflow.name}. Use checkpoints and step logs to debug.
+                Detailed run history for {@workflow.name}. Use step logs to debug.
               </p>
               <div class="flex flex-wrap items-center gap-4 text-xs text-base-content/60">
                 <div class="flex items-center gap-1">
@@ -386,118 +382,6 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
           <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
             <div class="flex items-center justify-between mb-4">
               <div class="flex items-center gap-2">
-                <.icon name="hero-check-circle" class="size-5" />
-                <h3 class="text-lg font-semibold text-base-content">Checkpoints</h3>
-              </div>
-              <span class="text-xs text-base-content/60">Latest first</span>
-            </div>
-
-            <div id="execution-checkpoints" phx-update="stream" class="space-y-3">
-              <div class="hidden only:block text-center text-sm text-base-content/60 py-4">
-                No checkpoints have been captured for this execution yet.
-              </div>
-
-              <div
-                :for={{id, checkpoint} <- @streams.checkpoints}
-                id={id}
-                class={[
-                  "rounded-xl border p-4 transition-colors",
-                  checkpoint.is_current && "border-primary/40 bg-primary/5",
-                  !checkpoint.is_current && "border-base-200 hover:border-primary/30"
-                ]}
-              >
-                <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                  <div class="space-y-1">
-                    <div class="flex items-center gap-2">
-                      <p class="text-base font-semibold text-base-content">
-                        Generation {checkpoint.generation}
-                      </p>
-                      <span class="badge badge-ghost badge-xs">
-                        {String.capitalize(to_string(checkpoint.reason))}
-                      </span>
-                      <%= if checkpoint.is_current do %>
-                        <span class="badge badge-primary badge-xs">Current</span>
-                      <% end %>
-                    </div>
-                    <p class="text-xs text-base-content/60">
-                      Saved {formatted_timestamp(checkpoint.inserted_at)}
-                    </p>
-                  </div>
-                  <div class="flex flex-wrap gap-3 text-xs text-base-content/60">
-                    <span class="inline-flex items-center gap-1">
-                      <.icon name="hero-rectangle-group" class="size-4" /> {byte_size_label(
-                        checkpoint.size_bytes
-                      )}
-                    </span>
-                    <span class="inline-flex items-center gap-1">
-                      <.icon name="hero-queue-list" class="size-4" />
-                      Pending {length(checkpoint.pending_runnables || [])}
-                    </span>
-                    <span class="inline-flex items-center gap-1">
-                      <.icon name="hero-check" class="size-4" />
-                      Completed {length(checkpoint.completed_step_hashes || [])}
-                    </span>
-                  </div>
-                </div>
-
-                <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div class="space-y-2">
-                    <p class="text-[11px] font-semibold uppercase tracking-wide text-base-content/60">
-                      Pending Runnables
-                    </p>
-                    <%= if Enum.empty?(checkpoint.pending_runnables || []) do %>
-                      <p class="text-sm text-base-content/60">None queued</p>
-                    <% else %>
-                      <div class="rounded-lg bg-base-200/60 p-3 text-xs font-mono text-base-content/80 space-y-1">
-                        <%= for runnable <- checkpoint.pending_runnables do %>
-                          <p>
-                            node: {runnable["node_hash"] || runnable[:node_hash]},
-                            fact: {runnable["fact_hash"] || runnable[:fact_hash]}
-                          </p>
-                        <% end %>
-                      </div>
-                    <% end %>
-                  </div>
-
-                  <div class="space-y-2">
-                    <p class="text-[11px] font-semibold uppercase tracking-wide text-base-content/60">
-                      Accumulator States
-                    </p>
-                    <%= if map_size(checkpoint.accumulator_states || %{}) == 0 do %>
-                      <p class="text-sm text-base-content/60">No accumulators recorded</p>
-                    <% else %>
-                      <pre class="rounded-lg bg-base-200/60 p-3 text-xs font-mono text-base-content/80 whitespace-pre-wrap">
-                        <code><%= pretty_data(checkpoint.accumulator_states) %></code>
-                      </pre>
-                    <% end %>
-                  </div>
-
-                  <div class="space-y-2">
-                    <p class="text-[11px] font-semibold uppercase tracking-wide text-base-content/60">
-                      Completed Step Hashes
-                    </p>
-                    <%= if Enum.empty?(checkpoint.completed_step_hashes || []) do %>
-                      <p class="text-sm text-base-content/60">
-                        No steps completed at this checkpoint
-                      </p>
-                    <% else %>
-                      <div class="rounded-lg bg-base-200/60 p-3 text-xs font-mono text-base-content/80 space-y-1">
-                        <%= for hash <- checkpoint.completed_step_hashes do %>
-                          <p>{hash}</p>
-                        <% end %>
-                      </div>
-                    <% end %>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
-            <div class="flex items-center justify-between mb-4">
-              <div class="flex items-center gap-2">
                 <.icon name="hero-code-bracket" class="size-5" />
                 <h3 class="text-lg font-semibold text-base-content">Full Execution Data (JSON)</h3>
               </div>
@@ -506,7 +390,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
 
             <div class="relative">
               <pre class="rounded-xl bg-base-200/60 p-4 text-xs font-mono text-base-content/90 shadow-inner whitespace-pre-wrap max-h-96 overflow-y-auto">
-                <code><%= Jason.encode!(%{workflow: @workflow, execution: @execution, checkpoints: @checkpoints, steps: @steps}, pretty: true) %></code>
+                <code><%= Jason.encode!(%{workflow: @workflow, execution: @execution, steps: @steps}, pretty: true) %></code>
               </pre>
               <button
                 class="absolute top-3 right-3 btn btn-ghost btn-xs gap-1"
@@ -632,9 +516,4 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
 
   defp format_duration(ms) when is_integer(ms), do: "#{Float.round(ms / 60_000, 1)}m"
   defp format_duration(value), do: inspect(value)
-
-  defp byte_size_label(nil), do: "-"
-  defp byte_size_label(size) when size < 1024, do: "#{size} B"
-  defp byte_size_label(size) when size < 1_048_576, do: "#{Float.round(size / 1024, 1)} KB"
-  defp byte_size_label(size), do: "#{Float.round(size / 1_048_576, 2)} MB"
 end

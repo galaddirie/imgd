@@ -50,10 +50,7 @@ defmodule Imgd.Workflows.Workflow do
       default: %{
         # 5 minutes default
         timeout_ms: 300_000,
-        max_retries: 3,
-        # :generation | :step | :time
-        checkpoint_strategy: :generation,
-        checkpoint_interval_ms: 60_000
+        max_retries: 3
       }
 
     field :published_at, :utc_datetime_usec

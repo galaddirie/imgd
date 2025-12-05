@@ -27,7 +27,7 @@ defmodule Imgd.Observability.StructuredLogger do
   - `:info` - Normal operations (start, complete)
   - `:warning` - Retries, timeouts, recoverable errors
   - `:error` - Failures, exceptions
-  - `:debug` - Detailed execution state (checkpoints, runnables)
+  - `:debug` - Detailed execution state (runnables)
   """
 
   require Logger
@@ -93,20 +93,6 @@ defmodule Imgd.Observability.StructuredLogger do
       exception_type: exception.__struct__ |> Module.split() |> List.last(),
       exception_message: Exception.message(exception),
       stacktrace: Exception.format_stacktrace(stacktrace) |> String.slice(0, 2000)
-    )
-  end
-
-  @doc """
-  Logs execution resumption from checkpoint.
-  """
-  def execution_resumed(execution, checkpoint) do
-    Logger.info("Workflow execution resumed from checkpoint",
-      event: "execution.resumed",
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      checkpoint_id: checkpoint.id,
-      resumed_at_generation: checkpoint.generation,
-      pending_runnables_count: length(checkpoint.pending_runnables)
     )
   end
 
@@ -207,53 +193,6 @@ defmodule Imgd.Observability.StructuredLogger do
       step_hash: node.hash,
       step_name: node.name,
       timeout_ms: timeout_ms
-    )
-  end
-
-  # ============================================================================
-  # Checkpoint Logging
-  # ============================================================================
-
-  @doc """
-  Logs checkpoint creation.
-  """
-  def checkpoint_created(execution, checkpoint, duration_ms) do
-    Logger.debug("Checkpoint created",
-      event: "checkpoint.created",
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      checkpoint_id: checkpoint.id,
-      generation: checkpoint.generation,
-      reason: checkpoint.reason,
-      size_bytes: checkpoint.size_bytes,
-      duration_ms: duration_ms,
-      pending_runnables_count: length(checkpoint.pending_runnables)
-    )
-  end
-
-  @doc """
-  Logs checkpoint restoration.
-  """
-  def checkpoint_restored(execution, checkpoint) do
-    Logger.debug("Checkpoint restored",
-      event: "checkpoint.restored",
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      checkpoint_id: checkpoint.id,
-      generation: checkpoint.generation
-    )
-  end
-
-  @doc """
-  Logs checkpoint creation failure.
-  """
-  def checkpoint_failed(execution, reason, error) do
-    Logger.warning("Checkpoint creation failed",
-      event: "checkpoint.failed",
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      reason: reason,
-      error: format_error(error)
     )
   end
 

@@ -3,7 +3,7 @@ defmodule Imgd.Workflows do
   The Workflows context.
 
   Provides the public API for managing workflow definitions, executions,
-  checkpoints, and execution steps.
+  and execution steps.
   """
   # TODO: BREAK OUT INTO SEPARATE MODULES
   import Ecto.Query, warn: false
@@ -12,7 +12,7 @@ defmodule Imgd.Workflows do
   alias Imgd.Accounts.Scope
   alias Imgd.Engine.DataFlow
   alias Imgd.Engine.DataFlow.{Envelope, ValidationError}
-  alias Imgd.Workflows.{Workflow, WorkflowVersion, Execution, ExecutionCheckpoint, ExecutionStep}
+  alias Imgd.Workflows.{Workflow, WorkflowVersion, Execution, ExecutionStep}
 
   require Logger
 
@@ -460,109 +460,6 @@ defmodule Imgd.Workflows do
           error: %{type: "timeout", message: "Execution exceeded time limit"}
         ]
       )
-
-    {:ok, count}
-  end
-
-  # ============================================================================
-  # Checkpoints
-  # ============================================================================
-
-  @doc """
-  Lists checkpoints for an execution.
-  """
-  def list_checkpoints(%Scope{} = scope, %Execution{} = execution) do
-    with :ok <- authorize_execution(scope, execution) do
-      ExecutionCheckpoint
-      |> ExecutionCheckpoint.by_execution(execution.id)
-      |> Repo.all()
-    end
-  end
-
-  @doc """
-  Gets the current (latest) checkpoint for an execution.
-  """
-  def get_current_checkpoint(%Scope{} = scope, %Execution{} = execution) do
-    with :ok <- authorize_execution(scope, execution) do
-      ExecutionCheckpoint
-      |> ExecutionCheckpoint.by_execution(execution.id)
-      |> ExecutionCheckpoint.current()
-      |> ExecutionCheckpoint.latest()
-      |> Repo.one()
-    end
-  end
-
-  @doc """
-  Creates a checkpoint from the current workflow state.
-  """
-  def create_checkpoint(%Execution{} = execution, workflow, opts \\ []) do
-    Repo.transact(fn ->
-      # Mark previous checkpoints as not current
-      {updated_count, _} =
-        ExecutionCheckpoint.mark_previous_not_current(execution.id)
-        |> Repo.update_all([])
-
-      Logger.debug("Marked #{updated_count} previous checkpoints as not current",
-        execution_id: execution.id
-      )
-
-      # Build the changeset
-      changeset = ExecutionCheckpoint.from_workflow_state(execution.id, workflow, opts)
-
-      # Log changeset validity for debugging
-      if not changeset.valid? do
-        Logger.error("Checkpoint changeset invalid",
-          execution_id: execution.id,
-          errors: inspect(changeset.errors)
-        )
-      end
-
-      # Create new checkpoint
-      case Repo.insert(changeset) do
-        {:ok, checkpoint} ->
-          Logger.debug("Created checkpoint",
-            execution_id: execution.id,
-            checkpoint_id: checkpoint.id,
-            generation: checkpoint.generation
-          )
-
-          {:ok, checkpoint}
-
-        {:error, changeset} ->
-          Logger.error("Failed to insert checkpoint",
-            execution_id: execution.id,
-            errors: inspect(changeset.errors),
-            changes: inspect(changeset.changes, limit: 500)
-          )
-
-          {:error, changeset}
-      end
-    end)
-  end
-
-  @doc """
-  Restores a Runic workflow from a checkpoint.
-  """
-  def restore_from_checkpoint(%ExecutionCheckpoint{} = checkpoint) do
-    {:ok, ExecutionCheckpoint.restore_workflow(checkpoint)}
-  rescue
-    e -> {:error, Exception.message(e)}
-  end
-
-  @doc """
-  Deletes old checkpoints for an execution, keeping only the most recent N.
-  """
-  def prune_checkpoints(%Execution{} = execution, keep_count \\ 5) do
-    checkpoints_to_delete =
-      ExecutionCheckpoint
-      |> ExecutionCheckpoint.by_execution(execution.id)
-      |> offset(^keep_count)
-      |> select([c], c.id)
-      |> Repo.all()
-
-    {count, _} =
-      from(c in ExecutionCheckpoint, where: c.id in ^checkpoints_to_delete)
-      |> Repo.delete_all()
 
     {:ok, count}
   end
