@@ -43,9 +43,11 @@ linear_workflow =
   workflow(
     name: "linear_pipeline",
     steps: [
-      step(fn x -> x * 2 end, name: :double),
-      step(fn x -> x + 10 end, name: :add_ten),
-      step(fn x -> "Result: #{x}" end, name: :format)
+      {step(fn x -> x * 2 end, name: :double),
+       [
+         {step(fn x -> x + 10 end, name: :add_ten),
+          [step(fn x -> "Result: #{x}" end, name: :format)]}
+       ]}
     ]
   )
 
@@ -100,7 +102,7 @@ workflows_to_create = [
   %{
     name: "Conditional Pipeline",
     description:
-      "Doubles input, then applies rules to categorize as 'large' (>20) or 'small' (<=20)",
+      "Doubles input, then applies rules to categorize the original input as 'large' (>20) or 'small' (<=20). Rules operate on root input, not processed output.",
     runic: rule_workflow,
     input_schema: input_schema
   }

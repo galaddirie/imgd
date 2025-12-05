@@ -551,7 +551,12 @@ defmodule Imgd.Workflows do
     |> Repo.update()
     |> case do
       {:ok, failed_step} = result ->
-        ExecutionPubSub.broadcast_step_failed(failed_step.execution_id, failed_step, failed_step.error)
+        ExecutionPubSub.broadcast_step_failed(
+          failed_step.execution_id,
+          failed_step,
+          failed_step.error
+        )
+
         result
 
       error ->
