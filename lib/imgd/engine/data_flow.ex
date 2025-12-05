@@ -162,7 +162,7 @@ defmodule Imgd.Engine.DataFlow do
 
       {:error, _} ->
         %{
-          "_non_json" => true,
+          "_non_json" => true, # todo: strange
           "_type" => inspect_type(value),
           "_inspect" => inspect(value, limit: 50, printable_limit: 200)
         }

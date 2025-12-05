@@ -28,6 +28,20 @@ defmodule Imgd.Workflows.ExecutionSchemaTest do
       assert %DateTime{} = changeset.changes.completed_at
     end
 
+    test "complete_changeset makes non-JSON output values storable" do
+      execution = %Execution{}
+
+      changeset = Execution.complete_changeset(execution, [{:small, 5}, 10])
+
+      assert %{productions: [first, 10]} = changeset.changes.output
+
+      assert first == %{
+               "_inspect" => "{:small, 5}",
+               "_non_json" => true,
+               "_type" => "tuple"
+             }
+    end
+
     test "fail_changeset normalizes tuple errors" do
       execution = %Execution{}
 

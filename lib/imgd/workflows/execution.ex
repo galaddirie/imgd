@@ -27,6 +27,7 @@ defmodule Imgd.Workflows.Execution do
   use Imgd.Schema
   import Ecto.Query
 
+  alias Imgd.Engine.DataFlow
   alias Imgd.Workflows.{Workflow, ExecutionStep}
   alias Imgd.Accounts.User
 
@@ -205,10 +206,42 @@ defmodule Imgd.Workflows.Execution do
 
   defp normalize_output(output) when is_list(output) do
     %{productions: output}
+    |> ensure_json_safe()
   end
 
-  defp normalize_output(output) when is_map(output), do: output
-  defp normalize_output(output), do: %{value: output}
+  defp normalize_output(output) when is_map(output) do
+    output
+    |> ensure_json_safe()
+  end
+
+  defp normalize_output(output) do
+    %{value: output}
+    |> ensure_json_safe()
+  end
+
+  defp ensure_json_safe(%{__struct__: _} = struct) do
+    struct
+    |> Map.from_struct()
+    |> Map.drop([:__meta__])
+    |> ensure_json_safe()
+  end
+
+  defp ensure_json_safe(map) when is_map(map) do
+    map
+    |> Enum.map(fn {key, value} -> {key, ensure_json_safe(value)} end)
+    |> Map.new()
+  end
+
+  defp ensure_json_safe(list) when is_list(list) do
+    Enum.map(list, &ensure_json_safe/1)
+  end
+
+  defp ensure_json_safe(value) do
+    case Jason.encode(value) do
+      {:ok, _} -> value
+      {:error, _} -> DataFlow.snapshot(value)
+    end
+  end
 
   defp normalize_error(%{__exception__: true} = error) do
     %{
