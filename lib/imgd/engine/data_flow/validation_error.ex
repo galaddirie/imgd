@@ -95,18 +95,17 @@ defmodule Imgd.Engine.DataFlow.ValidationError do
   """
   @spec from_jsv(JSV.ValidationError.t()) :: t()
   def from_jsv(%JSV.ValidationError{} = error) do
-    normalized = JSV.normalize_error(error, key_type: :atom)
+    normalized = JSV.normalize_error(error, keys: :atoms)
 
-    detail =
-      normalized[:details] ||
-        normalized["details"] ||
-        []
-        |> List.first()
+    details = normalized[:details] || normalized["details"] || []
+    detail = List.first(details)
 
     jsv_error =
-      (detail && (detail[:errors] || detail["errors"])) ||
-        []
-        |> List.first() || %{}
+      detail &&
+        (detail[:errors] || detail["errors"] || [])
+        |> List.first()
+
+    jsv_error = jsv_error || %{}
 
     path =
       detail
