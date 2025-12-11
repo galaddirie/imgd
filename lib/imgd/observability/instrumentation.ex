@@ -469,7 +469,7 @@ defmodule Imgd.Observability.Instrumentation do
 
   defp record_span_error(reason) do
     span_ctx = Tracer.current_span_ctx()
-    OpenTelemetry.Span.set_status(span_ctx, :error, inspect(reason))
+    OpenTelemetry.Span.set_status(span_ctx, OpenTelemetry.status(:error, inspect(reason)))
     Tracer.set_attribute(:error, true)
     Tracer.set_attribute(:"error.reason", inspect(reason))
   end
@@ -477,6 +477,6 @@ defmodule Imgd.Observability.Instrumentation do
   defp record_span_exception(exception, stacktrace) do
     span_ctx = Tracer.current_span_ctx()
     OpenTelemetry.Span.record_exception(span_ctx, exception, stacktrace)
-    OpenTelemetry.Span.set_status(span_ctx, :error, Exception.message(exception))
+    OpenTelemetry.Span.set_status(span_ctx, OpenTelemetry.status(:error, Exception.message(exception)))
   end
 end

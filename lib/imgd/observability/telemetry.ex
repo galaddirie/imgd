@@ -240,12 +240,12 @@ defmodule Imgd.Observability.Telemetry do
       end)
   """
   def span(domain, action, metadata, fun) do
-    start_event = [:imgd, :engine, domain, :"#{action}_start"]
-    stop_event = [:imgd, :engine, domain, :"#{action}_stop"]
-    exception_event = [:imgd, :engine, domain, :"#{action}_exception"]
+    # :telemetry.span expects an event prefix - it automatically appends
+    # :start, :stop, or :exception to create the full event names
+    event_prefix = [:imgd, :engine, domain, action]
 
     :telemetry.span(
-      [start_event, stop_event, exception_event],
+      event_prefix,
       metadata,
       fn ->
         result = fun.()
