@@ -124,12 +124,14 @@ defmodule Imgd.Executions.Context do
     case execution.workflow_version do
       %{settings: settings} when is_map(settings) ->
         Map.get(settings, "variables") || Map.get(settings, :variables) || %{}
+
       _ ->
         %{}
     end
   end
 
   defp get_in_metadata(%Execution{metadata: nil}, _key), do: nil
+
   defp get_in_metadata(%Execution{metadata: meta}, key) do
     Map.get(meta, key)
   end

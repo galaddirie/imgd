@@ -184,7 +184,10 @@ defmodule Imgd.Executions.Execution do
   def trigger_data(%__MODULE__{trigger: nil}), do: %{}
 
   @doc "Checks if the execution is in a terminal state."
-  def terminal?(%__MODULE__{status: status}) when status in [:completed, :failed, :cancelled, :timeout], do: true
+  def terminal?(%__MODULE__{status: status})
+      when status in [:completed, :failed, :cancelled, :timeout],
+      do: true
+
   def terminal?(%__MODULE__{}), do: false
 
   @doc "Checks if the execution is still running."
@@ -194,6 +197,7 @@ defmodule Imgd.Executions.Execution do
   @doc "Computes duration in milliseconds, or nil if not yet complete."
   def duration_ms(%__MODULE__{started_at: nil}), do: nil
   def duration_ms(%__MODULE__{completed_at: nil}), do: nil
+
   def duration_ms(%__MODULE__{started_at: started, completed_at: completed}) do
     DateTime.diff(completed, started, :millisecond)
   end

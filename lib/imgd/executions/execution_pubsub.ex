@@ -94,7 +94,11 @@ defmodule Imgd.Executions.PubSub do
   end
 
   @doc "Broadcast that a node failed."
-  def broadcast_node_failed(%Execution{} = execution, %NodeExecution{} = node_execution, error \\ nil) do
+  def broadcast_node_failed(
+        %Execution{} = execution,
+        %NodeExecution{} = node_execution,
+        error \\ nil
+      ) do
     payload =
       node_execution
       |> build_node_payload()

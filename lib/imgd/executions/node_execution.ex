@@ -5,8 +5,7 @@ defmodule Imgd.Executions.NodeExecution do
   Each time a node runs (including retries), a new NodeExecution record
   is created to capture input, output, timing, and any errors.
   """
-  @derive {Jason.Encoder,
-           except: [:__meta__, :execution]}
+  @derive {Jason.Encoder, except: [:__meta__, :execution]}
   use Imgd.Schema
   import Imgd.ChangesetHelpers
 
@@ -92,7 +91,9 @@ defmodule Imgd.Executions.NodeExecution do
   # Convenience functions
 
   @doc "Checks if the node execution is in a terminal state."
-  def terminal?(%__MODULE__{status: status}) when status in [:completed, :failed, :skipped], do: true
+  def terminal?(%__MODULE__{status: status}) when status in [:completed, :failed, :skipped],
+    do: true
+
   def terminal?(%__MODULE__{}), do: false
 
   @doc "Checks if the node execution succeeded."
@@ -102,6 +103,7 @@ defmodule Imgd.Executions.NodeExecution do
   @doc "Computes execution duration in milliseconds."
   def duration_ms(%__MODULE__{started_at: nil}), do: nil
   def duration_ms(%__MODULE__{completed_at: nil}), do: nil
+
   def duration_ms(%__MODULE__{started_at: started, completed_at: completed}) do
     DateTime.diff(completed, started, :millisecond)
   end
@@ -109,6 +111,7 @@ defmodule Imgd.Executions.NodeExecution do
   @doc "Computes queue wait time in milliseconds."
   def queue_time_ms(%__MODULE__{queued_at: nil}), do: nil
   def queue_time_ms(%__MODULE__{started_at: nil}), do: nil
+
   def queue_time_ms(%__MODULE__{queued_at: queued, started_at: started}) do
     DateTime.diff(started, queued, :millisecond)
   end
