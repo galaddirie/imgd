@@ -33,7 +33,6 @@ scrape_configs:
             step_hash: step_hash
             step_name: step_name
             step_type: step_type
-            generation: generation
             attempt: attempt
             event: event
             # Trace context
@@ -61,7 +60,6 @@ scrape_configs:
           workflow_name:
           step_hash:
           step_name:
-          generation:
           attempt:
           trace_id:
           span_id:

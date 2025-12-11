@@ -14,8 +14,11 @@ defmodule Imgd.Workflows.Workflow do
              :nodes,
              :connections,
              :triggers,
+             :trigger_config,
              :current_version_tag,
+             :version,
              :published_version_id,
+             :definition,
              :settings,
              :user_id,
              :inserted_at,
@@ -66,7 +69,10 @@ defmodule Imgd.Workflows.Workflow do
           nodes: [node()],
           connections: [connection()],
           triggers: [trigger()],
+          trigger_config: map() | nil,
           settings: settings(),
+          version: String.t() | nil,
+          definition: map() | nil,
           current_version_tag: String.t() | nil,
           user_id: Ecto.UUID.t(),
           inserted_at: DateTime.t(),
@@ -107,6 +113,11 @@ defmodule Imgd.Workflows.Workflow do
       field :type, Ecto.Enum, values: [:manual, :webhook, :schedule, :event]
       field :config, :map, default: %{}
     end
+
+    # Virtual fields used by the UI
+    field :trigger_config, :map, virtual: true
+    field :version, :string, virtual: true
+    field :definition, :map, virtual: true
 
     # Runtime settings
     field :settings, :map,

@@ -23,7 +23,6 @@ defmodule Imgd.Observability.Telemetry do
   - `step.hash` - Unique hash of the step node
   - `step.name` - Human-readable step name
   - `step.type` - Type of step (Step, Condition, Accumulator, etc.)
-  - `generation` - Current generation in the workflow graph
   """
 
   require Logger
@@ -49,9 +48,6 @@ defmodule Imgd.Observability.Telemetry do
       [:imgd, :engine, :step, :start],
       [:imgd, :engine, :step, :stop],
       [:imgd, :engine, :step, :exception],
-
-      # Generation advancement
-      [:imgd, :engine, :generation, :complete],
 
       # Workflow preparation
       [:imgd, :engine, :prepare, :start],
@@ -145,8 +141,7 @@ defmodule Imgd.Observability.Telemetry do
     attributes =
       step_attributes(execution, node, fact)
       |> Map.merge(%{
-        "step.attempt": opts[:attempt] || 1,
-        "step.generation": opts[:generation] || 0
+        "step.attempt": opts[:attempt] || 1
       })
 
     Tracer.with_span span_name, %{attributes: attributes, kind: :internal} do
@@ -269,7 +264,6 @@ defmodule Imgd.Observability.Telemetry do
         step_hash: node.hash,
         step_name: step_name,
         step_type: node.__struct__ |> Module.split() |> List.last(),
-        generation: opts[:generation],
         attempt: opts[:attempt]
       ]
       |> Enum.reject(fn {_, v} -> is_nil(v) end)
@@ -342,7 +336,6 @@ defmodule Imgd.Observability.Telemetry do
         step_name: step_name,
         step_type: node.__struct__ |> Module.split() |> List.last(),
         input_fact_hash: fact.hash,
-        generation: opts[:generation] || 0,
         attempt: opts[:attempt] || 1
       }
     )
@@ -365,7 +358,6 @@ defmodule Imgd.Observability.Telemetry do
         input_fact_hash: fact.hash,
         output_fact_hash: output_fact && output_fact.hash,
         status: status,
-        generation: opts[:generation] || 0,
         attempt: opts[:attempt] || 1
       }
     )

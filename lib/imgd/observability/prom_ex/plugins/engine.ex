@@ -13,9 +13,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
   - `imgd_engine_step_total` - Counter of step executions by status and type
   - `imgd_engine_step_duration_milliseconds` - Histogram of step duration
   - `imgd_engine_step_retries_total` - Counter of step retries
-
-  ### Generation Metrics
-  - `imgd_engine_generation_duration_milliseconds` - Histogram of generation completion time
   """
 
   use PromEx.Plugin
@@ -99,18 +96,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
               exception_type: exception_type(meta.exception)
             }
           end
-        ),
-
-        # ====================================================================
-        # Generation Metrics
-        # ====================================================================
-
-        counter(
-          [:imgd, :engine, :generation, :complete, :total],
-          event_name: [:imgd, :engine, :generation, :complete],
-          description: "Total number of generation completions",
-          tags: [:workflow_id],
-          tag_values: fn meta -> %{workflow_id: meta.workflow_id || "unknown"} end
         )
       ]
     )
@@ -151,12 +136,12 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
 
     # Count active executions
     active_executions =
-      Imgd.Workflows.Execution
+      Imgd.Executions.Execution
       |> where([e], e.status == :running)
       |> Imgd.Repo.aggregate(:count)
 
     pending_executions =
-      Imgd.Workflows.Execution
+      Imgd.Executions.Execution
       |> where([e], e.status == :pending)
       |> Imgd.Repo.aggregate(:count)
 

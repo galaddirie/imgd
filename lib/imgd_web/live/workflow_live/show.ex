@@ -171,8 +171,11 @@ defmodule ImgdWeb.WorkflowLive.Show do
     # Update trace steps - find and update the matching step
     trace_steps =
       Enum.map(socket.assigns.trace_steps, fn trace_step ->
-        if trace_step.step_hash == step_info.step_hash &&
-             trace_step.generation == step_info.generation do
+        same_step? =
+          trace_step.step_hash == step_info.step_hash &&
+            (is_nil(step_info.attempt) || trace_step.attempt == step_info.attempt)
+
+        if same_step? do
           Map.merge(trace_step, %{
             status: :completed,
             duration_ms: step_info.duration_ms,
@@ -200,8 +203,11 @@ defmodule ImgdWeb.WorkflowLive.Show do
     # Update trace steps
     trace_steps =
       Enum.map(socket.assigns.trace_steps, fn trace_step ->
-        if trace_step.step_hash == step_info.step_hash &&
-             trace_step.generation == step_info.generation do
+        same_step? =
+          trace_step.step_hash == step_info.step_hash &&
+            (is_nil(step_info.attempt) || trace_step.attempt == step_info.attempt)
+
+        if same_step? do
           Map.merge(trace_step, %{
             status: step_info.status,
             duration_ms: step_info.duration_ms,
@@ -219,16 +225,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
       |> assign(execution_steps: execution_steps)
       |> assign(trace_steps: trace_steps)
 
-    {:noreply, socket}
-  end
-
-  def handle_info({:generation_started, _generation, _count}, socket) do
-    # Could add a trace entry for generation start if desired
-    {:noreply, socket}
-  end
-
-  def handle_info({:generation_completed, _generation}, socket) do
-    # Could add a trace entry for generation completion if desired
     {:noreply, socket}
   end
 
@@ -499,8 +495,8 @@ defmodule ImgdWeb.WorkflowLive.Show do
                           {format_duration(execution_duration_ms(@current_execution))}
                         </span>
                         <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
-                          <.icon name="hero-bolt" class="size-4" />
-                          {get_generation(@current_execution.output)} generations
+                          <.icon name="hero-hashtag" class="size-4" />
+                          Run {short_id(@current_execution.id)}
                         </span>
                       </div>
                     </div>
@@ -740,11 +736,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
   end
 
   defp execution_duration_ms(_), do: nil
-
-  defp get_generation(nil), do: 0
-  defp get_generation(%{"generation" => gen}), do: gen
-  defp get_generation(%{generation: gen}), do: gen
-  defp get_generation(_), do: 0
 
   defp format_relative_time(nil), do: "-"
 

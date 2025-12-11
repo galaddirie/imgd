@@ -9,8 +9,12 @@ defmodule Imgd.Executions.Execution do
            only: [
              :id,
              :workflow_version_id,
+             :workflow_version_tag,
              :status,
              :trigger,
+             :trigger_type,
+             :input,
+             :output,
              :context,
              :error,
              :started_at,
@@ -44,9 +48,13 @@ defmodule Imgd.Executions.Execution do
           workflow_version_id: Ecto.UUID.t(),
           workflow_id: Ecto.UUID.t(),
           status: status(),
+          trigger_type: trigger_type() | String.t(),
           trigger: trigger(),
           runic_build_log: [runic_log_entry()],
           runic_reaction_log: [runic_log_entry()],
+          input: map() | nil,
+          output: map() | nil,
+          workflow_version_tag: String.t() | nil,
           context: map(),
           error: map() | nil,
           waiting_for: map() | nil,
@@ -111,6 +119,12 @@ defmodule Imgd.Executions.Execution do
     belongs_to :workflow, Workflow
     belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
     has_many :node_executions, NodeExecution
+
+    # Virtual fields used by the UI
+    field :input, :map, virtual: true
+    field :output, :map, virtual: true
+    field :trigger_type, :string, virtual: true
+    field :workflow_version_tag, :string, virtual: true
 
     timestamps()
   end

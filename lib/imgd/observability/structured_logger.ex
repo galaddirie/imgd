@@ -60,8 +60,7 @@ defmodule Imgd.Observability.StructuredLogger do
       execution_id: execution.id,
       workflow_id: execution.workflow_id,
       workflow_name: workflow.name,
-      duration_ms: duration_ms,
-      final_generation: execution.current_generation
+      duration_ms: duration_ms
     )
   end
 
@@ -75,8 +74,7 @@ defmodule Imgd.Observability.StructuredLogger do
       workflow_id: execution.workflow_id,
       workflow_name: workflow.name,
       duration_ms: duration_ms,
-      error: format_error(error),
-      generation_at_failure: execution.current_generation
+      error: format_error(error)
     )
   end
 
@@ -111,7 +109,6 @@ defmodule Imgd.Observability.StructuredLogger do
       step_name: node.name,
       step_type: node.__struct__ |> Module.split() |> List.last(),
       input_fact_hash: fact.hash,
-      generation: opts[:generation],
       attempt: opts[:attempt] || 1
     )
   end
@@ -129,7 +126,6 @@ defmodule Imgd.Observability.StructuredLogger do
       step_type: node.__struct__ |> Module.split() |> List.last(),
       duration_ms: duration_ms,
       output_fact_hash: output_fact && output_fact.hash,
-      generation: opts[:generation],
       attempt: opts[:attempt] || 1
     )
   end
@@ -192,41 +188,6 @@ defmodule Imgd.Observability.StructuredLogger do
       step_hash: node.hash,
       step_name: node.name,
       timeout_ms: timeout_ms
-    )
-  end
-
-  # ============================================================================
-  # Generation Logging
-  # ============================================================================
-
-  @doc """
-  Logs generation completion.
-  """
-  def generation_completed(execution, generation, steps_count, duration_ms) do
-    Logger.info("Generation completed",
-      event: "generation.completed",
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      generation: generation,
-      steps_executed: steps_count,
-      duration_ms: duration_ms
-    )
-  end
-
-  @doc """
-  Logs runnables found for next generation.
-  """
-  def runnables_found(execution, generation, runnables) do
-    Logger.debug("Runnables found for next generation",
-      event: "generation.runnables_found",
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      generation: generation,
-      runnable_count: length(runnables),
-      runnables:
-        Enum.map(runnables, fn {node, fact} ->
-          %{step_hash: node.hash, step_name: node.name, fact_hash: fact.hash}
-        end)
     )
   end
 

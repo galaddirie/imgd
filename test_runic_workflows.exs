@@ -162,24 +162,6 @@ alt_sequential? = "Result: 20" in result4
 IO.puts("RESULT: #{if alt_sequential?, do: "SEQUENTIAL ✓", else: "UNEXPECTED ✗"}")
 
 # =============================================================================
-# TEST 5: Check generation counts
-# =============================================================================
-
-IO.puts(("\n" <> "-") |> String.duplicate(60))
-IO.puts("TEST 5: Generation comparison")
-IO.puts("-" |> String.duplicate(60))
-
-flat_wf_executed = flat_workflow |> Workflow.react_until_satisfied(input)
-linear_wf_executed = linear_workflow |> Workflow.react_until_satisfied(input)
-
-IO.puts("Flat workflow generations: #{flat_wf_executed.generations}")
-IO.puts("Linear workflow generations: #{linear_wf_executed.generations}")
-IO.puts("")
-
-IO.puts("Flat should have 1 generation (all parallel)")
-IO.puts("Linear should have 3 generations (sequential)")
-
-# =============================================================================
 # SUMMARY
 # =============================================================================
 

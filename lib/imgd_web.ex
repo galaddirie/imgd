@@ -91,7 +91,7 @@ defmodule ImgdWeb do
       alias Phoenix.LiveView.JS
       alias ImgdWeb.Layouts
 
-      # Routes generation with the ~p sigil
+      # Routes with the ~p sigil
       unquote(verified_routes())
     end
   end

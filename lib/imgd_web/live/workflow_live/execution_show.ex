@@ -79,7 +79,9 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                 <span class={["badge badge-sm", execution_status_badge(@execution.status)]}>
                   {@execution.status}
                 </span>
-                <span class="badge badge-ghost badge-xs">v{@execution.workflow_version}</span>
+                <span class="badge badge-ghost badge-xs">
+                  v{@execution.workflow_version_tag || "unknown"}
+                </span>
               </div>
               <p class="max-w-2xl text-sm text-muted">
                 Detailed run history for {@workflow.name}. Use step logs to debug.
@@ -126,23 +128,23 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                   </span>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   <.metric
                     title="Status"
                     icon="hero-circle-stack"
                     value={String.capitalize(to_string(@execution.status))}
                   />
                   <.metric
+                    title="Trigger"
+                    icon="hero-bolt"
+                    value={String.capitalize(@execution.trigger_type)}
+                    hint="How the execution was started"
+                  />
+                  <.metric
                     title="Duration"
                     icon="hero-stopwatch"
                     value={format_duration(@duration_ms)}
                     hint="Total runtime from start to completion"
-                  />
-                  <.metric
-                    title="Generation"
-                    icon="hero-bolt"
-                    value={"Gen #{@execution.current_generation}"}
-                    hint="Current workflow generation"
                   />
                   <.metric
                     title="Started At"
@@ -157,7 +159,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                   <.metric
                     title="Workflow Version"
                     icon="hero-arrow-up-on-square-stack"
-                    value={"v#{@execution.workflow_version}"}
+                    value={"v#{@execution.workflow_version_tag || "unknown"}"}
                   />
                 </div>
               </div>
@@ -268,7 +270,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                     title="Total Duration"
                     value={format_duration(@duration_ms)}
                   />
-                  <.stat title="Current Generation" value={@execution.current_generation} />
+                  <.stat title="Total Steps" value={length(@steps)} />
                 </div>
               </div>
 
@@ -313,9 +315,6 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                     <div class="flex flex-wrap items-center gap-3 text-xs text-base-content/60">
                       <span class="inline-flex items-center gap-1">
                         <.icon name="hero-hashtag" class="size-4" /> {step.step_hash}
-                      </span>
-                      <span class="inline-flex items-center gap-1">
-                        <.icon name="hero-bolt" class="size-4" /> Gen {step.generation}
                       </span>
                       <span class="inline-flex items-center gap-1">
                         <.icon name="hero-arrow-path" class="size-4" /> Attempt {step.attempt}

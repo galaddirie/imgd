@@ -59,7 +59,7 @@
           {
             "datasource": { "type": "loki", "uid": "loki" },
             "editorMode": "code",
-            "expr": "{job=\"imgd\"} | json | execution_id = `$execution_id` | line_format \"[{{.level}}] {{.event}} - {{.message}} (step={{.step_name}}, gen={{.generation}})\"",
+            "expr": "{job=\"imgd\"} | json | execution_id = `$execution_id` | line_format \"[{{.level}}] {{.event}} - {{.message}} (step={{.step_name}})\"",
             "legendFormat": "",
             "queryType": "range",
             "refId": "A"

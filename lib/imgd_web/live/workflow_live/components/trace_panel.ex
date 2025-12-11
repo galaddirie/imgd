@@ -192,13 +192,6 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
       end
 
     parts =
-      if step.generation do
-        ["Gen #{step.generation}" | parts]
-      else
-        parts
-      end
-
-    parts =
       if step.attempt && step.attempt > 1 do
         ["Attempt #{step.attempt}" | parts]
       else

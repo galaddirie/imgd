@@ -114,7 +114,6 @@ config :logger_json, :backend,
     :step_hash,
     :step_name,
     :step_type,
-    :generation,
     :attempt,
     :event
   ],
