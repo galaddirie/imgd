@@ -24,7 +24,9 @@ config :imgd,
   ecto_repos: [Imgd.Repo],
   generators: [timestamp_type: :utc_datetime]
 
-quickjs_wasm_path = Path.expand("../priv/wasm/quickjs.wasm", __DIR__)
+quickjs_wasm_path =
+  System.get_env("QJS_WASM_PATH") ||
+    Path.expand("../priv/wasm/qjs-wasi.wasm", __DIR__)
 
 config :imgd, Imgd.Sandbox,
   quickjs_wasm_path: quickjs_wasm_path,

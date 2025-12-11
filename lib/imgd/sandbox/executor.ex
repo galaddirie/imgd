@@ -7,106 +7,263 @@ defmodule Imgd.Sandbox.Executor do
 
   alias Imgd.Sandbox.{Config, WasmRuntime}
 
-  @input_fallback_offset 1_024
+  alias Wasmex.{Pipe, StoreOrCaller}
+  alias Wasmex.Wasi.WasiOptions
+
+  @result_prefix "__IMGD_RESULT__"
+
+  @bootstrap_script """
+  import * as std from 'std';
+
+  const RESULT_PREFIX = "#{@result_prefix}";
+
+  const encodeResult = (result) => {
+    try {
+      std.out.puts(RESULT_PREFIX + JSON.stringify(result) + "\\n");
+    } catch (err) {
+      const fallback = {
+        ok: false,
+        error: "Failed to encode result: " + String(err && err.message ? err.message : err)
+      };
+      std.out.puts(RESULT_PREFIX + JSON.stringify(fallback) + "\\n");
+    }
+  };
+
+  const safeValue = (value) => {
+    const seen = new WeakSet();
+
+    const replacer = (_key, val) => {
+      if (typeof val === "bigint") return `bigint:${val.toString()}`;
+      if (typeof val === "function") return `[Function ${val.name || "anonymous"}]`;
+      if (typeof val === "symbol") return val.toString();
+      if (val === undefined) return null;
+      if (val && typeof val === "object") {
+        if (seen.has(val)) return "[Circular]";
+        seen.add(val);
+      }
+      return val;
+    };
+
+    try {
+      return JSON.parse(JSON.stringify(value, replacer));
+    } catch (err) {
+      return `[Unserializable: ${err && err.message ? err.message : String(err)}]`;
+    }
+  };
+
+  const redirectConsole = () => {
+    const sink = (...messages) => {
+      try {
+        std.err.puts(messages.map((value) => String(value)).join(" ") + "\\n");
+      } catch (_err) {}
+    };
+
+    globalThis.console = {
+      log: sink,
+      info: sink,
+      warn: sink,
+      error: sink,
+      debug: sink
+    };
+    globalThis.print = (...messages) => sink(...messages);
+  };
+
+  const formatError = (err) => {
+    if (!err) return "Unknown error";
+    if (typeof err === "object" && err.stack) return String(err.stack);
+    return String(err.message || err);
+  };
+
+  const main = async () => {
+    redirectConsole();
+
+    const payloadEnv = std.getenv("IMGD_PAYLOAD");
+    if (!payloadEnv) {
+      encodeResult({ ok: false, error: "Missing payload" });
+      return;
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(payloadEnv);
+    } catch (err) {
+      encodeResult({ ok: false, error: "Invalid payload: " + String(err && err.message ? err.message : err) });
+      return;
+    }
+
+    if (typeof payload.code !== "string") {
+      encodeResult({ ok: false, error: "Payload missing code" });
+      return;
+    }
+
+    const args = payload.args || {};
+    globalThis.args = args;
+
+    try {
+      const fn = new Function("args", payload.code);
+      let value = fn(args);
+      if (value && typeof value.then === "function") {
+        value = await value;
+      }
+
+      encodeResult({ ok: true, value: safeValue(value) });
+    } catch (err) {
+      encodeResult({ ok: false, error: formatError(err) });
+    }
+  };
+
+  main().finally(() => std.exit(0));
+  """
 
   @spec run(String.t(), Config.t()) :: {:ok, String.t(), map()} | {:error, term()}
   def run(code, %Config{} = config) do
-    case WasmRuntime.new_instance(config.fuel, config.memory_mb) do
-      {:ok, pid, store} ->
-        try do
-          do_run(pid, store, code, config)
-        after
-          GenServer.stop(pid)
-        end
+    payload = Jason.encode!(%{code: code, args: config.args})
 
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, wasi_options} <- build_wasi_options(payload),
+         {:ok, instance} <- WasmRuntime.new_instance(config, wasi_options) do
+      try do
+        with {:ok, raw} <- execute(instance, config) do
+          fuel_used = fuel_consumed(instance.store, config.fuel)
+          {:ok, raw, %{fuel_consumed: fuel_used}}
+        end
+      after
+        GenServer.stop(instance.pid)
+      end
+    else
+      {:error, reason} -> {:error, reason}
     end
   rescue
     e -> {:error, {:execution_error, Exception.message(e)}}
   end
 
-  defp do_run(pid, store, code, %Config{} = config) do
-    with {:ok, memory} <- Wasmex.memory(pid),
-         {:ok, input_ptr, input_len} <- write_input(pid, store, memory, code, config.args),
-         {:ok, raw} <- execute(pid, store, memory, input_ptr, input_len, config) do
-      fuel_used = fuel_consumed(store, config.fuel)
-      {:ok, raw, %{fuel_consumed: fuel_used}}
-    end
-  end
+  defp build_wasi_options(payload) do
+    with {:ok, stdout} <- Pipe.new(),
+         {:ok, stderr} <- Pipe.new() do
+      opts = %WasiOptions{
+        args: runtime_args(),
+        env: %{"IMGD_PAYLOAD" => payload},
+        stdout: stdout,
+        stderr: stderr
+      }
 
-  defp write_input(pid, store, memory, code, args) do
-    input = Jason.encode!(%{code: code, args: args})
-    input_bytes = input <> <<0>>
-    input_len = byte_size(input)
-
-    with {:ok, ptr} <- allocate(pid, input_len + 1),
-         :ok <- Wasmex.Memory.write_binary(store, memory, ptr, input_bytes) do
-      {:ok, ptr, input_len}
+      {:ok, opts}
     else
       {:error, reason} -> {:error, {:wasm_error, reason}}
     end
   end
 
-  defp allocate(pid, size) do
-    case Wasmex.call_function(pid, "alloc", [size]) do
-      {:ok, [ptr]} when is_integer(ptr) and ptr > 0 ->
-        {:ok, ptr}
+  defp execute(%{pid: pid, store: _store, stdout: stdout, stderr: stderr}, %Config{
+         max_output_size: max_output_size
+       }) do
+    call_result = Wasmex.call_function(pid, "_start", [])
+    stdout_data = read_pipe(stdout)
+    stderr_data = read_pipe(stderr)
 
-      _ ->
-        {:ok, @input_fallback_offset}
-    end
+    result =
+      case call_result do
+        {:ok, _} ->
+          with :ok <- enforce_output_limit_bytes(stdout_data, max_output_size),
+               {:ok, output} <- extract_result(stdout_data) do
+            {:ok, output}
+          end
+
+        {:trap, reason} ->
+          {:error, classify_trap(reason)}
+
+        {:error, msg} when is_binary(msg) ->
+          {:error, classify_message(msg)}
+
+        {:error, reason} ->
+          {:error, {:wasm_error, reason}}
+      end
+
+    maybe_attach_logs(result, stdout_data, stderr_data)
   end
 
-  defp execute(pid, store, memory, input_ptr, input_len, %Config{max_output_size: max_output_size}) do
-    case Wasmex.call_function(pid, "eval_js", [input_ptr, input_len]) do
-      {:ok, [0]} ->
-        read_error(pid, store, memory)
-
-      {:ok, [result_ptr]} ->
-        with {:ok, [result_len]} <- Wasmex.call_function(pid, "get_output_len", []),
-             :ok <- enforce_output_limit(result_len, max_output_size),
-             {:ok, output} <- read_output(store, memory, result_ptr, result_len) do
-          {:ok, output}
-        else
-          {:error, reason} -> {:error, reason}
-        end
-
-      {:trap, reason} ->
-        {:error, classify_trap(reason)}
-
-      {:error, msg} when is_binary(msg) ->
-        {:error, classify_message(msg)}
-
-      {:error, reason} ->
-        {:error, {:wasm_error, reason}}
-    end
+  defp runtime_args do
+    ["qjs", "-m", "-e", bootstrap_script()]
   end
 
-  defp read_error(pid, store, memory) do
-    with {:ok, [err_ptr]} <- Wasmex.call_function(pid, "get_error_ptr", []),
-         {:ok, [err_len]} <- Wasmex.call_function(pid, "get_error_len", []) do
-      message = Wasmex.Memory.read_string(store, memory, err_ptr, err_len)
-      {:error, {:runtime_error, message}}
-    else
-      _ -> {:error, {:runtime_error, "Unknown runtime error"}}
-    end
+  defp bootstrap_script do
+    @bootstrap_script |> String.trim()
   end
 
-  defp read_output(store, memory, ptr, len) do
-    {:ok, Wasmex.Memory.read_string(store, memory, ptr, len)}
-  rescue
-    e -> {:error, {:wasm_error, Exception.message(e)}}
+  defp read_pipe(nil), do: ""
+
+  defp read_pipe(pipe) do
+    _ = Pipe.seek(pipe, 0)
+    Pipe.read(pipe)
   end
 
-  defp enforce_output_limit(len, max_output_size) when len > max_output_size do
+  defp enforce_output_limit_bytes(data, max_output_size) when byte_size(data) > max_output_size do
     {:error, {:runtime_error, "Output exceeds max size of #{max_output_size} bytes"}}
   end
 
-  defp enforce_output_limit(_len, _max_output_size), do: :ok
+  defp enforce_output_limit_bytes(_data, _max_output_size), do: :ok
+
+  defp extract_result(stdout) do
+    case :binary.matches(stdout, @result_prefix) do
+      [] ->
+        {:error, {:runtime_error, "Sandbox output missing result marker"}}
+
+      matches ->
+        {idx, _} = List.last(matches)
+        start = idx + byte_size(@result_prefix)
+        remaining = binary_part(stdout, start, byte_size(stdout) - start)
+
+        json =
+          remaining
+          |> String.split("\n", parts: 2)
+          |> List.first()
+
+        json =
+          case json do
+            nil -> ""
+            value -> String.trim(value)
+          end
+
+        if json == "" do
+          {:error, {:runtime_error, "Sandbox returned empty result"}}
+        else
+          {:ok, json}
+        end
+    end
+  end
+
+  defp maybe_attach_logs({:error, {:runtime_error, msg}}, stdout, stderr) do
+    details =
+      [stdout: stdout, stderr: stderr]
+      |> Enum.map(fn {label, data} -> {label, truncate_logs(data)} end)
+      |> Enum.filter(fn {_label, data} -> data != "" end)
+
+    if details == [] do
+      {:error, {:runtime_error, msg}}
+    else
+      log_text =
+        details
+        |> Enum.map(fn {label, data} -> "#{label}: #{data}" end)
+        |> Enum.join(" | ")
+
+      {:error, {:runtime_error, "#{msg} (#{log_text})"}}
+    end
+  end
+
+  defp maybe_attach_logs(other, _stdout, _stderr), do: other
+
+  defp truncate_logs(data) when is_binary(data) do
+    trimmed = String.trim(data)
+
+    if byte_size(trimmed) > 500 do
+      binary_part(trimmed, 0, 500) <> "..."
+    else
+      trimmed
+    end
+  end
+
+  defp truncate_logs(_data), do: ""
 
   defp fuel_consumed(store, original) do
-    case Wasmex.StoreOrCaller.get_fuel(store) do
+    case StoreOrCaller.get_fuel(store) do
       {:ok, remaining} when is_integer(remaining) -> max(original - remaining, 0)
       _ -> nil
     end

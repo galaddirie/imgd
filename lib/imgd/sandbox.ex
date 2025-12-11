@@ -24,8 +24,11 @@ defmodule Imgd.Sandbox do
 
       {final_result, status_meta} =
         case result do
-          {:ok, value, metrics} -> {{:ok, value}, %{status: :ok, fuel_consumed: metrics[:fuel_consumed]}}
-          {:error, error} -> {{:error, error}, %{status: :error}}
+          {:ok, value, metrics} ->
+            {{:ok, value}, %{status: :ok, fuel_consumed: metrics[:fuel_consumed]}}
+
+          {:error, error} ->
+            {{:error, error}, %{status: :error}}
         end
 
       {final_result, status_meta}
@@ -46,9 +49,13 @@ defmodule Imgd.Sandbox do
   end
 
   defp execute_in_flame(code, config) do
-    FLAME.call(Imgd.Sandbox.Runner, fn ->
-      Executor.run(code, config)
-    end, timeout: config.timeout)
+    FLAME.call(
+      Imgd.Sandbox.Runner,
+      fn ->
+        Executor.run(code, config)
+      end,
+      timeout: config.timeout
+    )
   catch
     :exit, {:timeout, _} -> {:error, {:timeout, config.timeout}}
     :exit, reason -> {:error, {:flame_error, reason}}
@@ -58,7 +65,7 @@ defmodule Imgd.Sandbox do
     if File.exists?(path) do
       :ok
     else
-      {:error, {:validation_error, "quickjs.wasm not found at #{path}"}}
+      {:error, {:validation_error, "qjs-wasi.wasm not found at #{path}"}}
     end
   end
 

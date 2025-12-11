@@ -52,7 +52,7 @@ defmodule Imgd.Sandbox.Supervisor do
     if File.exists?(path) do
       [quickjs_wasm_path: path]
     else
-      {:skip, %{missing_quickjs_wasm: path}}
+      {:skip, %{missing_qjs_wasm: path}}
     end
   end
 end

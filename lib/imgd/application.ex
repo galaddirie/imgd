@@ -21,7 +21,7 @@ defmodule Imgd.Application do
       # Node type registry - must start before endpoint so types are available
       Imgd.Nodes.Registry,
       Imgd.Sandbox.Supervisor,
-      flame_parent && ImgdWeb.Endpoint
+      ImgdWeb.Endpoint
     ]
     |> Enum.filter(& &1)
 
