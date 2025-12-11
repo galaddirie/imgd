@@ -131,6 +131,96 @@ defmodule Imgd.Executions do
   end
 
   # ============================================================================
+  # Execution Scheduling (Oban)
+  # ============================================================================
+
+  @doc """
+  Enqueues an execution for processing via Oban.
+
+  This inserts an Oban job that will pick up the execution and run it
+  via the WorkflowRunner. Includes OpenTelemetry trace context propagation.
+
+  ## Options
+
+  - `:scheduled_at` - Schedule the job for a future time
+  - `:priority` - Job priority (0-3, lower is higher priority)
+
+  Returns `{:ok, job}` or `{:error, reason}`.
+  """
+  def enqueue_execution(%Scope{} = scope, %Execution{} = execution, opts \\ []) do
+    with :ok <- authorize_execution(scope, execution) do
+      Imgd.Workers.ExecutionWorker.enqueue(execution.id, opts)
+    end
+  end
+
+  @doc """
+  Starts and enqueues an execution in a single operation.
+
+  Creates the execution record and immediately enqueues it for processing.
+  This is the primary way to trigger a workflow execution.
+
+  ## Options
+
+  All options from `start_execution/3` plus:
+  - `:scheduled_at` - Schedule the job for a future time
+  - `:priority` - Job priority (0-3, lower is higher priority)
+
+  Returns `{:ok, %{execution: execution, job: job}}` or `{:error, reason}`.
+  """
+  def start_and_enqueue_execution(%Scope{} = scope, %Workflow{} = workflow, attrs \\ %{}, opts \\ []) do
+    with {:ok, execution} <- start_execution(scope, workflow, attrs),
+         {:ok, job} <- enqueue_execution(scope, execution, opts) do
+      {:ok, %{execution: execution, job: job}}
+    end
+  end
+
+  @doc """
+  Cancels a pending or running execution.
+
+  Updates the execution status to `:cancelled` and attempts to cancel
+  any associated Oban job.
+
+  Returns `{:ok, execution}` or `{:error, reason}`.
+  """
+  def cancel_execution(%Scope{} = scope, %Execution{} = execution) do
+    with :ok <- authorize_execution(scope, execution),
+         :ok <- validate_cancellable(execution) do
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      # Cancel any pending Oban jobs for this execution
+      cancel_oban_job(execution.id)
+
+      execution
+      |> Execution.changeset(%{
+        status: :cancelled,
+        completed_at: now
+      })
+      |> Repo.update()
+    end
+  end
+
+  defp validate_cancellable(%Execution{status: status}) do
+    if status in [:pending, :running, :paused] do
+      :ok
+    else
+      {:error, {:not_cancellable, status}}
+    end
+  end
+
+  defp cancel_oban_job(execution_id) do
+    import Ecto.Query
+
+    # Find and cancel any pending jobs for this execution
+    Oban.Job
+    |> where([j], j.queue == "executions")
+    |> where([j], j.state in ["available", "scheduled", "retryable"])
+    |> where([j], fragment("?->>'execution_id' = ?", j.args, ^execution_id))
+    |> Repo.update_all(set: [state: "cancelled", cancelled_at: DateTime.utc_now()])
+
+    :ok
+  end
+
+  # ============================================================================
   # Node Executions
   # ============================================================================
 

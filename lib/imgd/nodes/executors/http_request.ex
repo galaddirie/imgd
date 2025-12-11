@@ -1,0 +1,166 @@
+defmodule Imgd.Nodes.Executors.HttpRequest do
+  @moduledoc """
+  Executor for HTTP Request nodes.
+
+  Makes HTTP requests using the Req library and returns the response.
+
+  ## Configuration
+
+  - `url` (required) - The URL to request
+  - `method` - HTTP method (GET, POST, PUT, PATCH, DELETE). Default: GET
+  - `headers` - Map of headers to include
+  - `body` - Request body (for POST/PUT/PATCH)
+  - `timeout_ms` - Request timeout in milliseconds. Default: 30000
+  - `follow_redirects` - Whether to follow redirects. Default: true
+
+  ## Input
+
+  The input data can be used to interpolate values into the URL, headers, or body
+  using `{{input.field}}` syntax (handled by expression evaluation).
+
+  ## Output
+
+  Returns a map with:
+  - `status` - HTTP status code
+  - `headers` - Response headers as a map
+  - `body` - Response body (parsed as JSON if applicable)
+  """
+
+  @behaviour Imgd.Runtime.NodeExecutor
+
+  require Logger
+
+  @default_timeout_ms 30_000
+  @default_method "GET"
+
+  @impl true
+  def execute(config, input, _context) do
+    url = Map.fetch!(config, "url")
+    method = Map.get(config, "method", @default_method) |> normalize_method()
+    headers = Map.get(config, "headers", %{}) |> normalize_headers()
+    body = Map.get(config, "body")
+    timeout_ms = Map.get(config, "timeout_ms", @default_timeout_ms)
+    follow_redirects = Map.get(config, "follow_redirects", true)
+
+    # Build request options
+    req_opts = [
+      method: method,
+      url: url,
+      headers: headers,
+      receive_timeout: timeout_ms,
+      redirect: follow_redirects
+    ]
+
+    # Add body for methods that support it
+    req_opts =
+      if method in [:post, :put, :patch] and body != nil do
+        Keyword.put(req_opts, :json, maybe_merge_input(body, input))
+      else
+        req_opts
+      end
+
+    Logger.debug("Executing HTTP request",
+      url: url,
+      method: method
+    )
+
+    case Req.request(req_opts) do
+      {:ok, %Req.Response{status: status, headers: resp_headers, body: resp_body}} ->
+        output = %{
+          "status" => status,
+          "headers" => Map.new(resp_headers),
+          "body" => resp_body,
+          "ok" => status in 200..299
+        }
+
+        if status in 200..299 do
+          {:ok, output}
+        else
+          {:error, output}
+        end
+
+      {:error, %Req.TransportError{reason: reason}} ->
+        {:error, %{"type" => "transport_error", "reason" => inspect(reason)}}
+
+      {:error, reason} ->
+        {:error, %{"type" => "request_error", "reason" => inspect(reason)}}
+    end
+  end
+
+  @impl true
+  def validate_config(config) do
+    errors = []
+
+    errors =
+      case Map.get(config, "url") do
+        nil -> [{:url, "is required"} | errors]
+        url when not is_binary(url) -> [{:url, "must be a string"} | errors]
+        url -> validate_url(url, errors)
+      end
+
+    errors =
+      case Map.get(config, "method") do
+        nil -> errors
+        method when method in ~w(GET POST PUT PATCH DELETE HEAD OPTIONS) -> errors
+        method when is_binary(method) -> [{:method, "must be one of: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"} | errors]
+        _ -> [{:method, "must be a string"} | errors]
+      end
+
+    errors =
+      case Map.get(config, "headers") do
+        nil -> errors
+        headers when is_map(headers) -> errors
+        _ -> [{:headers, "must be a map"} | errors]
+      end
+
+    errors =
+      case Map.get(config, "timeout_ms") do
+        nil -> errors
+        timeout when is_integer(timeout) and timeout > 0 -> errors
+        _ -> [{:timeout_ms, "must be a positive integer"} | errors]
+      end
+
+    if errors == [] do
+      :ok
+    else
+      {:error, Enum.reverse(errors)}
+    end
+  end
+
+  # ============================================================================
+  # Private Helpers
+  # ============================================================================
+
+  defp normalize_method(method) when is_binary(method) do
+    method
+    |> String.downcase()
+    |> String.to_existing_atom()
+  rescue
+    ArgumentError -> :get
+  end
+
+  defp normalize_method(method) when is_atom(method), do: method
+
+  defp normalize_headers(headers) when is_map(headers) do
+    Enum.map(headers, fn {k, v} -> {to_string(k), to_string(v)} end)
+  end
+
+  defp normalize_headers(_), do: []
+
+  defp validate_url(url, errors) do
+    case URI.parse(url) do
+      %URI{scheme: nil} -> [{:url, "must include scheme (http:// or https://)"} | errors]
+      %URI{host: nil} -> [{:url, "must include host"} | errors]
+      %URI{scheme: scheme} when scheme not in ["http", "https"] ->
+        [{:url, "scheme must be http or https"} | errors]
+      _ -> errors
+    end
+  end
+
+  defp maybe_merge_input(body, input) when is_map(body) and is_map(input) do
+    # Allow body to reference input fields
+    Map.merge(body, %{"_input" => input})
+  end
+
+  defp maybe_merge_input(body, _input), do: body
+end
