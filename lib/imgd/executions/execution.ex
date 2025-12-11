@@ -43,6 +43,8 @@ defmodule Imgd.Executions.Execution do
 
   @type runic_log_entry :: map()
 
+  @type metadata :: __MODULE__.Metadata.t() | nil
+
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
           workflow_version_id: Ecto.UUID.t(),
@@ -61,7 +63,7 @@ defmodule Imgd.Executions.Execution do
           started_at: DateTime.t() | nil,
           completed_at: DateTime.t() | nil,
           expires_at: DateTime.t() | nil,
-          metadata: map(),
+          metadata: metadata(),
           workflow: Workflow.t() | Ecto.Association.NotLoaded.t(),
           workflow_version: WorkflowVersion.t() | Ecto.Association.NotLoaded.t(),
           triggered_by_user: %User{} | Ecto.Association.NotLoaded.t(),
@@ -106,15 +108,20 @@ defmodule Imgd.Executions.Execution do
     # TTL for long-running cleanup
     field :expires_at, :utc_datetime_usec
 
-    # todo: fix this i hate untyped metadata json fields
     # Metadata for correlation, debugging
-    field :metadata, :map, default: %{}
-    # Example: %{
-    #   trace_id: "...",
-    #   correlation_id: "...",
-    #   triggered_by: "user_id" | "schedule_id" | "webhook_request_id",
-    #   parent_execution_id: "..." (for sub-workflows)
-    # }
+    embeds_one :metadata, Metadata, on_replace: :update do
+      @derive Jason.Encoder
+
+      field :trace_id, :string
+      field :correlation_id, :string
+      field :triggered_by, :string
+      field :parent_execution_id, :binary_id
+      field :input, :map
+      field :output, :map
+      field :tags, :map, default: %{}
+      # Arbitrary custom values callers want to persist
+      field :extras, :map, default: %{}
+    end
 
     belongs_to :workflow, Workflow
     belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
@@ -155,11 +162,11 @@ defmodule Imgd.Executions.Execution do
     |> validate_required([:workflow_version_id, :workflow_id, :status, :trigger])
     |> validate_trigger()
     |> validate_map_field(:context)
-    |> validate_map_field(:metadata)
     |> validate_map_field(:waiting_for, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
     |> validate_list_of_maps(:runic_build_log)
     |> validate_list_of_maps(:runic_reaction_log)
+    |> cast_embed(:metadata, with: &metadata_changeset/2, required: false)
   end
 
   defp normalize_trigger(changeset) do
@@ -247,5 +254,23 @@ defmodule Imgd.Executions.Execution do
           [{field, "must be a list of maps"}]
       end
     end)
+  end
+
+  defp metadata_changeset(metadata, attrs) do
+    metadata
+    |> cast(attrs, [
+      :trace_id,
+      :correlation_id,
+      :triggered_by,
+      :parent_execution_id,
+      :input,
+      :output,
+      :tags,
+      :extras
+    ])
+    |> validate_map_field(:input, allow_nil: true)
+    |> validate_map_field(:output, allow_nil: true)
+    |> validate_map_field(:tags, allow_nil: true)
+    |> validate_map_field(:extras, allow_nil: true)
   end
 end

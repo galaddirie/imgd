@@ -1,57 +1,32 @@
 defmodule Imgd.Observability.Telemetry do
   @moduledoc """
-  Telemetry event definitions and handlers for imgd observability.
+  Telemetry event definitions and tracing helpers for the workflow engine.
 
-  This module defines all telemetry events emitted by the workflow engine
-  and sets up handlers for tracing, metrics, and logging integration.
-
-  ## Event Naming Convention
-
-  All events follow the pattern: `[:imgd, :domain, :action, :stage]`
-
-  - domain: `engine`, `workflow`, `step`
-  - action: specific operation being performed
-  - stage: `start`, `stop`, `exception`
-
-  ## Span Attributes
-
-  Traces include these standard attributes:
-  - `workflow.id` - UUID of the workflow definition
-  - `workflow.name` - Human-readable workflow name
-  - `execution.id` - UUID of this execution instance
-  - `execution.status` - Current status (running, completed, failed, etc.)
-  - `step.hash` - Unique hash of the step node
-  - `step.name` - Human-readable step name
-  - `step.type` - Type of step (Step, Condition, Accumulator, etc.)
+  The helpers in this module align with the current `Workflow`, `Execution`, and
+  `NodeExecution` schemas so observability stays consistent while the runtime is
+  being built. Events follow the `[:imgd, :engine, ...]` naming convention and
+  include the IDs and metadata required for PromEx, Grafana, and OpenTelemetry.
   """
 
   require Logger
   require OpenTelemetry.Tracer, as: Tracer
 
   alias OpenTelemetry.Span
-
-  # ============================================================================
-  # Event Definitions
-  # ============================================================================
+  alias Imgd.Executions.{Execution, NodeExecution}
+  alias Imgd.Workflows.{Workflow, WorkflowVersion}
 
   @doc """
-  All telemetry events emitted by the imgd engine.
+  All telemetry events emitted by the engine.
   """
   def events do
     [
-      # Execution lifecycle
       [:imgd, :engine, :execution, :start],
       [:imgd, :engine, :execution, :stop],
       [:imgd, :engine, :execution, :exception],
-
-      # Step execution
-      [:imgd, :engine, :step, :start],
-      [:imgd, :engine, :step, :stop],
-      [:imgd, :engine, :step, :exception],
-
-      # Workflow preparation
-      [:imgd, :engine, :prepare, :start],
-      [:imgd, :engine, :prepare, :stop]
+      [:imgd, :engine, :node, :start],
+      [:imgd, :engine, :node, :stop],
+      [:imgd, :engine, :node, :exception],
+      [:imgd, :engine, :stats, :poll]
     ]
   end
 
@@ -60,21 +35,12 @@ defmodule Imgd.Observability.Telemetry do
   # ============================================================================
 
   @doc """
-  Wraps a workflow execution in a traced span.
-
-  Creates a root span for the entire workflow execution, with child spans
-  for each step. Automatically handles errors and sets appropriate status.
-
-  ## Example
-
-      Telemetry.with_execution_span(execution, workflow, fn ->
-        # Execute workflow logic
-        {:ok, result}
-      end)
+  Wraps a workflow execution in a traced span and emits start/stop/exception
+  telemetry events.
   """
-  def with_execution_span(execution, workflow, fun) when is_function(fun, 0) do
-    span_name = "workflow.execute #{workflow.name || "unnamed"}"
-
+  def with_execution_span(%Execution{} = execution, workflow \\ nil, fun)
+      when is_function(fun, 0) do
+    span_name = "execution #{execution_span_name(workflow, execution)}"
     attributes = execution_attributes(execution, workflow)
 
     Tracer.with_span span_name, %{attributes: attributes, kind: :internal} do
@@ -84,108 +50,73 @@ defmodule Imgd.Observability.Telemetry do
       try do
         result = fun.()
         duration_ms = duration_since(start_time)
+        status = execution_status_from_result(result, execution)
 
-        case result do
-          {:ok, {:failed, failure_reason}} = failure ->
-            Span.set_status(Tracer.current_span_ctx(), {:error, inspect(failure_reason)})
+        set_span_status(status, result)
+        emit_execution_stop(execution, workflow, status, duration_ms)
 
-            Span.set_attribute(
-              Tracer.current_span_ctx(),
-              :"error.message",
-              inspect(failure_reason)
-            )
-
-            emit_execution_stop(execution, workflow, :failed, duration_ms)
-            failure
-
-          {:ok, _} = success ->
-            Span.set_status(Tracer.current_span_ctx(), :ok)
-            emit_execution_stop(execution, workflow, :completed, duration_ms)
-            success
-
-          {:error, reason} = error ->
-            Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
-            Span.set_attribute(Tracer.current_span_ctx(), :"error.message", inspect(reason))
-            emit_execution_stop(execution, workflow, :failed, duration_ms)
-            error
-        end
+        result
       rescue
-        e ->
+        exception ->
           duration_ms = duration_since(start_time)
-          Span.record_exception(Tracer.current_span_ctx(), e, __STACKTRACE__)
-          Span.set_status(Tracer.current_span_ctx(), {:error, Exception.message(e)})
-          emit_execution_exception(execution, workflow, e, __STACKTRACE__, duration_ms)
-          reraise e, __STACKTRACE__
+          Span.record_exception(Tracer.current_span_ctx(), exception, __STACKTRACE__)
+          Span.set_status(Tracer.current_span_ctx(), {:error, Exception.message(exception)})
+
+          emit_execution_exception(execution, workflow, exception, __STACKTRACE__, duration_ms)
+          reraise exception, __STACKTRACE__
       end
     end
   end
 
   @doc """
-  Wraps a step execution in a traced span.
+  Wraps a node execution in a traced span and emits node telemetry events.
 
-  Creates a child span under the current workflow execution span.
-  Records step-specific attributes and timing.
-
-  ## Example
-
-      Telemetry.with_step_span(execution, node, fact, fn ->
-        # Execute step logic
-        {:ok, result}
-      end)
+  Accepts either a `NodeExecution` struct or a workflow node map/struct with
+  `:id`, `:name`, and `:type_id` keys. Attempts and status can be overridden via
+  options for cases like retries.
   """
-  def with_step_span(execution, node, fact, opts \\ [], fun) when is_function(fun, 0) do
-    # todo: implement step name
-    step_name = ""
-    span_name = "step.execute #{step_name}"
+  def with_node_span(%Execution{} = execution, node_info, fun) when is_function(fun, 0) do
+    with_node_span(execution, node_info, [], fun)
+  end
 
-    attributes =
-      step_attributes(execution, node, fact)
-      |> Map.merge(%{
-        "step.attempt": opts[:attempt] || 1
-      })
+  def with_node_span(%Execution{} = execution, node_info, opts, fun) when is_function(fun, 0) do
+    metadata = node_metadata(execution, node_info, opts)
+    span_name = "node #{node_label(metadata)}"
+    attributes = node_attributes(metadata)
 
     Tracer.with_span span_name, %{attributes: attributes, kind: :internal} do
-      emit_step_start(execution, node, fact, opts)
+      emit_node_start(metadata)
       start_time = System.monotonic_time()
 
       try do
         result = fun.()
         duration_ms = duration_since(start_time)
 
-        case result do
-          {:ok, workflow, events} ->
-            output_fact = extract_output_fact(events)
+        {status, stop_meta} = node_status_from_result(result, metadata)
+        combined_meta = Map.merge(metadata, stop_meta)
 
-            Span.set_attribute(
-              Tracer.current_span_ctx(),
-              :"step.output_fact_hash",
-              output_fact.hash
-            )
+        set_span_status(status, result)
+        emit_node_stop(combined_meta, status, duration_ms)
 
-            Span.set_status(Tracer.current_span_ctx(), :ok)
-            emit_step_stop(execution, node, fact, :completed, duration_ms, output_fact, opts)
-            {:ok, workflow, events}
-
-          {:error, reason} = error ->
-            Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
-            Span.set_attribute(Tracer.current_span_ctx(), :"error.message", inspect(reason))
-            emit_step_stop(execution, node, fact, :failed, duration_ms, nil, opts)
-            error
-
-          {:error, reason, workflow} ->
-            Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
-            emit_step_stop(execution, node, fact, :failed, duration_ms, nil, opts)
-            {:error, reason, workflow}
-        end
+        result
       rescue
-        e ->
+        exception ->
           duration_ms = duration_since(start_time)
-          Span.record_exception(Tracer.current_span_ctx(), e, __STACKTRACE__)
-          Span.set_status(Tracer.current_span_ctx(), {:error, Exception.message(e)})
-          emit_step_exception(execution, node, fact, e, __STACKTRACE__, duration_ms)
-          reraise e, __STACKTRACE__
+          Span.record_exception(Tracer.current_span_ctx(), exception, __STACKTRACE__)
+          Span.set_status(Tracer.current_span_ctx(), {:error, Exception.message(exception)})
+
+          emit_node_exception(metadata, exception, __STACKTRACE__, duration_ms)
+          reraise exception, __STACKTRACE__
       end
     end
+  end
+
+  @doc """
+  Backwards compatible shim that delegates to `with_node_span/4`.
+  """
+  def with_step_span(%Execution{} = execution, node_info, opts \\ [], fun)
+      when is_function(fun, 0) do
+    with_node_span(execution, node_info, opts, fun)
   end
 
   # ============================================================================
@@ -194,15 +125,6 @@ defmodule Imgd.Observability.Telemetry do
 
   @doc """
   Extracts the current trace context for propagation to async jobs.
-
-  Use this when enqueuing Oban jobs to maintain trace continuity.
-
-  ## Example
-
-      trace_context = Telemetry.extract_trace_context()
-      %{execution_id: id, trace_context: trace_context}
-      |> Imgd.Workers.ExecutionWorker.new()
-      |> Oban.insert()
   """
   def extract_trace_context do
     case OpenTelemetry.Ctx.get_current() do
@@ -213,15 +135,6 @@ defmodule Imgd.Observability.Telemetry do
 
   @doc """
   Restores trace context from a propagated map.
-
-  Use this at the start of Oban job execution.
-
-  ## Example
-
-      def perform(%Oban.Job{args: %{"trace_context" => ctx}}) do
-        Telemetry.restore_trace_context(ctx)
-        # ... job logic with tracing continuity
-      end
   """
   def restore_trace_context(nil), do: :ok
 
@@ -233,17 +146,16 @@ defmodule Imgd.Observability.Telemetry do
 
   @doc """
   Sets workflow context in Logger metadata for structured logging.
-
-  This ensures all logs within the current process include workflow context.
   """
-  def set_log_context(execution, workflow \\ nil) do
+  def set_log_context(%Execution{} = execution, workflow \\ nil) do
     metadata =
       [
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
         workflow_name: workflow && workflow.name,
-        workflow_version: execution.workflow_version,
-        trigger_type: execution.trigger_type
+        workflow_version_id: execution.workflow_version_id,
+        workflow_version_tag: workflow_version_tag(workflow, execution),
+        trigger_type: trigger_type(execution)
       ]
       |> Enum.reject(fn {_, v} -> is_nil(v) end)
 
@@ -251,24 +163,24 @@ defmodule Imgd.Observability.Telemetry do
   end
 
   @doc """
-  Sets step context in Logger metadata.
+  Sets node context in Logger metadata.
   """
-  def set_step_log_context(execution, node, opts \\ []) do
-    # todo: implement step name
-    step_name = ""
+  def set_node_log_context(%Execution{} = execution, node_info, opts \\ []) do
+    metadata = node_metadata(execution, node_info, opts)
 
-    metadata =
-      [
-        execution_id: execution.id,
-        workflow_id: execution.workflow_id,
-        step_hash: node.hash,
-        step_name: step_name,
-        step_type: node.__struct__ |> Module.split() |> List.last(),
-        attempt: opts[:attempt]
-      ]
-      |> Enum.reject(fn {_, v} -> is_nil(v) end)
-
-    Logger.metadata(metadata)
+    [
+      {:execution_id, metadata.execution_id},
+      {:workflow_id, metadata.workflow_id},
+      {:workflow_version_id, metadata.workflow_version_id},
+      {:workflow_version_tag, metadata.workflow_version_tag},
+      {:node_execution_id, metadata.node_execution_id},
+      {:node_id, metadata.node_id},
+      {:node_type_id, metadata.node_type_id},
+      {:node_name, metadata.node_name},
+      {:attempt, metadata.attempt}
+    ]
+    |> Enum.reject(fn {_, v} -> is_nil(v) end)
+    |> Logger.metadata()
   end
 
   # ============================================================================
@@ -283,9 +195,11 @@ defmodule Imgd.Observability.Telemetry do
         execution: execution,
         workflow: workflow,
         workflow_id: execution.workflow_id,
-        workflow_name: workflow.name,
+        workflow_version_id: execution.workflow_version_id,
+        workflow_version_tag: workflow_version_tag(workflow, execution),
+        workflow_name: workflow && workflow.name,
         execution_id: execution.id,
-        trigger_type: execution.trigger_type
+        trigger_type: trigger_type(execution)
       }
     )
   end
@@ -298,10 +212,12 @@ defmodule Imgd.Observability.Telemetry do
         execution: execution,
         workflow: workflow,
         workflow_id: execution.workflow_id,
-        workflow_name: workflow.name,
+        workflow_version_id: execution.workflow_version_id,
+        workflow_version_tag: workflow_version_tag(workflow, execution),
+        workflow_name: workflow && workflow.name,
         execution_id: execution.id,
         status: status,
-        trigger_type: execution.trigger_type
+        trigger_type: trigger_type(execution)
       }
     )
   end
@@ -314,6 +230,8 @@ defmodule Imgd.Observability.Telemetry do
         execution: execution,
         workflow: workflow,
         workflow_id: execution.workflow_id,
+        workflow_version_id: execution.workflow_version_id,
+        workflow_version_tag: workflow_version_tag(workflow, execution),
         execution_id: execution.id,
         exception: exception,
         stacktrace: stacktrace
@@ -321,65 +239,65 @@ defmodule Imgd.Observability.Telemetry do
     )
   end
 
-  defp emit_step_start(execution, node, fact, opts) do
-    # todo: implement step name
-    step_name = ""
-
+  defp emit_node_start(metadata) do
     :telemetry.execute(
-      [:imgd, :engine, :step, :start],
+      [:imgd, :engine, :node, :start],
       %{system_time: System.system_time()},
       %{
-        execution: execution,
-        execution_id: execution.id,
-        workflow_id: execution.workflow_id,
-        step_hash: node.hash,
-        step_name: step_name,
-        step_type: node.__struct__ |> Module.split() |> List.last(),
-        input_fact_hash: fact.hash,
-        attempt: opts[:attempt] || 1
+        node_execution: metadata.node_execution,
+        execution: metadata.execution,
+        execution_id: metadata.execution_id,
+        workflow_id: metadata.workflow_id,
+        workflow_version_id: metadata.workflow_version_id,
+        workflow_version_tag: metadata.workflow_version_tag,
+        node_execution_id: metadata.node_execution_id,
+        node_id: metadata.node_id,
+        node_type_id: metadata.node_type_id,
+        node_name: metadata.node_name,
+        attempt: metadata.attempt || 1
       }
     )
   end
 
-  defp emit_step_stop(execution, node, fact, status, duration_ms, output_fact, opts) do
-    # todo: implement step name
-    step_name = ""
-
+  defp emit_node_stop(metadata, status, duration_ms) do
     :telemetry.execute(
-      [:imgd, :engine, :step, :stop],
+      [:imgd, :engine, :node, :stop],
       %{duration_ms: duration_ms},
       %{
-        execution: execution,
-        execution_id: execution.id,
-        workflow_id: execution.workflow_id,
-        step_hash: node.hash,
-        step_name: step_name,
-        step_type: node.__struct__ |> Module.split() |> List.last(),
-        input_fact_hash: fact.hash,
-        output_fact_hash: output_fact && output_fact.hash,
+        node_execution: metadata.node_execution,
+        execution: metadata.execution,
+        execution_id: metadata.execution_id,
+        workflow_id: metadata.workflow_id,
+        workflow_version_id: metadata.workflow_version_id,
+        workflow_version_tag: metadata.workflow_version_tag,
+        node_execution_id: metadata.node_execution_id,
+        node_id: metadata.node_id,
+        node_type_id: metadata.node_type_id,
+        node_name: metadata.node_name,
         status: status,
-        attempt: opts[:attempt] || 1
+        attempt: metadata.attempt || 1
       }
     )
   end
 
-  defp emit_step_exception(execution, node, fact, exception, stacktrace, duration_ms) do
-    # todo: implement step name
-    step_name = ""
-
+  defp emit_node_exception(metadata, exception, stacktrace, duration_ms) do
     :telemetry.execute(
-      [:imgd, :engine, :step, :exception],
+      [:imgd, :engine, :node, :exception],
       %{duration_ms: duration_ms},
       %{
-        execution: execution,
-        execution_id: execution.id,
-        workflow_id: execution.workflow_id,
-        step_hash: node.hash,
-        step_name: step_name,
-        step_type: node.__struct__ |> Module.split() |> List.last(),
-        input_fact_hash: fact.hash,
+        node_execution: metadata.node_execution,
+        execution: metadata.execution,
+        execution_id: metadata.execution_id,
+        workflow_id: metadata.workflow_id,
+        workflow_version_id: metadata.workflow_version_id,
+        workflow_version_tag: metadata.workflow_version_tag,
+        node_execution_id: metadata.node_execution_id,
+        node_id: metadata.node_id,
+        node_type_id: metadata.node_type_id,
+        node_name: metadata.node_name,
         exception: exception,
-        stacktrace: stacktrace
+        stacktrace: stacktrace,
+        attempt: metadata.attempt || 1
       }
     )
   end
@@ -388,31 +306,31 @@ defmodule Imgd.Observability.Telemetry do
   # Private: Attribute Building
   # ============================================================================
 
-  defp execution_attributes(execution, workflow) do
+  defp execution_attributes(%Execution{} = execution, workflow) do
     %{
       "workflow.id": execution.workflow_id,
-      "workflow.name": workflow.name || "unnamed",
-      "workflow.version": execution.workflow_version,
+      "workflow.name": workflow && workflow.name,
+      "workflow.version_id": execution.workflow_version_id,
+      "workflow.version_tag": workflow_version_tag(workflow, execution),
       "execution.id": execution.id,
       "execution.status": execution.status,
-      "execution.trigger_type": execution.trigger_type,
+      "execution.trigger_type": trigger_type(execution),
       "execution.triggered_by_user_id": execution.triggered_by_user_id
     }
     |> reject_nil_values()
   end
 
-  defp step_attributes(execution, node, fact) do
-    step_type = node.__struct__ |> Module.split() |> List.last()
-    # todo: implement step name
-    step_name = ""
-
+  defp node_attributes(metadata) do
     %{
-      "workflow.id": execution.workflow_id,
-      "execution.id": execution.id,
-      "step.hash": node.hash,
-      "step.name": step_name,
-      "step.type": step_type,
-      "step.input_fact_hash": fact.hash
+      "workflow.id": metadata.workflow_id,
+      "workflow.version_id": metadata.workflow_version_id,
+      "workflow.version_tag": metadata.workflow_version_tag,
+      "execution.id": metadata.execution_id,
+      "node.execution_id": metadata.node_execution_id,
+      "node.id": metadata.node_id,
+      "node.type_id": metadata.node_type_id,
+      "node.name": metadata.node_name,
+      "node.attempt": metadata.attempt
     }
     |> reject_nil_values()
   end
@@ -423,11 +341,162 @@ defmodule Imgd.Observability.Telemetry do
     |> Map.new()
   end
 
-  defp extract_output_fact(events) do
-    Enum.find_value(events, %{hash: 0}, fn
-      %Runic.Workflow.ReactionOccurred{reaction: :produced, to: fact} -> fact
-      _ -> nil
-    end)
+  defp workflow_version_tag(%WorkflowVersion{version_tag: tag}, _execution), do: tag
+
+  defp workflow_version_tag(
+         %Workflow{published_version: %WorkflowVersion{version_tag: tag}},
+         _execution
+       ),
+       do: tag
+
+  defp workflow_version_tag(%Workflow{current_version_tag: tag}, _execution) when is_binary(tag),
+    do: tag
+
+  defp workflow_version_tag(_workflow, %Execution{workflow_version_tag: tag}) when is_binary(tag),
+    do: tag
+
+  defp workflow_version_tag(_workflow, %Execution{
+         workflow_version: %WorkflowVersion{version_tag: tag}
+       }),
+       do: tag
+
+  defp workflow_version_tag(_workflow, %Execution{workflow_version_id: id}) when not is_nil(id),
+    do: id
+
+  defp workflow_version_tag(_workflow, _execution), do: nil
+
+  defp trigger_type(%Execution{trigger_type: trigger_type}) when not is_nil(trigger_type),
+    do: trigger_type
+
+  defp trigger_type(%Execution{trigger: trigger}) when is_map(trigger) do
+    Map.get(trigger, :type) || Map.get(trigger, "type")
+  end
+
+  defp trigger_type(_), do: nil
+
+  defp execution_span_name(nil, %Execution{id: id}), do: id
+  defp execution_span_name(%Workflow{name: name}, _execution) when is_binary(name), do: name
+  defp execution_span_name(_workflow, %Execution{id: id}), do: id
+
+  defp node_metadata(%Execution{} = execution, node_info, opts) do
+    {node_id, node_type_id, node_name} = node_identity(node_info)
+    attempt = Keyword.get(opts, :attempt) || attempt_from(node_info) || 1
+    status = Keyword.get(opts, :status) || node_status(node_info)
+
+    %{
+      execution: execution,
+      execution_id: execution.id,
+      workflow_id: execution.workflow_id,
+      workflow_version_id: execution.workflow_version_id,
+      workflow_version_tag: workflow_version_tag(nil, execution),
+      node_execution: node_execution_struct(node_info),
+      node_execution_id: node_execution_id(node_info),
+      node_id: node_id,
+      node_type_id: node_type_id,
+      node_name: node_name,
+      attempt: attempt,
+      status: status
+    }
+  end
+
+  defp node_identity(%NodeExecution{node_id: node_id, node_type_id: node_type_id}) do
+    {node_id, node_type_id, nil}
+  end
+
+  defp node_identity(%{node_id: node_id, node_type_id: node_type_id, node_name: node_name}) do
+    {node_id, node_type_id, node_name}
+  end
+
+  defp node_identity(%{id: node_id, type_id: type_id} = node) do
+    {node_id, type_id, Map.get(node, :name)}
+  end
+
+  defp node_identity(node) do
+    {
+      Map.get(node, :id) || Map.get(node, "id"),
+      Map.get(node, :type_id) || Map.get(node, "type_id"),
+      Map.get(node, :name) || Map.get(node, "name")
+    }
+  end
+
+  defp node_label(metadata) do
+    cond do
+      metadata.node_name -> metadata.node_name
+      metadata.node_id -> metadata.node_id
+      true -> "node"
+    end
+  end
+
+  defp node_execution_struct(%NodeExecution{} = node_execution), do: node_execution
+  defp node_execution_struct(_), do: nil
+
+  defp node_execution_id(%NodeExecution{id: id}), do: id
+  defp node_execution_id(%{node_execution_id: id}) when not is_nil(id), do: id
+  defp node_execution_id(_), do: nil
+
+  defp attempt_from(%NodeExecution{attempt: attempt}), do: attempt
+  defp attempt_from(%{attempt: attempt}), do: attempt
+  defp attempt_from(_), do: nil
+
+  defp node_status(%NodeExecution{status: status}), do: status
+  defp node_status(%{status: status}), do: status
+  defp node_status(_), do: nil
+
+  defp execution_status_from_result({:ok, %Execution{status: status}}, _execution), do: status
+  defp execution_status_from_result(%Execution{status: status}, _execution), do: status
+  defp execution_status_from_result({:ok, _}, _execution), do: :completed
+  defp execution_status_from_result(:ok, _execution), do: :completed
+  defp execution_status_from_result({:error, _}, _execution), do: :failed
+
+  defp execution_status_from_result(_result, %Execution{status: status}) when not is_nil(status),
+    do: status
+
+  defp execution_status_from_result(_result, _execution), do: :completed
+
+  defp node_status_from_result({:error, reason}, metadata), do: {:failed, %{error: reason}}
+
+  defp node_status_from_result({:ok, %NodeExecution{} = node_execution}, metadata) do
+    status = node_execution.status || metadata.status || :completed
+
+    {status,
+     %{
+       node_execution: node_execution,
+       status: status,
+       attempt: node_execution.attempt || metadata.attempt
+     }}
+  end
+
+  defp node_status_from_result(%NodeExecution{} = node_execution, metadata) do
+    status = node_execution.status || metadata.status || :completed
+
+    {status,
+     %{
+       node_execution: node_execution,
+       status: status,
+       attempt: node_execution.attempt || metadata.attempt
+     }}
+  end
+
+  defp node_status_from_result({:ok, result}, metadata) do
+    {metadata.status || :completed, %{output_data: result}}
+  end
+
+  defp node_status_from_result(:ok, metadata), do: {metadata.status || :completed, %{}}
+  defp node_status_from_result(_result, metadata), do: {metadata.status || :completed, %{}}
+
+  defp set_span_status(status, {:error, reason}) do
+    Span.set_status(Tracer.current_span_ctx(), {:error, inspect(reason)})
+    Span.set_attribute(Tracer.current_span_ctx(), :"error.message", inspect(reason))
+  end
+
+  defp set_span_status(status, _result) do
+    case status do
+      status when status in [:failed, :cancelled, :timeout] ->
+        Span.set_status(Tracer.current_span_ctx(), {:error, Atom.to_string(status)})
+
+      _ ->
+        Span.set_status(Tracer.current_span_ctx(), :ok)
+    end
   end
 
   defp duration_since(start_time) do

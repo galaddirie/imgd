@@ -91,15 +91,13 @@ defmodule Imgd.Executions do
 
   defp build_execution_attrs(scope, workflow, attrs) do
     trigger = Map.get(attrs, :trigger) || Map.get(attrs, "trigger") || %{type: :manual, data: %{}}
-    metadata = Map.get(attrs, :metadata) || Map.get(attrs, "metadata") || %{}
     input = Map.get(attrs, :input) || Map.get(attrs, "input")
 
     metadata =
-      if is_nil(input) do
-        metadata
-      else
-        Map.put(metadata, "input", input)
-      end
+      (Map.get(attrs, :metadata) || Map.get(attrs, "metadata") || %{})
+      |> normalize_metadata()
+      |> maybe_put_input(input)
+      |> maybe_put_triggered_by(scope)
 
     %{
       workflow_id: workflow.id,
@@ -129,16 +127,16 @@ defmodule Imgd.Executions do
   defp format_step(%NodeExecution{} = step) do
     %{
       id: step.id,
-      step_name: step.node_id,
-      step_hash: step.node_id,
+      node_id: step.node_id,
+      node_type_id: step.node_type_id,
       status: step.status,
-      input_snapshot: step.input_data,
-      output_snapshot: step.output_data,
+      input_data: step.input_data,
+      output_data: step.output_data,
       error: step.error,
       attempt: step.attempt,
       duration_ms: duration_ms(step.started_at, step.finished_at),
       started_at: step.started_at,
-      completed_at: step.finished_at,
+      finished_at: step.finished_at,
       logs: nil
     }
   end
@@ -149,14 +147,14 @@ defmodule Imgd.Executions do
 
   defp decorate_execution(%Execution{} = execution) do
     trigger = normalize_trigger(execution.trigger)
-    metadata = execution.metadata || %{}
+    metadata = execution_metadata(execution.metadata)
 
     %{
       execution
       | trigger: trigger,
         trigger_type: trigger_type_value(trigger),
-        input: Map.get(metadata, "input"),
-        output: Map.get(metadata, "output"),
+        input: Map.get(metadata, :input),
+        output: Map.get(metadata, :output),
         workflow_version_tag: workflow_version_tag(execution)
     }
   end
@@ -197,4 +195,57 @@ defmodule Imgd.Executions do
 
   defp maybe_user_id(%Scope{user: nil}), do: nil
   defp maybe_user_id(%Scope{user: user}), do: user.id
+
+  defp normalize_metadata(metadata) when is_map(metadata) do
+    Enum.reduce(metadata, %{}, fn {key, value}, acc ->
+      case normalize_metadata_key(key) do
+        :tags -> Map.put(acc, :tags, value || %{})
+        :extras -> Map.put(acc, :extras, value || %{})
+        nil -> Map.update(acc, :extras, %{}, &Map.put(&1, key, value))
+        normalized_key -> Map.put(acc, normalized_key, value)
+      end
+    end)
+    |> Map.put_new(:tags, %{})
+    |> Map.put_new(:extras, %{})
+  end
+
+  defp normalize_metadata(_), do: %{tags: %{}, extras: %{}}
+
+  defp normalize_metadata_key(key) when is_atom(key), do: key
+
+  defp normalize_metadata_key(key) when is_binary(key) do
+    case key do
+      "trace_id" -> :trace_id
+      "correlation_id" -> :correlation_id
+      "triggered_by" -> :triggered_by
+      "parent_execution_id" -> :parent_execution_id
+      "input" -> :input
+      "output" -> :output
+      "tags" -> :tags
+      "extras" -> :extras
+      _ -> nil
+    end
+  end
+
+  defp normalize_metadata_key(_), do: nil
+
+  defp maybe_put_input(metadata, nil), do: metadata
+  defp maybe_put_input(metadata, input), do: Map.put(metadata, :input, input)
+
+  defp maybe_put_triggered_by(metadata, %Scope{user: nil}), do: metadata
+
+  defp maybe_put_triggered_by(metadata, %Scope{user: user}),
+    do: Map.put_new(metadata, :triggered_by, user.id)
+
+  defp execution_metadata(nil), do: %{tags: %{}, extras: %{}}
+
+  defp execution_metadata(%Execution.Metadata{} = metadata) do
+    metadata
+    |> Map.from_struct()
+    |> Map.delete(:__meta__)
+    |> Map.delete(:__struct__)
+    |> normalize_metadata()
+  end
+
+  defp execution_metadata(metadata) when is_map(metadata), do: normalize_metadata(metadata)
 end

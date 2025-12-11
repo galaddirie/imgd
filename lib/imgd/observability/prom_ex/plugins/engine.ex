@@ -9,18 +9,20 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
   - `imgd_engine_execution_duration_milliseconds` - Histogram of execution duration
   - `imgd_engine_execution_active` - Gauge of currently active executions
 
-  ### Step Metrics
-  - `imgd_engine_step_total` - Counter of step executions by status and type
-  - `imgd_engine_step_duration_milliseconds` - Histogram of step duration
-  - `imgd_engine_step_retries_total` - Counter of step retries
+  ### Node Metrics
+  - `imgd_engine_node_total` - Counter of node executions by status and type
+  - `imgd_engine_node_duration_milliseconds` - Histogram of node duration
+  - `imgd_engine_node_exception_total` - Counter of node exceptions
   """
 
   use PromEx.Plugin
 
   require Logger
 
+  alias Imgd.Executions.{Execution, NodeExecution}
+
   @execution_duration_buckets [10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000]
-  @step_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000]
+  @node_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000]
 
   @impl true
   def event_metrics(_opts) do
@@ -35,7 +37,13 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           [:imgd, :engine, :execution, :total],
           event_name: [:imgd, :engine, :execution, :stop],
           description: "Total number of workflow executions",
-          tags: [:workflow_id, :workflow_name, :status, :trigger_type],
+          tags: [
+            :workflow_id,
+            :workflow_version_id,
+            :workflow_version_tag,
+            :status,
+            :trigger_type
+          ],
           tag_values: &execution_tag_values/1
         ),
         distribution(
@@ -43,7 +51,7 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           event_name: [:imgd, :engine, :execution, :stop],
           description: "Workflow execution duration in milliseconds",
           measurement: :duration_ms,
-          tags: [:workflow_id, :workflow_name, :status],
+          tags: [:workflow_id, :workflow_version_id, :workflow_version_tag, :status],
           tag_values: &execution_tag_values/1,
           reporter_options: [buckets: @execution_duration_buckets],
           unit: :millisecond
@@ -52,47 +60,49 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           [:imgd, :engine, :execution, :exception, :total],
           event_name: [:imgd, :engine, :execution, :exception],
           description: "Total number of workflow execution exceptions",
-          tags: [:workflow_id, :workflow_name, :exception_type],
+          tags: [:workflow_id, :workflow_version_id, :workflow_version_tag, :exception_type],
           tag_values: fn meta ->
             %{
-              workflow_id: meta.workflow_id || "unknown",
-              workflow_name: meta[:workflow_name] || "unknown",
+              workflow_id: safe_string(meta.workflow_id),
+              workflow_version_id: safe_string(meta.workflow_version_id),
+              workflow_version_tag: safe_string(meta[:workflow_version_tag]),
               exception_type: exception_type(meta.exception)
             }
           end
         ),
 
         # ====================================================================
-        # Step Metrics
+        # Node Metrics
         # ====================================================================
 
         counter(
-          [:imgd, :engine, :step, :total],
-          event_name: [:imgd, :engine, :step, :stop],
-          description: "Total number of step executions",
-          tags: [:workflow_id, :step_name, :step_type, :status],
-          tag_values: &step_tag_values/1
+          [:imgd, :engine, :node, :total],
+          event_name: [:imgd, :engine, :node, :stop],
+          description: "Total number of node executions",
+          tags: [:workflow_id, :workflow_version_id, :node_id, :node_type_id, :status],
+          tag_values: &node_tag_values/1
         ),
         distribution(
-          [:imgd, :engine, :step, :duration, :milliseconds],
-          event_name: [:imgd, :engine, :step, :stop],
-          description: "Step execution duration in milliseconds",
+          [:imgd, :engine, :node, :duration, :milliseconds],
+          event_name: [:imgd, :engine, :node, :stop],
+          description: "Node execution duration in milliseconds",
           measurement: :duration_ms,
-          tags: [:workflow_id, :step_name, :step_type, :status],
-          tag_values: &step_tag_values/1,
-          reporter_options: [buckets: @step_duration_buckets],
+          tags: [:workflow_id, :workflow_version_id, :node_id, :node_type_id, :status],
+          tag_values: &node_tag_values/1,
+          reporter_options: [buckets: @node_duration_buckets],
           unit: :millisecond
         ),
         counter(
-          [:imgd, :engine, :step, :exception, :total],
-          event_name: [:imgd, :engine, :step, :exception],
-          description: "Total number of step execution exceptions",
-          tags: [:workflow_id, :step_name, :step_type, :exception_type],
+          [:imgd, :engine, :node, :exception, :total],
+          event_name: [:imgd, :engine, :node, :exception],
+          description: "Total number of node execution exceptions",
+          tags: [:workflow_id, :workflow_version_id, :node_id, :node_type_id, :exception_type],
           tag_values: fn meta ->
             %{
-              workflow_id: meta.workflow_id || "unknown",
-              step_name: meta.step_name || "unknown",
-              step_type: meta.step_type || "unknown",
+              workflow_id: safe_string(meta.workflow_id),
+              workflow_version_id: safe_string(meta.workflow_version_id),
+              node_id: safe_string(meta.node_id),
+              node_type_id: safe_string(meta.node_type_id),
               exception_type: exception_type(meta.exception)
             }
           end
@@ -121,10 +131,10 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           measurement: :pending_executions
         ),
         last_value(
-          [:imgd, :engine, :steps, :running],
+          [:imgd, :engine, :nodes, :running],
           event_name: [:imgd, :engine, :stats, :poll],
-          description: "Number of currently running steps",
-          measurement: :running_steps
+          description: "Number of currently running nodes",
+          measurement: :running_nodes
         )
       ]
     )
@@ -136,33 +146,36 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
 
     # Count active executions
     active_executions =
-      Imgd.Executions.Execution
+      Execution
       |> where([e], e.status == :running)
-      |> Imgd.Repo.aggregate(:count)
+      |> Imgd.Repo.aggregate(:count, :id)
 
     pending_executions =
-      Imgd.Executions.Execution
+      Execution
       |> where([e], e.status == :pending)
-      |> Imgd.Repo.aggregate(:count)
+      |> Imgd.Repo.aggregate(:count, :id)
 
-    # todo: implement workflow nodes and steps
-    running_steps =
-      :telemetry.execute(
-        [:imgd, :engine, :stats, :poll],
-        %{
-          active_executions: active_executions,
-          pending_executions: pending_executions,
-          running_steps: running_steps
-        },
-        %{}
-      )
+    running_nodes =
+      NodeExecution
+      |> where([ne], ne.status == :running)
+      |> Imgd.Repo.aggregate(:count, :id)
+
+    :telemetry.execute(
+      [:imgd, :engine, :stats, :poll],
+      %{
+        active_executions: active_executions,
+        pending_executions: pending_executions,
+        running_nodes: running_nodes
+      },
+      %{}
+    )
   rescue
     e ->
       Logger.warning("Failed to poll engine stats: #{Exception.message(e)}")
 
       :telemetry.execute(
         [:imgd, :engine, :stats, :poll],
-        %{active_executions: 0, pending_executions: 0, running_steps: 0},
+        %{active_executions: 0, pending_executions: 0, running_nodes: 0},
         %{}
       )
   end
@@ -174,17 +187,19 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
   defp execution_tag_values(meta) do
     %{
       workflow_id: safe_string(meta.workflow_id),
-      workflow_name: safe_string(meta[:workflow_name]),
+      workflow_version_id: safe_string(meta.workflow_version_id),
+      workflow_version_tag: safe_string(meta[:workflow_version_tag]),
       status: safe_atom(meta.status),
       trigger_type: safe_atom(meta[:trigger_type])
     }
   end
 
-  defp step_tag_values(meta) do
+  defp node_tag_values(meta) do
     %{
       workflow_id: safe_string(meta.workflow_id),
-      step_name: safe_string(meta.step_name),
-      step_type: safe_string(meta.step_type),
+      workflow_version_id: safe_string(meta.workflow_version_id),
+      node_id: safe_string(meta.node_id),
+      node_type_id: safe_string(meta.node_type_id),
       status: safe_atom(meta.status)
     }
   end
