@@ -13,19 +13,20 @@ defmodule Imgd.Sandbox.Executor do
   @result_prefix "__IMGD_RESULT__"
 
   @bootstrap_script """
-  import * as std from 'std';
-
   const RESULT_PREFIX = "#{@result_prefix}";
+
+  const writer = globalThis.print || (() => {});
+  const log = (...messages) => writer(messages.map((value) => String(value)).join(" "));
 
   const encodeResult = (result) => {
     try {
-      std.out.puts(RESULT_PREFIX + JSON.stringify(result) + "\\n");
+      writer(RESULT_PREFIX + JSON.stringify(result));
     } catch (err) {
       const fallback = {
         ok: false,
         error: "Failed to encode result: " + String(err && err.message ? err.message : err)
       };
-      std.out.puts(RESULT_PREFIX + JSON.stringify(fallback) + "\\n");
+      writer(RESULT_PREFIX + JSON.stringify(fallback));
     }
   };
 
@@ -51,12 +52,8 @@ defmodule Imgd.Sandbox.Executor do
     }
   };
 
-  const redirectConsole = () => {
-    const sink = (...messages) => {
-      try {
-        std.err.puts(messages.map((value) => String(value)).join(" ") + "\\n");
-      } catch (_err) {}
-    };
+  const setupConsole = () => {
+    const sink = (...messages) => log(...messages);
 
     globalThis.console = {
       log: sink,
@@ -65,27 +62,38 @@ defmodule Imgd.Sandbox.Executor do
       error: sink,
       debug: sink
     };
-    globalThis.print = (...messages) => sink(...messages);
   };
 
   const formatError = (err) => {
     if (!err) return "Unknown error";
-    if (typeof err === "object" && err.stack) return String(err.stack);
-    return String(err.message || err);
+
+    if (typeof err === "object") {
+      const message = String(err.message || err);
+      if (err.stack) return message + "\\n" + String(err.stack);
+      return message;
+    }
+
+    return String(err);
+  };
+
+  const readPayload = () => {
+    const argv = globalThis.scriptArgs || [];
+    if (!Array.isArray(argv) || argv.length === 0) return null;
+    return argv[argv.length - 1];
   };
 
   const main = async () => {
-    redirectConsole();
+    setupConsole();
 
-    const payloadEnv = std.getenv("IMGD_PAYLOAD");
-    if (!payloadEnv) {
+    const payloadRaw = readPayload();
+    if (typeof payloadRaw !== "string") {
       encodeResult({ ok: false, error: "Missing payload" });
       return;
     }
 
     let payload;
     try {
-      payload = JSON.parse(payloadEnv);
+      payload = JSON.parse(payloadRaw);
     } catch (err) {
       encodeResult({ ok: false, error: "Invalid payload: " + String(err && err.message ? err.message : err) });
       return;
@@ -112,7 +120,9 @@ defmodule Imgd.Sandbox.Executor do
     }
   };
 
-  main().finally(() => std.exit(0));
+  main().catch((err) => {
+    encodeResult({ ok: false, error: formatError(err) });
+  });
   """
 
   @spec run(String.t(), Config.t()) :: {:ok, String.t(), map()} | {:error, term()}
@@ -122,10 +132,10 @@ defmodule Imgd.Sandbox.Executor do
     with {:ok, wasi_options} <- build_wasi_options(payload),
          {:ok, instance} <- WasmRuntime.new_instance(config, wasi_options) do
       try do
-        with {:ok, raw} <- execute(instance, config) do
-          fuel_used = fuel_consumed(instance.store, config.fuel)
-          {:ok, raw, %{fuel_consumed: fuel_used}}
-        end
+      with {:ok, raw, logs} <- execute(instance, config) do
+        fuel_used = fuel_consumed(instance.store, config.fuel)
+        {:ok, raw, Map.merge(logs, %{fuel_consumed: fuel_used})}
+      end
       after
         GenServer.stop(instance.pid)
       end
@@ -140,8 +150,8 @@ defmodule Imgd.Sandbox.Executor do
     with {:ok, stdout} <- Pipe.new(),
          {:ok, stderr} <- Pipe.new() do
       opts = %WasiOptions{
-        args: runtime_args(),
-        env: %{"IMGD_PAYLOAD" => payload},
+        args: runtime_args(payload),
+        env: %{},
         stdout: stdout,
         stderr: stderr
       }
@@ -162,26 +172,44 @@ defmodule Imgd.Sandbox.Executor do
     result =
       case call_result do
         {:ok, _} ->
-          with :ok <- enforce_output_limit_bytes(stdout_data, max_output_size),
-               {:ok, output} <- extract_result(stdout_data) do
-            {:ok, output}
-          end
-
-        {:trap, reason} ->
-          {:error, classify_trap(reason)}
+          handle_output(stdout_data, max_output_size)
 
         {:error, msg} when is_binary(msg) ->
-          {:error, classify_message(msg)}
+          if proc_exit?(msg) do
+            handle_output(stdout_data, max_output_size)
+          else
+            {:error, classify_message(msg)}
+          end
+
+        {:trap, reason} when is_binary(reason) ->
+          if proc_exit?(reason) do
+            handle_output(stdout_data, max_output_size)
+          else
+            {:error, classify_trap(reason)}
+          end
 
         {:error, reason} ->
           {:error, {:wasm_error, reason}}
       end
 
-    maybe_attach_logs(result, stdout_data, stderr_data)
+    case result do
+      {:ok, output} ->
+        {:ok, output, %{stdout: stdout_data, stderr: stderr_data}}
+
+      {:error, reason} ->
+        maybe_attach_logs({:error, reason}, stdout_data, stderr_data)
+    end
   end
 
-  defp runtime_args do
-    ["qjs", "-m", "-e", bootstrap_script()]
+  defp handle_output(stdout_data, max_output_size) do
+    with :ok <- enforce_output_limit_bytes(stdout_data, max_output_size),
+         {:ok, output} <- extract_result(stdout_data) do
+      {:ok, output}
+    end
+  end
+
+  defp runtime_args(payload) do
+    ["qjs", "-m", "-e", bootstrap_script(), "--", payload]
   end
 
   defp bootstrap_script do
@@ -200,6 +228,10 @@ defmodule Imgd.Sandbox.Executor do
   end
 
   defp enforce_output_limit_bytes(_data, _max_output_size), do: :ok
+
+  defp proc_exit?(message) when is_binary(message) do
+    String.contains?(message, "__wasi_proc_exit")
+  end
 
   defp extract_result(stdout) do
     case :binary.matches(stdout, @result_prefix) do

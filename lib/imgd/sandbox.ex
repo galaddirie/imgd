@@ -25,10 +25,10 @@ defmodule Imgd.Sandbox do
       {final_result, status_meta} =
         case result do
           {:ok, value, metrics} ->
-            {{:ok, value}, %{status: :ok, fuel_consumed: metrics[:fuel_consumed]}}
+            {{:ok, value}, Map.merge(metadata, %{status: :ok, fuel_consumed: metrics[:fuel_consumed]})}
 
           {:error, error} ->
-            {{:error, error}, %{status: :error}}
+            {{:error, error}, Map.merge(metadata, %{status: :error})}
         end
 
       {final_result, status_meta}
@@ -40,12 +40,37 @@ defmodule Imgd.Sandbox do
          :ok <- ensure_pool_running(),
          :ok <- Validator.validate_code(code, config),
          :ok <- Validator.validate_args(config.args),
-         {:ok, raw, metrics} <- execute_in_flame(code, config),
-         {:ok, result} <- Result.parse(raw) do
-      {:ok, result, metrics}
+         {:ok, raw, metrics} <- execute_in_flame(code, config) do
+      case Result.parse(raw) do
+        {:ok, result} ->
+          {:ok, result, metrics}
+
+        {:error, {:runtime_error, msg}} ->
+          {:error, Error.wrap({:runtime_error, attach_logs(msg, metrics)})}
+
+        {:error, reason} ->
+          {:error, Error.wrap(reason)}
+      end
     else
       {:error, reason} -> {:error, Error.wrap(reason)}
     end
+  end
+
+  defp attach_logs(msg, %{stdout: stdout, stderr: stderr}) do
+    logs =
+      [stdout: stdout, stderr: stderr]
+      |> Enum.map(fn {label, data} -> {label, String.trim(data)} end)
+      |> Enum.filter(fn {_label, data} -> data != "" end)
+      |> Enum.map(fn {label, data} -> "#{label}: #{truncate(data)}" end)
+      |> Enum.join(" | ")
+
+    if logs == "", do: msg, else: "#{msg} (#{logs})"
+  end
+
+  defp attach_logs(msg, _metrics), do: msg
+
+  defp truncate(str) do
+    if byte_size(str) > 500, do: binary_part(str, 0, 500) <> "...", else: str
   end
 
   defp execute_in_flame(code, config) do
@@ -58,6 +83,7 @@ defmodule Imgd.Sandbox do
     )
   catch
     :exit, {:timeout, _} -> {:error, {:timeout, config.timeout}}
+    :exit, :timeout -> {:error, {:timeout, config.timeout}}
     :exit, reason -> {:error, {:flame_error, reason}}
   end
 
