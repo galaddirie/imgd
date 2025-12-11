@@ -12,8 +12,7 @@ defmodule Imgd.Executions.Context do
     :node_outputs,
     # Workflow-level variables
     :variables,
-    # Environment variables
-    :env,
+
     :current_node_id,
     :current_input,
     :metadata
@@ -38,7 +37,6 @@ defmodule Imgd.Executions.Context do
       trigger_data: execution.trigger_data,
       node_outputs: execution.context,
       variables: Map.get(execution.definition.settings, "variables", %{}),
-      env: load_env_vars(),
       current_node_id: current_node_id,
       current_input: current_input,
       metadata: %{
