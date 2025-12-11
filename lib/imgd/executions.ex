@@ -4,9 +4,16 @@ defmodule Imgd.Executions do
 
   All functions require an `Imgd.Accounts.Scope` with a user, ensuring callers
   only interact with their own workflows and executions.
+
+  ## Return Value Conventions
+
+  - Query functions scoped by user in the query itself return raw values
+  - Functions that verify ownership of a passed struct return `{:ok, result} | {:error, reason}`
+  - Write operations return `{:ok, struct} | {:error, changeset | reason}`
   """
 
   import Ecto.Query, warn: false
+  import Imgd.ContextHelpers, only: [normalize_attrs: 1, scope_user_id!: 1]
 
   alias Imgd.Accounts.Scope
   alias Imgd.Executions.{Execution, NodeExecution}
@@ -14,6 +21,10 @@ defmodule Imgd.Executions do
   alias Imgd.Repo
 
   @type scope :: %Scope{}
+
+  # ============================================================================
+  # Executions
+  # ============================================================================
 
   @doc """
   Lists executions visible to the scope's user.
@@ -23,6 +34,9 @@ defmodule Imgd.Executions do
     * `:workflow_id` - limit to a workflow id
     * `:status` - status atom or list of statuses
     * `:limit` - max rows
+    * `:offset` - rows to skip (for pagination)
+    * `:before` - cursor-based pagination, executions before this datetime
+    * `:after` - cursor-based pagination, executions after this datetime
     * `:preload` - list of associations to preload
     * `:order` - `:desc_started` (default) or `:desc_inserted`
   """
@@ -35,8 +49,10 @@ defmodule Imgd.Executions do
     |> select([e, _w], e)
     |> maybe_filter_workflow(opts)
     |> maybe_filter_status(opts)
+    |> maybe_filter_cursor(opts)
     |> maybe_order_executions(opts)
     |> maybe_limit(opts)
+    |> maybe_offset(opts)
     |> maybe_preload(opts)
     |> Repo.all()
   end
@@ -90,7 +106,7 @@ defmodule Imgd.Executions do
          {:ok, version} <- resolve_version_for_execution(workflow, attrs) do
       params =
         attrs
-        |> drop_forbidden_execution_keys()
+        |> drop_protected_execution_keys()
         |> Map.put(:workflow_id, workflow.id)
         |> Map.put(:workflow_version_id, version.id)
         |> Map.put_new(:triggered_by_user_id, scope.user.id)
@@ -107,37 +123,81 @@ defmodule Imgd.Executions do
   def update_execution(%Scope{} = scope, %Execution{} = execution, attrs) do
     attrs = normalize_attrs(attrs)
 
-    with :ok <- ensure_execution_in_scope(scope, execution) do
+    with :ok <- authorize_execution(scope, execution) do
       execution
-      |> Execution.changeset(drop_forbidden_execution_keys(attrs))
+      |> Execution.changeset(drop_protected_execution_keys(attrs))
       |> Repo.update()
     end
   end
 
+  # ============================================================================
+  # Node Executions
+  # ============================================================================
+
   @doc """
   Lists node executions for a given execution.
+
+  Returns `{:ok, node_executions}` or `{:error, :forbidden}`.
   """
   def list_node_executions(%Scope{} = scope, %Execution{} = execution, opts \\ []) do
-    with :ok <- ensure_execution_in_scope(scope, execution) do
-      NodeExecution
-      |> where([n], n.execution_id == ^execution.id)
-      |> order_by([n], asc: n.inserted_at)
-      |> maybe_preload(opts)
-      |> maybe_limit(opts)
-      |> Repo.all()
+    with :ok <- authorize_execution(scope, execution) do
+      node_executions =
+        NodeExecution
+        |> where([n], n.execution_id == ^execution.id)
+        |> order_by([n], asc: n.inserted_at)
+        |> maybe_preload(opts)
+        |> maybe_limit(opts)
+        |> maybe_offset(opts)
+        |> Repo.all()
+
+      {:ok, node_executions}
     end
   end
 
   @doc """
+  Fetches a node execution by ID, verifying ownership through the execution chain.
+
+  Returns the node execution or nil.
+  """
+  def get_node_execution(%Scope{} = scope, id, opts \\ []) do
+    user_id = scope_user_id!(scope)
+
+    NodeExecution
+    |> join(:inner, [n], e in assoc(n, :execution))
+    |> join(:inner, [_n, e], w in assoc(e, :workflow))
+    |> where([n, _e, w], n.id == ^id and w.user_id == ^user_id)
+    |> select([n, _e, _w], n)
+    |> maybe_preload(opts)
+    |> Repo.one()
+  end
+
+  @doc """
+  Fetches a node execution by ID or raises.
+  """
+  def get_node_execution!(%Scope{} = scope, id, opts \\ []) do
+    user_id = scope_user_id!(scope)
+
+    NodeExecution
+    |> join(:inner, [n], e in assoc(n, :execution))
+    |> join(:inner, [_n, e], w in assoc(e, :workflow))
+    |> where([n, _e, w], n.id == ^id and w.user_id == ^user_id)
+    |> select([n, _e, _w], n)
+    |> maybe_preload(opts)
+    |> Repo.one!()
+  end
+
+  @doc """
   Creates a node execution for the given execution.
+
+  Returns `{:ok, node_execution}` or `{:error, reason}`.
   """
   def create_node_execution(%Scope{} = scope, %Execution{} = execution, attrs \\ %{}) do
     attrs = normalize_attrs(attrs)
 
-    with :ok <- ensure_execution_in_scope(scope, execution) do
+    with :ok <- authorize_execution(scope, execution) do
       attrs =
         attrs
-        |> drop_forbidden_node_keys()
+        |> drop_protected_node_keys()
         |> Map.put(:execution_id, execution.id)
 
       %NodeExecution{}
@@ -148,13 +208,15 @@ defmodule Imgd.Executions do
 
   @doc """
   Updates a node execution after confirming ownership.
+
+  Returns `{:ok, node_execution}` or `{:error, reason}`.
   """
   def update_node_execution(%Scope{} = scope, %NodeExecution{} = node_execution, attrs) do
     attrs = normalize_attrs(attrs)
 
-    with :ok <- ensure_node_execution_in_scope(scope, node_execution) do
+    with :ok <- authorize_node_execution(scope, node_execution) do
       node_execution
-      |> NodeExecution.changeset(drop_forbidden_node_keys(attrs))
+      |> NodeExecution.changeset(drop_protected_node_keys(attrs))
       |> Repo.update()
     end
   end
@@ -166,10 +228,9 @@ defmodule Imgd.Executions do
     NodeExecution.changeset(node_execution, attrs)
   end
 
-  # Helpers
-
-  defp scope_user_id!(%Scope{user: %{id: user_id}}) when not is_nil(user_id), do: user_id
-  defp scope_user_id!(_), do: raise(ArgumentError, "current_scope with user is required")
+  # ============================================================================
+  # Authorization Helpers
+  # ============================================================================
 
   defp authorize_workflow(%Scope{} = scope, %Workflow{} = workflow) do
     case workflow.user_id == scope_user_id!(scope) do
@@ -178,76 +239,73 @@ defmodule Imgd.Executions do
     end
   end
 
-  defp ensure_execution_in_scope(%Scope{} = scope, %Execution{} = execution) do
+  @doc false
+  # Single-query authorization for executions.
+  # Always performs a DB check to avoid issues with partially-loaded structs.
+  defp authorize_execution(%Scope{} = scope, %Execution{} = execution) do
     user_id = scope_user_id!(scope)
 
-    cond do
-      match?(%Workflow{user_id: ^user_id}, execution.workflow) ->
-        :ok
+    authorized =
+      Repo.exists?(
+        from e in Execution,
+          join: w in assoc(e, :workflow),
+          where: e.id == ^execution.id and w.user_id == ^user_id
+      )
 
-      not is_nil(execution.workflow_id) and
-          Repo.exists?(
-            from w in Workflow, where: w.id == ^execution.workflow_id and w.user_id == ^user_id
-          ) ->
-        :ok
-
-      not is_nil(execution.id) and
-          Repo.exists?(
-            from e in Execution,
-              join: w in assoc(e, :workflow),
-              where: e.id == ^execution.id and w.user_id == ^user_id
-          ) ->
-        :ok
-
-      true ->
-        {:error, :forbidden}
-    end
+    if authorized, do: :ok, else: {:error, :forbidden}
   end
 
-  defp ensure_node_execution_in_scope(%Scope{} = scope, %NodeExecution{} = node_execution) do
+  @doc false
+  # Single-query authorization for node executions.
+  defp authorize_node_execution(%Scope{} = scope, %NodeExecution{} = node_execution) do
     user_id = scope_user_id!(scope)
 
-    case Repo.exists?(
-           from n in NodeExecution,
-             join: e in assoc(n, :execution),
-             join: w in assoc(e, :workflow),
-             where: n.id == ^node_execution.id and w.user_id == ^user_id
-         ) do
-      true -> :ok
-      false -> {:error, :forbidden}
-    end
+    authorized =
+      Repo.exists?(
+        from n in NodeExecution,
+          join: e in assoc(n, :execution),
+          join: w in assoc(e, :workflow),
+          where: n.id == ^node_execution.id and w.user_id == ^user_id
+      )
+
+    if authorized, do: :ok, else: {:error, :forbidden}
   end
+
+  # ============================================================================
+  # Version Resolution
+  # ============================================================================
 
   defp resolve_version_for_execution(%Workflow{} = workflow, attrs) do
     provided_version = Map.get(attrs, :workflow_version) || Map.get(attrs, "workflow_version")
+    provided_version_id = Map.get(attrs, :workflow_version_id) || Map.get(attrs, "workflow_version_id")
 
     cond do
       match?(%WorkflowVersion{}, provided_version) ->
         validate_version_belongs(workflow, provided_version)
 
-      Map.has_key?(attrs, :workflow_version_id) ->
-        load_version(workflow, Map.get(attrs, :workflow_version_id))
+      is_binary(provided_version_id) ->
+        load_and_validate_version(workflow, provided_version_id)
 
-      Map.has_key?(attrs, "workflow_version_id") ->
-        load_version(workflow, Map.get(attrs, "workflow_version_id"))
+      not is_nil(provided_version_id) ->
+        {:error, :invalid_version_id}
 
       match?(%WorkflowVersion{}, workflow.published_version) ->
         validate_version_belongs(workflow, workflow.published_version)
 
-      not is_nil(workflow.published_version_id) ->
-        load_version(workflow, workflow.published_version_id)
+      is_binary(workflow.published_version_id) ->
+        load_and_validate_version(workflow, workflow.published_version_id)
 
       true ->
         {:error, :not_published}
     end
   end
 
-  defp load_version(%Workflow{} = workflow, version_id) when is_binary(version_id) do
-    version = Repo.get(WorkflowVersion, version_id)
-    validate_version_belongs(workflow, version)
+  defp load_and_validate_version(%Workflow{} = workflow, version_id) do
+    case Repo.get(WorkflowVersion, version_id) do
+      nil -> {:error, :version_not_found}
+      version -> validate_version_belongs(workflow, version)
+    end
   end
-
-  defp load_version(%Workflow{}, _), do: {:error, :not_published}
 
   defp validate_version_belongs(
          %Workflow{id: workflow_id},
@@ -257,7 +315,10 @@ defmodule Imgd.Executions do
   end
 
   defp validate_version_belongs(_workflow, %WorkflowVersion{}), do: {:error, :version_mismatch}
-  defp validate_version_belongs(_workflow, _nil_version), do: {:error, :not_published}
+
+  # ============================================================================
+  # Query Helpers
+  # ============================================================================
 
   defp maybe_filter_workflow(query, opts) do
     cond do
@@ -275,16 +336,23 @@ defmodule Imgd.Executions do
 
   defp maybe_filter_status(query, opts) do
     case Keyword.get(opts, :status) do
-      nil ->
-        query
-
-      statuses when is_list(statuses) ->
-        where(query, [e], e.status in ^statuses)
-
-      status ->
-        where(query, [e], e.status == ^status)
+      nil -> query
+      statuses when is_list(statuses) -> where(query, [e], e.status in ^statuses)
+      status -> where(query, [e], e.status == ^status)
     end
   end
+
+  defp maybe_filter_cursor(query, opts) do
+    query
+    |> maybe_filter_before(Keyword.get(opts, :before))
+    |> maybe_filter_after(Keyword.get(opts, :after))
+  end
+
+  defp maybe_filter_before(query, nil), do: query
+  defp maybe_filter_before(query, before), do: where(query, [e], e.started_at < ^before)
+
+  defp maybe_filter_after(query, nil), do: query
+  defp maybe_filter_after(query, after_dt), do: where(query, [e], e.started_at > ^after_dt)
 
   defp maybe_order_executions(query, opts) do
     case Keyword.get(opts, :order, :desc_started) do
@@ -300,6 +368,13 @@ defmodule Imgd.Executions do
     end
   end
 
+  defp maybe_offset(query, opts) do
+    case Keyword.get(opts, :offset) do
+      nil -> query
+      offset -> offset(query, ^offset)
+    end
+  end
+
   defp maybe_preload(query, opts) do
     case Keyword.get(opts, :preload, []) do
       [] -> query
@@ -307,7 +382,11 @@ defmodule Imgd.Executions do
     end
   end
 
-  defp drop_forbidden_execution_keys(attrs) when is_map(attrs) do
+  # ============================================================================
+  # Key Filtering
+  # ============================================================================
+
+  defp drop_protected_execution_keys(attrs) when is_map(attrs) do
     Map.drop(attrs, [
       :workflow_id,
       "workflow_id",
@@ -324,9 +403,9 @@ defmodule Imgd.Executions do
     ])
   end
 
-  defp drop_forbidden_execution_keys(attrs), do: attrs
+  defp drop_protected_execution_keys(attrs), do: attrs
 
-  defp drop_forbidden_node_keys(attrs) when is_map(attrs) do
+  defp drop_protected_node_keys(attrs) when is_map(attrs) do
     Map.drop(attrs, [
       :execution_id,
       "execution_id",
@@ -339,10 +418,5 @@ defmodule Imgd.Executions do
     ])
   end
 
-  defp drop_forbidden_node_keys(attrs), do: attrs
-
-  defp normalize_attrs(nil), do: %{}
-  defp normalize_attrs(attrs) when is_map(attrs), do: attrs
-  defp normalize_attrs(attrs) when is_list(attrs), do: Map.new(attrs)
-  defp normalize_attrs(attrs), do: attrs
+  defp drop_protected_node_keys(attrs), do: attrs
 end

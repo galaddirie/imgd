@@ -4,9 +4,16 @@ defmodule Imgd.Workflows do
 
   All operations are scoped to the caller via `Imgd.Accounts.Scope`. Scope
   must include a user; otherwise an `ArgumentError` is raised.
+
+  ## Return Value Conventions
+
+  - Query functions scoped by user in the query itself return raw values
+  - Functions that verify ownership of a passed struct return `{:ok, result} | {:error, reason}`
+  - Write operations return `{:ok, struct} | {:error, changeset | reason}`
   """
 
   import Ecto.Query, warn: false
+  import Imgd.ContextHelpers, only: [normalize_attrs: 1, scope_user_id!: 1]
 
   alias Imgd.Accounts.Scope
   alias Imgd.Workflows.{Workflow, WorkflowVersion}
@@ -14,12 +21,17 @@ defmodule Imgd.Workflows do
 
   @type scope :: %Scope{}
 
+  # ============================================================================
+  # Workflows
+  # ============================================================================
+
   @doc """
   Lists workflows for the given scope.
 
   Supports optional filters:
     * `:status` - a status atom or list of statuses
     * `:limit` - max number of rows
+    * `:offset` - number of rows to skip (for pagination)
     * `:preload` - preload associations
     * `:order` - one of `:desc_inserted` (default), `:asc_name`, `:desc_name`
   """
@@ -31,6 +43,7 @@ defmodule Imgd.Workflows do
     |> maybe_filter_status(opts)
     |> maybe_order(opts)
     |> maybe_limit(opts)
+    |> maybe_offset(opts)
     |> maybe_preload(opts)
     |> Repo.all()
   end
@@ -76,7 +89,7 @@ defmodule Imgd.Workflows do
       attrs
       |> normalize_attrs()
       |> Map.put(:user_id, user_id)
-      |> Map.put("user_id", user_id)
+      |> Map.drop(["user_id"])
 
     %Workflow{}
     |> Workflow.changeset(attrs)
@@ -89,7 +102,7 @@ defmodule Imgd.Workflows do
   def update_workflow(%Scope{} = scope, %Workflow{} = workflow, attrs) do
     with :ok <- authorize_workflow(scope, workflow) do
       workflow
-      |> Workflow.changeset(attrs |> normalize_attrs() |> drop_user_keys())
+      |> Workflow.changeset(attrs |> normalize_attrs() |> drop_protected_keys())
       |> Repo.update()
     end
   end
@@ -128,7 +141,7 @@ defmodule Imgd.Workflows do
           status: :draft,
           published_version_id: nil
         })
-        |> Map.merge(drop_user_keys(attrs))
+        |> Map.merge(drop_protected_keys(attrs))
 
       create_workflow(scope, clone_attrs)
     end
@@ -147,8 +160,9 @@ defmodule Imgd.Workflows do
     attrs = normalize_attrs(attrs)
 
     with :ok <- authorize_workflow(scope, workflow),
-         {:ok, version_tag} <- resolve_version_tag(workflow, attrs),
-         {:ok, source_hash} <- build_source_hash(workflow) do
+         {:ok, version_tag} <- resolve_version_tag(workflow, attrs) do
+      source_hash = compute_source_hash(workflow)
+
       Repo.transact(fn ->
         version_params = %{
           version_tag: version_tag,
@@ -180,17 +194,79 @@ defmodule Imgd.Workflows do
     end
   end
 
+  # ============================================================================
+  # Workflow Versions
+  # ============================================================================
+
   @doc """
   Lists workflow versions for a workflow owned by the scope.
+
+  Returns `{:ok, versions}` or `{:error, :forbidden}`.
   """
   def list_workflow_versions(%Scope{} = scope, %Workflow{} = workflow, opts \\ []) do
     with :ok <- authorize_workflow(scope, workflow) do
-      WorkflowVersion
-      |> where([v], v.workflow_id == ^workflow.id)
-      |> order_by([v], desc: v.inserted_at)
-      |> maybe_limit(opts)
-      |> maybe_preload(opts)
-      |> Repo.all()
+      versions =
+        WorkflowVersion
+        |> where([v], v.workflow_id == ^workflow.id)
+        |> order_by([v], desc: v.inserted_at)
+        |> maybe_limit(opts)
+        |> maybe_offset(opts)
+        |> maybe_preload(opts)
+        |> Repo.all()
+
+      {:ok, versions}
+    end
+  end
+
+  @doc """
+  Fetches a specific workflow version by ID.
+
+  Returns `{:ok, version}`, `{:ok, nil}`, or `{:error, :forbidden}`.
+  """
+  def get_workflow_version(%Scope{} = scope, %Workflow{} = workflow, version_id, opts \\ []) do
+    with :ok <- authorize_workflow(scope, workflow) do
+      version =
+        WorkflowVersion
+        |> where([v], v.workflow_id == ^workflow.id and v.id == ^version_id)
+        |> maybe_preload(opts)
+        |> Repo.one()
+
+      {:ok, version}
+    end
+  end
+
+  @doc """
+  Fetches a specific workflow version by ID or raises.
+
+  Returns `{:ok, version}` or `{:error, :forbidden}`.
+  Raises `Ecto.NoResultsError` if not found.
+  """
+  def get_workflow_version!(%Scope{} = scope, %Workflow{} = workflow, version_id, opts \\ []) do
+    with :ok <- authorize_workflow(scope, workflow) do
+      version =
+        WorkflowVersion
+        |> where([v], v.workflow_id == ^workflow.id and v.id == ^version_id)
+        |> maybe_preload(opts)
+        |> Repo.one!()
+
+      {:ok, version}
+    end
+  end
+
+  @doc """
+  Fetches a workflow version by version tag.
+
+  Returns `{:ok, version}`, `{:ok, nil}`, or `{:error, :forbidden}`.
+  """
+  def get_workflow_version_by_tag(%Scope{} = scope, %Workflow{} = workflow, tag, opts \\ []) do
+    with :ok <- authorize_workflow(scope, workflow) do
+      version =
+        WorkflowVersion
+        |> where([v], v.workflow_id == ^workflow.id and v.version_tag == ^tag)
+        |> maybe_preload(opts)
+        |> Repo.one()
+
+      {:ok, version}
     end
   end
 
@@ -201,10 +277,9 @@ defmodule Imgd.Workflows do
     WorkflowVersion.changeset(version, attrs)
   end
 
-  # Helpers
-
-  defp scope_user_id!(%Scope{user: %{id: user_id}}) when not is_nil(user_id), do: user_id
-  defp scope_user_id!(_), do: raise(ArgumentError, "current_scope with user is required")
+  # ============================================================================
+  # Private Helpers
+  # ============================================================================
 
   defp authorize_workflow(%Scope{} = scope, %Workflow{} = workflow) do
     case workflow.user_id == scope_user_id!(scope) do
@@ -213,7 +288,7 @@ defmodule Imgd.Workflows do
     end
   end
 
-  defp drop_user_keys(attrs) when is_map(attrs) do
+  defp drop_protected_keys(attrs) when is_map(attrs) do
     Map.drop(attrs, [
       :user_id,
       "user_id",
@@ -224,18 +299,13 @@ defmodule Imgd.Workflows do
     ])
   end
 
-  defp drop_user_keys(attrs), do: attrs
+  defp drop_protected_keys(attrs), do: attrs
 
   defp maybe_filter_status(query, opts) do
     case Keyword.get(opts, :status) do
-      nil ->
-        query
-
-      statuses when is_list(statuses) ->
-        where(query, [w], w.status in ^statuses)
-
-      status ->
-        where(query, [w], w.status == ^status)
+      nil -> query
+      statuses when is_list(statuses) -> where(query, [w], w.status in ^statuses)
+      status -> where(query, [w], w.status == ^status)
     end
   end
 
@@ -243,6 +313,13 @@ defmodule Imgd.Workflows do
     case Keyword.get(opts, :limit) do
       nil -> query
       limit -> limit(query, ^limit)
+    end
+  end
+
+  defp maybe_offset(query, opts) do
+    case Keyword.get(opts, :offset) do
+      nil -> query
+      offset -> offset(query, ^offset)
     end
   end
 
@@ -275,7 +352,7 @@ defmodule Imgd.Workflows do
     end
   end
 
-  defp build_source_hash(%Workflow{} = workflow) do
+  defp compute_source_hash(%Workflow{} = workflow) do
     payload = %{
       nodes: normalize_embeds(workflow.nodes),
       connections: normalize_embeds(workflow.connections),
@@ -283,13 +360,10 @@ defmodule Imgd.Workflows do
       settings: workflow.settings || %{}
     }
 
-    binary =
-      payload
-      |> Jason.encode!()
-      |> :crypto.hash(:sha256)
-      |> Base.encode16(case: :lower)
-
-    {:ok, binary}
+    payload
+    |> Jason.encode!()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
   end
 
   defp normalize_embeds(nil), do: []
@@ -307,9 +381,4 @@ defmodule Imgd.Workflows do
   end
 
   defp normalize_embed(other), do: other
-
-  defp normalize_attrs(nil), do: %{}
-  defp normalize_attrs(attrs) when is_map(attrs), do: attrs
-  defp normalize_attrs(attrs) when is_list(attrs), do: Map.new(attrs)
-  defp normalize_attrs(attrs), do: attrs
 end
