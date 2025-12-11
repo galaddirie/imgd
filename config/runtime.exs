@@ -47,6 +47,22 @@ if env == :prod do
     ]
 end
 
+if env == :prod do
+  config :flame, :backend, FLAME.FlyBackend
+
+  config :flame, FLAME.FlyBackend,
+    token: System.fetch_env!("FLY_API_TOKEN"),
+    cpu_kind: System.get_env("FLY_CPU_KIND", "shared-cpu-1x"),
+    cpus: String.to_integer(System.get_env("FLY_CPUS", "1")),
+    memory_mb: String.to_integer(System.get_env("FLY_MEMORY_MB", "256"))
+
+  config :imgd, Imgd.Sandbox.Pool,
+    min: 1,
+    max: 20,
+    max_concurrency: 50,
+    idle_shutdown_after: 60_000
+end
+
 # The block below contains prod specific runtime configuration.
 
 # ## Using releases

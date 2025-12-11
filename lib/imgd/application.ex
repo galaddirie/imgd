@@ -7,6 +7,9 @@ defmodule Imgd.Application do
   def start(_type, _args) do
     setup_opentelemetry()
     Imgd.Observability.Telemetry.setup()
+    Imgd.Sandbox.Telemetry.setup()
+
+    flame_parent = FLAME.Parent.get()
 
     children = [
       ImgdWeb.Telemetry,
@@ -17,8 +20,10 @@ defmodule Imgd.Application do
       {Phoenix.PubSub, name: Imgd.PubSub},
       # Node type registry - must start before endpoint so types are available
       Imgd.Nodes.Registry,
-      ImgdWeb.Endpoint
+      Imgd.Sandbox.Supervisor,
+      flame_parent && ImgdWeb.Endpoint
     ]
+    |> Enum.filter(& &1)
 
     opts = [strategy: :one_for_one, name: Imgd.Supervisor]
     Supervisor.start_link(children, opts)

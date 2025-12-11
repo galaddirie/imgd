@@ -24,6 +24,22 @@ config :imgd,
   ecto_repos: [Imgd.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+quickjs_wasm_path = Path.expand("../priv/wasm/quickjs.wasm", __DIR__)
+
+config :imgd, Imgd.Sandbox,
+  quickjs_wasm_path: quickjs_wasm_path,
+  timeout: 5_000,
+  fuel: 10_000_000,
+  memory_mb: 16,
+  max_code_size: 102_400,
+  max_output_size: 1_048_576
+
+config :imgd, Imgd.Sandbox.Pool,
+  min: 0,
+  max: 10,
+  max_concurrency: 20,
+  idle_shutdown_after: 30_000
+
 # Configure the endpoint
 config :imgd, ImgdWeb.Endpoint,
   url: [host: "localhost"],

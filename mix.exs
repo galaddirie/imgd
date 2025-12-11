@@ -82,6 +82,9 @@ defmodule Imgd.MixProject do
       {:opentelemetry_logger_metadata, "~> 0.2.0"},
       {:opentelemetry_liveview, "~> 1.0.0-rc.4"},
 
+      #runtime
+      {:wasmex, "~> 0.13.0"},
+      {:flame, "~> 0.5.3"},
       # Metrics
       {:prom_ex, "~> 1.11"},
 
