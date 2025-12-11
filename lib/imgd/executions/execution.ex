@@ -3,29 +3,18 @@ defmodule Imgd.Executions.Execution do
   Workflow execution instance.
 
   Tracks the runtime state of a single workflow execution including
-  status, timing, and error information.
+  status, timing, context (accumulated node outputs), and error information.
   """
   @derive {Jason.Encoder,
-           only: [
-             :id,
-             :workflow_version_id,
-             :workflow_version_tag,
-             :status,
-             :trigger,
-             :trigger_type,
-             :output,
-             :context,
-             :error,
-             :started_at,
-             :completed_at,
-             :expires_at,
-             :metadata,
-             :workflow_id,
-             :triggered_by_user_id,
-             :inserted_at,
-             :updated_at
+           except: [
+             :__meta__,
+             :workflow,
+             :workflow_version,
+             :triggered_by_user,
+             :node_executions
            ]}
   use Imgd.Schema
+  import Imgd.ChangesetHelpers
 
   alias Imgd.Workflows.{Workflow, WorkflowVersion}
   alias Imgd.Accounts.User
@@ -34,224 +23,140 @@ defmodule Imgd.Executions.Execution do
   @type status :: :pending | :running | :paused | :completed | :failed | :cancelled | :timeout
   @type trigger_type :: :manual | :schedule | :webhook | :event
 
-  @typedoc "Trigger metadata used to start executions"
-  @type trigger :: %{
-          required(:type) => trigger_type(),
-          optional(:data) => map()
-        }
+  @statuses [:pending, :running, :paused, :completed, :failed, :cancelled, :timeout]
+  @trigger_types [:manual, :schedule, :webhook, :event]
 
-  @type runic_log_entry :: map()
+  defmodule Trigger do
+    @moduledoc "Embedded trigger data for an execution"
+    use Ecto.Schema
 
-  @type metadata :: __MODULE__.Metadata.t() | map() | nil
+    @type t :: %__MODULE__{
+            type: Imgd.Executions.Execution.trigger_type(),
+            data: map()
+          }
+
+    @primary_key false
+    embedded_schema do
+      field :type, Ecto.Enum, values: [:manual, :schedule, :webhook, :event]
+      field :data, :map, default: %{}
+    end
+  end
+
+  defmodule Metadata do
+    @moduledoc "Embedded metadata for execution correlation and debugging"
+    use Ecto.Schema
+    @derive Jason.Encoder
+
+    @type t :: %__MODULE__{
+            trace_id: String.t() | nil,
+            correlation_id: String.t() | nil,
+            triggered_by: String.t() | nil,
+            parent_execution_id: Ecto.UUID.t() | nil,
+            tags: map(),
+            extras: map()
+          }
+
+    @primary_key false
+    embedded_schema do
+      field :trace_id, :string
+      field :correlation_id, :string
+      field :triggered_by, :string
+      field :parent_execution_id, :binary_id
+      field :tags, :map, default: %{}
+      field :extras, :map, default: %{}
+    end
+  end
 
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
           workflow_version_id: Ecto.UUID.t(),
           workflow_id: Ecto.UUID.t(),
           status: status(),
-          trigger_type: trigger_type() | String.t(),
-          trigger: trigger(),
-          runic_build_log: [runic_log_entry()],
-          runic_reaction_log: [runic_log_entry()],
-          workflow_version_tag: String.t() | nil,
-          output: map(), # declared output payload from a output node
+          trigger: Trigger.t(),
+          runic_build_log: [map()],
+          runic_reaction_log: [map()],
           context: map(),
+          output: map() | nil,
           error: map() | nil,
           waiting_for: map() | nil,
           started_at: DateTime.t() | nil,
           completed_at: DateTime.t() | nil,
           expires_at: DateTime.t() | nil,
-          metadata: metadata(),
-          workflow: Workflow.t() | Ecto.Association.NotLoaded.t(),
-          workflow_version: WorkflowVersion.t() | Ecto.Association.NotLoaded.t(),
-          triggered_by_user: %User{} | Ecto.Association.NotLoaded.t(),
+          metadata: Metadata.t() | nil,
           triggered_by_user_id: Ecto.UUID.t() | nil,
           inserted_at: DateTime.t(),
           updated_at: DateTime.t()
         }
 
-  @trigger_types [:manual, :schedule, :webhook, :event]
-
   schema "executions" do
     belongs_to :workflow_version, WorkflowVersion
+    belongs_to :workflow, Workflow
 
-    field :status, Ecto.Enum,
-      values: [:pending, :running, :paused, :completed, :failed, :cancelled, :timeout],
-      default: :pending
+    field :status, Ecto.Enum, values: @statuses, default: :pending
 
-    field :trigger, :map,
-      default: %{
-        type: :manual,
-        data: %{} # input data
-      }
+    embeds_one :trigger, Trigger, on_replace: :update
+    embeds_one :metadata, Metadata, on_replace: :update
 
-    # Runic integration - the event log for rebuilding state
-    # ComponentAdded events
+    # Runic integration - event logs for rebuilding state
     field :runic_build_log, {:array, :map}, default: []
-    # ReactionOccurred events
     field :runic_reaction_log, {:array, :map}, default: []
 
-    # Execution context - accumulated outputs from all nodes
+    # Accumulated outputs from all nodes: %{"node_id" => output_data}
     field :context, :map, default: %{}
 
-    # Final output of the execution
+    # Final declared output (from an output node)
     field :output, :map
 
+    # Error details if failed
     field :error, :map
 
-    # For waiting/paused executions
+    # For waiting/paused executions (e.g., awaiting webhook callback)
     field :waiting_for, :map
 
     # Timing
     field :started_at, :utc_datetime_usec
     field :completed_at, :utc_datetime_usec
-    # TTL for long-running cleanup
     field :expires_at, :utc_datetime_usec
 
-    # Metadata for correlation, debugging
-    embeds_one :metadata, Metadata, on_replace: :update do
-      @derive Jason.Encoder
-
-      field :trace_id, :string
-      field :correlation_id, :string
-      field :triggered_by, :string
-      field :parent_execution_id, :binary_id
-      field :tags, :map, default: %{}
-      # Arbitrary custom values callers want to persist
-      field :extras, :map, default: %{}
-    end
-
-    belongs_to :workflow, Workflow
     belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
     has_many :node_executions, NodeExecution
-
-    # Virtual fields used by the UI
-    field :trigger_type, :string, virtual: true
-    field :workflow_version_tag, :string, virtual: true
 
     timestamps()
   end
 
   def changeset(execution, attrs) do
     execution
-    |> cast(
-      attrs,
-      [
-        :workflow_version_id,
-        :workflow_id,
-        :status,
-        :trigger,
-        :runic_build_log,
-        :runic_reaction_log,
-        :context,
-        :output,
-        :error,
-        :waiting_for,
-        :started_at,
-        :completed_at,
-        :expires_at,
-        :metadata,
-        :triggered_by_user_id
-      ],
-      empty_values: []
-    )
-    |> normalize_trigger()
-    |> validate_required([:workflow_version_id, :workflow_id, :status, :trigger])
-    |> validate_trigger()
+    |> cast(attrs, [
+      :workflow_version_id,
+      :workflow_id,
+      :status,
+      :runic_build_log,
+      :runic_reaction_log,
+      :context,
+      :output,
+      :error,
+      :waiting_for,
+      :started_at,
+      :completed_at,
+      :expires_at,
+      :triggered_by_user_id
+    ])
+    |> cast_embed(:trigger, required: true, with: &trigger_changeset/2)
+    |> cast_embed(:metadata, with: &metadata_changeset/2)
+    |> validate_required([:workflow_version_id, :workflow_id, :status])
     |> validate_map_field(:context)
-    |> validate_map_field(:output)
-    |> validate_map_field(:waiting_for, allow_nil: true)
+    |> validate_map_field(:output, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
+    |> validate_map_field(:waiting_for, allow_nil: true)
     |> validate_list_of_maps(:runic_build_log)
     |> validate_list_of_maps(:runic_reaction_log)
-    |> cast_embed(:metadata, with: &metadata_changeset/2, required: false)
   end
 
-  defp normalize_trigger(changeset) do
-    case normalize_trigger_map(get_field(changeset, :trigger)) do
-      {:ok, trigger} -> put_change(changeset, :trigger, trigger)
-      _ -> changeset
-    end
-  end
-
-  defp validate_trigger(changeset) do
-    validate_change(changeset, :trigger, fn :trigger, trigger ->
-      case normalize_trigger_map(trigger) do
-        {:ok, _} ->
-          []
-
-        {:error, :missing} ->
-          [trigger: "must include a trigger type"]
-
-        {:error, :not_map} ->
-          [trigger: "must be a map with type and data keys"]
-
-        {:error, {:invalid_type, value}} ->
-          [trigger: "unsupported trigger type #{inspect(value)}"]
-
-        {:error, :invalid_data} ->
-          [trigger: "trigger data must be a map"]
-      end
-    end)
-  end
-
-  defp normalize_trigger_map(nil), do: {:error, :missing}
-
-  defp normalize_trigger_map(trigger) when is_map(trigger) do
-    type_value = Map.get(trigger, :type) || Map.get(trigger, "type")
-    data = Map.get(trigger, :data) || Map.get(trigger, "data") || %{}
-
-    with {:ok, type} <- cast_trigger_type(type_value),
-         true <- is_map(data) do
-      {:ok, %{type: type, data: data}}
-    else
-      {:error, type_error} -> {:error, {:invalid_type, type_error}}
-      false -> {:error, :invalid_data}
-    end
-  end
-
-  defp normalize_trigger_map(_), do: {:error, :not_map}
-
-  defp cast_trigger_type(type) when type in @trigger_types, do: {:ok, type}
-
-  defp cast_trigger_type(type) when is_binary(type) do
-    case type do
-      "manual" -> {:ok, :manual}
-      "schedule" -> {:ok, :schedule}
-      "webhook" -> {:ok, :webhook}
-      "event" -> {:ok, :event}
-      _ -> {:error, type}
-    end
-  end
-
-  defp cast_trigger_type(type), do: {:error, type}
-
-  defp validate_map_field(changeset, field, opts \\ []) do
-    validate_change(changeset, field, fn ^field, value ->
-      cond do
-        is_map(value) -> []
-        is_nil(value) and Keyword.get(opts, :allow_nil, false) -> []
-        true -> [{field, "must be a map"}]
-      end
-    end)
-  end
-
-  defp validate_list_of_maps(changeset, field) do
-    validate_change(changeset, field, fn ^field, value ->
-      cond do
-        is_list(value) and Enum.all?(value, &is_map/1) ->
-          []
-
-        is_list(value) ->
-          [{field, "must only contain map entries"}]
-
-        is_nil(value) ->
-          []
-
-        true ->
-          [{field, "must be a list of maps"}]
-      end
-    end)
+  defp trigger_changeset(trigger, attrs) do
+    trigger
+    |> cast(attrs, [:type, :data])
+    |> validate_required([:type])
+    |> validate_map_field(:data)
   end
 
   defp metadata_changeset(metadata, attrs) do
@@ -266,5 +171,30 @@ defmodule Imgd.Executions.Execution do
     ])
     |> validate_map_field(:tags, allow_nil: true)
     |> validate_map_field(:extras, allow_nil: true)
+  end
+
+  # Convenience functions
+
+  @doc "Returns the trigger type as an atom."
+  def trigger_type(%__MODULE__{trigger: %Trigger{type: type}}), do: type
+  def trigger_type(%__MODULE__{trigger: nil}), do: nil
+
+  @doc "Returns the trigger input data."
+  def trigger_data(%__MODULE__{trigger: %Trigger{data: data}}), do: data
+  def trigger_data(%__MODULE__{trigger: nil}), do: %{}
+
+  @doc "Checks if the execution is in a terminal state."
+  def terminal?(%__MODULE__{status: status}) when status in [:completed, :failed, :cancelled, :timeout], do: true
+  def terminal?(%__MODULE__{}), do: false
+
+  @doc "Checks if the execution is still running."
+  def active?(%__MODULE__{status: status}) when status in [:pending, :running, :paused], do: true
+  def active?(%__MODULE__{}), do: false
+
+  @doc "Computes duration in milliseconds, or nil if not yet complete."
+  def duration_ms(%__MODULE__{started_at: nil}), do: nil
+  def duration_ms(%__MODULE__{completed_at: nil}), do: nil
+  def duration_ms(%__MODULE__{started_at: started, completed_at: completed}) do
+    DateTime.diff(completed, started, :millisecond)
   end
 end

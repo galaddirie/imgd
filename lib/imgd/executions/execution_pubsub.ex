@@ -1,57 +1,103 @@
-defmodule Imgd.Workflows.ExecutionPubSub do
+defmodule Imgd.Executions.PubSub do
   @moduledoc """
   PubSub broadcasting for workflow execution and node execution updates.
 
-  Designed around the `Execution` and `NodeExecution` schemas so LiveViews and
-  future engine processes can stay in sync as runs progress.
+  Provides real-time updates so LiveViews and other processes can stay
+  in sync as executions progress.
+
+  ## Topics
+
+  - `execution:{id}` - Updates for a specific execution
+  - `workflow_executions:{workflow_id}` - All executions for a workflow
+
+  ## Events
+
+  Execution lifecycle:
+  - `{:execution_started, execution}`
+  - `{:execution_updated, execution}`
+  - `{:execution_completed, execution}`
+  - `{:execution_failed, execution, error}`
+
+  Node lifecycle:
+  - `{:node_started, node_payload}`
+  - `{:node_completed, node_payload}`
+  - `{:node_failed, node_payload}`
   """
 
-  alias Imgd.Executions.NodeExecution
+  alias Imgd.Executions.{Execution, NodeExecution}
 
   @pubsub Imgd.PubSub
 
-  # Topic patterns
+  # Topic builders
+
   def execution_topic(execution_id), do: "execution:#{execution_id}"
   def workflow_executions_topic(workflow_id), do: "workflow_executions:#{workflow_id}"
 
-  # Subscribe
+  # Subscriptions
+
+  @doc "Subscribe to updates for a specific execution."
   def subscribe_execution(execution_id) do
     Phoenix.PubSub.subscribe(@pubsub, execution_topic(execution_id))
   end
 
+  @doc "Unsubscribe from a specific execution's updates."
+  def unsubscribe_execution(execution_id) do
+    Phoenix.PubSub.unsubscribe(@pubsub, execution_topic(execution_id))
+  end
+
+  @doc "Subscribe to all execution updates for a workflow."
   def subscribe_workflow_executions(workflow_id) do
     Phoenix.PubSub.subscribe(@pubsub, workflow_executions_topic(workflow_id))
   end
 
-  # Broadcast execution lifecycle events
-  def broadcast_execution_started(execution) do
+  @doc "Unsubscribe from a workflow's execution updates."
+  def unsubscribe_workflow_executions(workflow_id) do
+    Phoenix.PubSub.unsubscribe(@pubsub, workflow_executions_topic(workflow_id))
+  end
+
+  # Execution lifecycle broadcasts
+
+  @doc "Broadcast that an execution has started."
+  def broadcast_execution_started(%Execution{} = execution) do
     broadcast_execution(:execution_started, execution)
   end
 
-  def broadcast_execution_completed(execution) do
-    broadcast_execution(:execution_completed, execution)
-  end
-
-  def broadcast_execution_failed(execution, error) do
-    broadcast_execution(:execution_failed, execution, error)
-  end
-
-  def broadcast_execution_updated(execution) do
+  @doc "Broadcast that an execution has been updated."
+  def broadcast_execution_updated(%Execution{} = execution) do
     broadcast_execution(:execution_updated, execution)
   end
 
-  # Broadcast node execution events
-  def broadcast_node_started(execution, %NodeExecution{} = node_execution) do
+  @doc "Broadcast that an execution completed successfully."
+  def broadcast_execution_completed(%Execution{} = execution) do
+    broadcast_execution(:execution_completed, execution)
+  end
+
+  @doc "Broadcast that an execution failed."
+  def broadcast_execution_failed(%Execution{} = execution, error \\ nil) do
+    error = error || execution.error
+    message = {:execution_failed, execution, error}
+
+    broadcast(execution.id, message)
+    broadcast_workflow(execution.workflow_id, message)
+  end
+
+  # Node execution broadcasts
+
+  @doc "Broadcast that a node has started executing."
+  def broadcast_node_started(%Execution{} = execution, %NodeExecution{} = node_execution) do
     broadcast_node(:node_started, execution, node_execution)
   end
 
-  def broadcast_node_completed(execution, %NodeExecution{} = node_execution) do
+  @doc "Broadcast that a node completed successfully."
+  def broadcast_node_completed(%Execution{} = execution, %NodeExecution{} = node_execution) do
     broadcast_node(:node_completed, execution, node_execution)
   end
 
-  def broadcast_node_failed(execution, %NodeExecution{} = node_execution, error \\ nil) do
+  @doc "Broadcast that a node failed."
+  def broadcast_node_failed(%Execution{} = execution, %NodeExecution{} = node_execution, error \\ nil) do
     payload =
-      node_payload(node_execution)
+      node_execution
+      |> build_node_payload()
       |> Map.put(:error, error || node_execution.error)
 
     broadcast(execution.id, {:node_failed, payload})
@@ -60,45 +106,39 @@ defmodule Imgd.Workflows.ExecutionPubSub do
 
   # Private helpers
 
-  defp broadcast_execution(event, execution, error \\ nil) do
-    message =
-      case error do
-        nil -> {event, execution}
-        _ -> {event, execution, error}
-      end
+  defp broadcast_execution(event, %Execution{} = execution) do
+    message = {event, execution}
 
     broadcast(execution.id, message)
     broadcast_workflow(execution.workflow_id, message)
   end
 
-  defp broadcast_node(event, execution, %NodeExecution{} = node_execution) do
-    payload = node_payload(node_execution)
+  defp broadcast_node(event, %Execution{} = execution, %NodeExecution{} = node_execution) do
+    payload = build_node_payload(node_execution)
     message = {event, payload}
 
     broadcast(execution.id, message)
     broadcast_workflow(execution.workflow_id, message)
   end
 
-  defp node_payload(%NodeExecution{} = node_execution) do
+  defp build_node_payload(%NodeExecution{} = ne) do
     %{
-      id: node_execution.id,
-      execution_id: node_execution.execution_id,
-      node_id: node_execution.node_id,
-      node_type_id: node_execution.node_type_id,
-      status: node_execution.status,
-      attempt: node_execution.attempt,
-      input_data: node_execution.input_data,
-      output_data: node_execution.output_data,
-      error: node_execution.error,
-      started_at: node_execution.started_at,
-      completed_at: node_execution.completed_at,
-      duration_ms: duration_ms(node_execution.started_at, node_execution.completed_at)
+      id: ne.id,
+      execution_id: ne.execution_id,
+      node_id: ne.node_id,
+      node_type_id: ne.node_type_id,
+      status: ne.status,
+      attempt: ne.attempt,
+      input_data: ne.input_data,
+      output_data: ne.output_data,
+      error: ne.error,
+      queued_at: ne.queued_at,
+      started_at: ne.started_at,
+      completed_at: ne.completed_at,
+      duration_ms: NodeExecution.duration_ms(ne),
+      queue_time_ms: NodeExecution.queue_time_ms(ne)
     }
   end
-
-  defp duration_ms(nil, _), do: nil
-  defp duration_ms(_, nil), do: nil
-  defp duration_ms(started, finished), do: DateTime.diff(finished, started, :millisecond)
 
   defp broadcast(execution_id, message) do
     Phoenix.PubSub.broadcast(@pubsub, execution_topic(execution_id), message)

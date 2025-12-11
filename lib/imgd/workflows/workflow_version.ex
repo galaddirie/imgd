@@ -5,86 +5,32 @@ defmodule Imgd.Workflows.WorkflowVersion do
   Created each time a workflow is published, preserving the exact
   definition for audit trails and execution reproducibility.
   """
+  @derive {Jason.Encoder,
+           except: [
+             :__meta__,
+             :workflow,
+             :published_by_user
+           ]}
   use Imgd.Schema
+  import Imgd.ChangesetHelpers
 
   alias Imgd.Workflows.Workflow
+  alias Imgd.Workflows.Embeds.{Node, Connection, Trigger}
   alias Imgd.Accounts.User
-
-  # Embedded schema modules
-  defmodule Node do
-    use Ecto.Schema
-    @primary_key false
-
-    embedded_schema do
-      field :id, :string
-      field :type_id, :string
-      field :name, :string
-      field :config, :map, default: %{}
-      field :position, :map, default: %{}
-      field :notes, :string
-    end
-  end
-
-  defmodule Connection do
-    use Ecto.Schema
-    @primary_key false
-
-    embedded_schema do
-      field :id, :string
-      field :source_node_id, :string
-      field :source_output, :string, default: "main"
-      field :target_node_id, :string
-      field :target_input, :string, default: "main"
-    end
-  end
-
-  defmodule Trigger do
-    use Ecto.Schema
-    @primary_key false
-
-    embedded_schema do
-      field :type, Ecto.Enum, values: [:manual, :webhook, :schedule, :event]
-      field :config, :map, default: %{}
-    end
-  end
-
-  @type trigger_type :: Workflow.trigger_type()
-
-  @typedoc "Node snapshot stored on a version"
-  @type workflow_node :: %Node{
-          id: String.t(),
-          type_id: String.t(),
-          name: String.t(),
-          config: map(),
-          position: map(),
-          notes: String.t() | nil
-        }
-
-  @typedoc "Connection snapshot stored on a version"
-  @type connection :: %Connection{
-          id: String.t(),
-          source_node_id: String.t(),
-          source_output: String.t(),
-          target_node_id: String.t(),
-          target_input: String.t()
-        }
-
-  @typedoc "Trigger snapshot stored on a version"
-  @type trigger :: %Trigger{type: trigger_type(), config: map()}
 
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
           version_tag: String.t(),
           source_hash: String.t(),
-          nodes: [workflow_node()],
-          connections: [connection()],
-          triggers: [trigger()],
+          nodes: [Node.t()],
+          connections: [Connection.t()],
+          triggers: [Trigger.t()],
           changelog: String.t() | nil,
           published_at: DateTime.t() | nil,
           published_by: Ecto.UUID.t() | nil,
           workflow_id: Ecto.UUID.t(),
           workflow: Workflow.t() | Ecto.Association.NotLoaded.t(),
-          published_by_user: %User{} | Ecto.Association.NotLoaded.t() | nil,
+          published_by_user: User.t() | Ecto.Association.NotLoaded.t() | nil,
           inserted_at: DateTime.t()
         }
 
@@ -92,7 +38,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
     # Human-friendly semver, e.g. "1.0.0", "1.2.0-beta.1"
     field :version_tag, :string
 
-    # Content hash of nodes + connections + triggers
+    # Content hash of nodes + connections + triggers (SHA-256)
     field :source_hash, :string
 
     embeds_many :nodes, Node, on_replace: :delete
@@ -120,57 +66,44 @@ defmodule Imgd.Workflows.WorkflowVersion do
       :source_hash,
       :workflow_id
     ])
-    |> cast_embed(:nodes, with: &node_changeset/2, required: true)
-    |> cast_embed(:connections, with: &connection_changeset/2)
-    |> cast_embed(:triggers, with: &trigger_changeset/2)
+    |> cast_embed(:nodes, required: true)
+    |> cast_embed(:connections)
+    |> cast_embed(:triggers)
     |> validate_required([:version_tag, :workflow_id, :source_hash])
     |> validate_version_tag()
-    |> validate_source_hash()
+    |> validate_hex_hash(:source_hash, length: 64)
     |> unique_constraint([:workflow_id, :version_tag])
-  end
-
-  defp node_changeset(node, attrs) do
-    node
-    |> cast(attrs, [:id, :type_id, :name, :config, :position, :notes])
-    |> validate_required([:id, :type_id, :name])
-  end
-
-  defp connection_changeset(connection, attrs) do
-    connection
-    |> cast(attrs, [:id, :source_node_id, :source_output, :target_node_id, :target_input])
-    |> validate_required([:id, :source_node_id, :target_node_id])
-  end
-
-  defp trigger_changeset(trigger, attrs) do
-    trigger
-    |> cast(attrs, [:type, :config])
-    |> validate_required([:type])
   end
 
   defp validate_version_tag(changeset) do
     validate_change(changeset, :version_tag, fn :version_tag, tag ->
       case Version.parse(tag) do
-        {:ok, _parsed} ->
-          []
-
-        :error ->
-          [version_tag: "must be a valid semantic version, e.g. 1.2.0"]
+        {:ok, _} -> []
+        :error -> [version_tag: "must be a valid semantic version (e.g., 1.2.0)"]
       end
     end)
   end
 
-  defp validate_source_hash(changeset) do
-    validate_change(changeset, :source_hash, fn :source_hash, hash ->
-      cond do
-        is_binary(hash) and byte_size(hash) == 64 and String.match?(hash, ~r/^[0-9a-f]+$/) ->
-          []
+  @doc """
+  Computes a content hash for the given nodes, connections, and triggers.
+  Used to detect changes between versions.
+  """
+  def compute_source_hash(nodes, connections, triggers) do
+    content =
+      %{
+        nodes: normalize_for_hash(nodes),
+        connections: normalize_for_hash(connections),
+        triggers: normalize_for_hash(triggers)
+      }
+      |> Jason.encode!()
 
-        is_binary(hash) ->
-          [source_hash: "must be a 64-character lowercase hex string"]
+    :crypto.hash(:sha256, content)
+    |> Base.encode16(case: :lower)
+  end
 
-        true ->
-          [source_hash: "must be a binary hash"]
-      end
-    end)
+  defp normalize_for_hash(items) when is_list(items) do
+    items
+    |> Enum.map(&Map.from_struct/1)
+    |> Enum.sort_by(& &1.id)
   end
 end
