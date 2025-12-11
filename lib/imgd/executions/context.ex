@@ -24,7 +24,6 @@ defmodule Imgd.Executions.Context do
           trigger_data: map(),
           node_outputs: map(),
           variables: map(),
-          env: map(),
           current_node_id: String.t(),
           current_input: term(),
           metadata: map()
