@@ -26,6 +26,72 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
   - `body` - Response body (parsed as JSON if applicable)
   """
 
+  use Imgd.Nodes.Definition,
+    id: "http_request",
+    name: "HTTP Request",
+    category: "Integrations",
+    description: "Make HTTP requests to external APIs and services",
+    icon: "hero-globe-alt",
+    kind: :action
+
+  @config_schema %{
+    "type" => "object",
+    "required" => ["url"],
+    "properties" => %{
+      "url" => %{
+        "type" => "string",
+        "title" => "URL",
+        "description" => "The URL to request"
+      },
+      "method" => %{
+        "type" => "string",
+        "title" => "Method",
+        "enum" => ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+        "default" => "GET",
+        "description" => "HTTP method to use"
+      },
+      "headers" => %{
+        "type" => "object",
+        "title" => "Headers",
+        "additionalProperties" => %{"type" => "string"},
+        "description" => "HTTP headers to include in the request"
+      },
+      "body" => %{
+        "type" => "object",
+        "title" => "Request Body",
+        "description" => "JSON body for POST/PUT/PATCH requests"
+      },
+      "timeout_ms" => %{
+        "type" => "integer",
+        "title" => "Timeout (ms)",
+        "default" => 30_000,
+        "minimum" => 1000,
+        "description" => "Request timeout in milliseconds"
+      },
+      "follow_redirects" => %{
+        "type" => "boolean",
+        "title" => "Follow Redirects",
+        "default" => true,
+        "description" => "Whether to follow HTTP redirects"
+      }
+    }
+  }
+
+  @input_schema %{
+    "type" => "object",
+    "description" => "Data to pass to the request (can be referenced in URL, headers, body)"
+  }
+
+  @output_schema %{
+    "type" => "object",
+    "properties" => %{
+      "status" => %{"type" => "integer", "description" => "HTTP status code"},
+      "headers" => %{"type" => "object", "description" => "Response headers"},
+      "body" => %{"description" => "Response body (JSON parsed if applicable)"},
+      "ok" => %{"type" => "boolean", "description" => "True if status is 2xx"}
+    }
+  }
+
   @behaviour Imgd.Runtime.NodeExecutor
 
   require Logger

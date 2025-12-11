@@ -5,53 +5,65 @@ defmodule Imgd.Nodes.Executors.Transform do
   Transforms input data using configured operations. This is a general-purpose
   data transformation node that supports various operations.
 
-  ## Configuration
-
-  - `operation` (required) - The transformation operation to perform
-  - `options` - Operation-specific options
-
   ## Supported Operations
 
-  ### `map` - Apply a mapping to each item in a list
-  Options:
-  - `field` - Field to extract from each item
-  - `template` - Template string for each item
-
-  ### `filter` - Filter items based on a condition
-  Options:
-  - `field` - Field to check
-  - `operator` - Comparison operator (eq, neq, gt, gte, lt, lte, contains)
-  - `value` - Value to compare against
-
-  ### `pick` - Select specific fields from the input
-  Options:
-  - `fields` - List of field names to keep
-
-  ### `omit` - Remove specific fields from the input
-  Options:
-  - `fields` - List of field names to remove
-
-  ### `merge` - Merge additional data into the input
-  Options:
-  - `data` - Map of data to merge
-
-  ### `set` - Set a specific field value
-  Options:
-  - `field` - Field name to set
-  - `value` - Value to set
-
-  ### `rename` - Rename fields
-  Options:
-  - `mapping` - Map of old_name => new_name
-
-  ### `flatten` - Flatten nested arrays
-  Options:
-  - `depth` - How deep to flatten (default: 1)
-
-  ## Output
-
-  Returns the transformed data.
+  - `map` - Apply a mapping to each item in a list
+  - `filter` - Filter items based on a condition
+  - `pick` - Select specific fields from the input
+  - `omit` - Remove specific fields from the input
+  - `merge` - Merge additional data into the input
+  - `set` - Set a specific field value
+  - `rename` - Rename fields
+  - `flatten` - Flatten nested arrays
+  - `passthrough` - Pass input unchanged (useful for testing)
   """
+
+  use Imgd.Nodes.Definition,
+    id: "transform",
+    name: "Transform",
+    category: "Data",
+    description: "Transform and reshape data using various operations",
+    icon: "hero-arrows-right-left",
+    kind: :transform
+
+  @config_schema %{
+    "type" => "object",
+    "required" => ["operation"],
+    "properties" => %{
+      "operation" => %{
+        "type" => "string",
+        "title" => "Operation",
+        "enum" => ["map", "filter", "pick", "omit", "merge", "set", "rename", "flatten", "passthrough"],
+        "description" => "The transformation operation to perform"
+      },
+      "options" => %{
+        "type" => "object",
+        "title" => "Options",
+        "description" => "Operation-specific options",
+        "properties" => %{
+          "field" => %{"type" => "string", "description" => "Field name to operate on"},
+          "fields" => %{"type" => "array", "items" => %{"type" => "string"}, "description" => "List of field names"},
+          "value" => %{"description" => "Value to use in the operation"},
+          "operator" => %{
+            "type" => "string",
+            "enum" => ["eq", "neq", "gt", "gte", "lt", "lte", "contains"],
+            "description" => "Comparison operator for filter"
+          },
+          "data" => %{"type" => "object", "description" => "Data to merge"},
+          "mapping" => %{"type" => "object", "description" => "Field rename mapping"},
+          "depth" => %{"type" => "integer", "minimum" => 1, "description" => "Flatten depth"}
+        }
+      }
+    }
+  }
+
+  @input_schema %{
+    "description" => "Data to transform (object, array, or primitive)"
+  }
+
+  @output_schema %{
+    "description" => "Transformed data"
+  }
 
   @behaviour Imgd.Runtime.NodeExecutor
 

@@ -15,6 +15,8 @@ defmodule Imgd.Application do
       {Oban, Application.fetch_env!(:imgd, Oban)},
       {DNSCluster, query: Application.get_env(:imgd, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Imgd.PubSub},
+      # Node type registry - must start before endpoint so types are available
+      Imgd.Nodes.Registry,
       ImgdWeb.Endpoint
     ]
 

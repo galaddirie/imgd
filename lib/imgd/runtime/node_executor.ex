@@ -95,9 +95,24 @@ defmodule Imgd.Runtime.NodeExecutor do
   @doc """
   Resolves the executor module for a given node type ID.
 
+  First checks the Registry for the type, falling back to convention-based
+  resolution if not found (for backwards compatibility).
+
   Returns `{:ok, module}` if found and loaded, `{:error, reason}` otherwise.
   """
   def resolve(type_id) when is_binary(type_id) do
+    # Try registry first
+    case Imgd.Nodes.Registry.get(type_id) do
+      {:ok, type} ->
+        Imgd.Nodes.Type.executor_module(type)
+
+      {:error, :not_found} ->
+        # Fallback to convention-based resolution
+        resolve_by_convention(type_id)
+    end
+  end
+
+  defp resolve_by_convention(type_id) do
     # Convention: type_id "http_request" -> Imgd.Nodes.Executors.HttpRequest
     module_name = type_id_to_module_name(type_id)
 
