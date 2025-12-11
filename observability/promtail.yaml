@@ -30,9 +30,11 @@ scrape_configs:
             execution_id: execution_id
             workflow_id: workflow_id
             workflow_name: workflow_name
-            step_hash: step_hash
-            step_name: step_name
-            step_type: step_type
+
+            # Node execution context
+            node_id: node_id
+            #TODO: MORE?
+            
             attempt: attempt
             event: event
             # Trace context
