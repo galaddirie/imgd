@@ -1,5 +1,7 @@
 import Config
 
+config :imgd, :env, :dev
+
 # Configure your database
 config :imgd, Imgd.Repo,
   username: "postgres",

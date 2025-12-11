@@ -1,5 +1,7 @@
 import Config
 
+config :imgd, :env, :test
+
 # Only in tests, remove the complexity from the password hashing algorithm
 config :pbkdf2_elixir, :rounds, 1
 
