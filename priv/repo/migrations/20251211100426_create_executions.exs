@@ -4,8 +4,14 @@ defmodule Imgd.Repo.Migrations.CreateExecutions do
   def change do
     create table(:executions, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id), null: false
-      add :workflow_version_id, references(:workflow_versions, on_delete: :restrict, type: :binary_id), null: false
+
+      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id),
+        null: false
+
+      add :workflow_version_id,
+          references(:workflow_versions, on_delete: :restrict, type: :binary_id),
+          null: false
+
       add :status, :string, null: false, default: "pending"
       # Embedded schemas stored as JSONB
       add :trigger, :jsonb, null: false

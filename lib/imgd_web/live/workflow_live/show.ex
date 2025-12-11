@@ -290,7 +290,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
     end
   end
 
-
   defp workflow_input_schema(workflow) do
     workflow.settings[:input_schema] || workflow.settings["input_schema"]
   end

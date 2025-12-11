@@ -36,8 +36,7 @@ defmodule Imgd.Observability.Telemetry do
       # ========================================================================
       # Execution Events
       # ========================================================================
-      {[:imgd, :engine, :execution, :start],
-       %{system_time: :integer},
+      {[:imgd, :engine, :execution, :start], %{system_time: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
@@ -45,9 +44,7 @@ defmodule Imgd.Observability.Telemetry do
          workflow_version_tag: :string,
          trigger_type: :atom
        }},
-
-      {[:imgd, :engine, :execution, :stop],
-       %{duration_ms: :integer},
+      {[:imgd, :engine, :execution, :stop], %{duration_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
@@ -56,9 +53,7 @@ defmodule Imgd.Observability.Telemetry do
          trigger_type: :atom,
          status: :atom
        }},
-
-      {[:imgd, :engine, :execution, :exception],
-       %{duration_ms: :integer},
+      {[:imgd, :engine, :execution, :exception], %{duration_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
@@ -70,8 +65,7 @@ defmodule Imgd.Observability.Telemetry do
       # ========================================================================
       # Node Events
       # ========================================================================
-      {[:imgd, :engine, :node, :start],
-       %{system_time: :integer, queue_time_ms: :integer},
+      {[:imgd, :engine, :node, :start], %{system_time: :integer, queue_time_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
@@ -80,9 +74,7 @@ defmodule Imgd.Observability.Telemetry do
          node_type_id: :string,
          attempt: :integer
        }},
-
-      {[:imgd, :engine, :node, :stop],
-       %{duration_ms: :integer},
+      {[:imgd, :engine, :node, :stop], %{duration_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
@@ -92,9 +84,7 @@ defmodule Imgd.Observability.Telemetry do
          attempt: :integer,
          status: :atom
        }},
-
-      {[:imgd, :engine, :node, :exception],
-       %{duration_ms: :integer},
+      {[:imgd, :engine, :node, :exception], %{duration_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
@@ -104,9 +94,7 @@ defmodule Imgd.Observability.Telemetry do
          attempt: :integer,
          exception: :exception
        }},
-
-      {[:imgd, :engine, :node, :retry],
-       %{backoff_ms: :integer},
+      {[:imgd, :engine, :node, :retry], %{backoff_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
@@ -118,8 +106,7 @@ defmodule Imgd.Observability.Telemetry do
       # ========================================================================
       # Expression Events (high-frequency, lightweight)
       # ========================================================================
-      {[:imgd, :engine, :expression, :evaluate],
-       %{duration_us: :integer},
+      {[:imgd, :engine, :expression, :evaluate], %{duration_us: :integer},
        %{
          execution_id: :string,
          expression_type: :atom,
@@ -134,8 +121,7 @@ defmodule Imgd.Observability.Telemetry do
          active_executions: :integer,
          pending_executions: :integer,
          running_nodes: :integer
-       },
-       %{}}
+       }, %{}}
     ]
   end
 

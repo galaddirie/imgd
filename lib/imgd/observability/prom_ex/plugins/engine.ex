@@ -38,7 +38,20 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
 
   alias Imgd.Executions.{Execution, NodeExecution}
 
-  @execution_duration_buckets [10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000, 300_000]
+  @execution_duration_buckets [
+    10,
+    50,
+    100,
+    250,
+    500,
+    1_000,
+    2_500,
+    5_000,
+    10_000,
+    30_000,
+    60_000,
+    300_000
+  ]
   @node_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
   @queue_time_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 5_000]
   @expression_duration_buckets [10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
@@ -65,7 +78,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
             }
           end
         ),
-
         distribution(
           [:imgd, :engine, :execution, :duration, :milliseconds],
           event_name: [:imgd, :engine, :execution, :stop],
@@ -81,7 +93,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           reporter_options: [buckets: @execution_duration_buckets],
           unit: :millisecond
         ),
-
         counter(
           [:imgd, :engine, :execution, :exception, :total],
           event_name: [:imgd, :engine, :execution, :exception],
@@ -112,7 +123,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
             }
           end
         ),
-
         distribution(
           [:imgd, :engine, :node, :duration, :milliseconds],
           event_name: [:imgd, :engine, :node, :stop],
@@ -149,7 +159,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           reporter_options: [buckets: @queue_time_buckets],
           unit: :millisecond
         ),
-
         counter(
           [:imgd, :engine, :node, :exception, :total],
           event_name: [:imgd, :engine, :node, :exception],
@@ -177,7 +186,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
             }
           end
         ),
-
         distribution(
           [:imgd, :engine, :node, :retry, :backoff, :milliseconds],
           event_name: [:imgd, :engine, :node, :retry],
@@ -207,7 +215,6 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
             }
           end
         ),
-
         distribution(
           [:imgd, :engine, :expression, :duration, :microseconds],
           event_name: [:imgd, :engine, :expression, :evaluate],
@@ -316,7 +323,10 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
   # ============================================================================
 
   defp exception_type(%{__struct__: struct}), do: struct |> Module.split() |> List.last()
-  defp exception_type(%{__exception__: true} = e), do: e.__struct__ |> Module.split() |> List.last()
+
+  defp exception_type(%{__exception__: true} = e),
+    do: e.__struct__ |> Module.split() |> List.last()
+
   defp exception_type(_), do: "unknown"
 
   defp safe_string(nil), do: "unknown"

@@ -13,7 +13,10 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowVersions do
       add :changelog, :text
       add :published_at, :utc_datetime_usec
       add :published_by, references(:users, on_delete: :nilify_all, type: :binary_id)
-      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id), null: false
+
+      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id),
+        null: false
+
       # Immutable - only inserted_at, no updated_at
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end

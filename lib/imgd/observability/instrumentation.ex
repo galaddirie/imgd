@@ -207,7 +207,9 @@ defmodule Imgd.Observability.Instrumentation do
 
     try do
       result = fun.()
-      duration_us = System.monotonic_time() - start_time |> System.convert_time_unit(:native, :microsecond)
+
+      duration_us =
+        (System.monotonic_time() - start_time) |> System.convert_time_unit(:native, :microsecond)
 
       :telemetry.execute(
         [:imgd, :engine, :expression, :evaluate],
@@ -218,7 +220,9 @@ defmodule Imgd.Observability.Instrumentation do
       result
     rescue
       e ->
-        duration_us = System.monotonic_time() - start_time |> System.convert_time_unit(:native, :microsecond)
+        duration_us =
+          (System.monotonic_time() - start_time)
+          |> System.convert_time_unit(:native, :microsecond)
 
         :telemetry.execute(
           [:imgd, :engine, :expression, :evaluate],
@@ -380,8 +384,9 @@ defmodule Imgd.Observability.Instrumentation do
   # ============================================================================
 
   defp build_trace_context(%Execution{} = execution) do
-    trace_id = get_in(execution.metadata || %{}, [Access.key(:trace_id)]) ||
-               get_in(execution.metadata || %{}, [Access.key("trace_id")])
+    trace_id =
+      get_in(execution.metadata || %{}, [Access.key(:trace_id)]) ||
+        get_in(execution.metadata || %{}, [Access.key("trace_id")])
 
     %{
       execution_id: execution.id,
@@ -477,6 +482,10 @@ defmodule Imgd.Observability.Instrumentation do
   defp record_span_exception(exception, stacktrace) do
     span_ctx = Tracer.current_span_ctx()
     OpenTelemetry.Span.record_exception(span_ctx, exception, stacktrace)
-    OpenTelemetry.Span.set_status(span_ctx, OpenTelemetry.status(:error, Exception.message(exception)))
+
+    OpenTelemetry.Span.set_status(
+      span_ctx,
+      OpenTelemetry.status(:error, Exception.message(exception))
+    )
   end
 end

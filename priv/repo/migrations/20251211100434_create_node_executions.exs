@@ -4,7 +4,10 @@ defmodule Imgd.Repo.Migrations.CreateNodeExecutions do
   def change do
     create table(:node_executions, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :execution_id, references(:executions, on_delete: :delete_all, type: :binary_id), null: false
+
+      add :execution_id, references(:executions, on_delete: :delete_all, type: :binary_id),
+        null: false
+
       # Which node in the workflow definition
       add :node_id, :string, null: false
       add :node_type_id, :string, null: false

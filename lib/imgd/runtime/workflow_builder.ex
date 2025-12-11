@@ -178,9 +178,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   defp build_runic_workflow(sorted_nodes, graph, context, version) do
     # Create base workflow with name
     base_workflow =
-      Runic.workflow(
-        name: "workflow_#{version.workflow_id}_v#{version.version_tag}"
-      )
+      Runic.workflow(name: "workflow_#{version.workflow_id}_v#{version.version_tag}")
 
     # Build a map of node_id -> Runic step for wiring dependencies
     {workflow, step_map} =

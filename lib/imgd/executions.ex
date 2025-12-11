@@ -167,7 +167,12 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, %{execution: execution, job: job}}` or `{:error, reason}`.
   """
-  def start_and_enqueue_execution(%Scope{} = scope, %Workflow{} = workflow, attrs \\ %{}, opts \\ []) do
+  def start_and_enqueue_execution(
+        %Scope{} = scope,
+        %Workflow{} = workflow,
+        attrs \\ %{},
+        opts \\ []
+      ) do
     with {:ok, execution} <- start_execution(scope, workflow, attrs),
          {:ok, job} <- enqueue_execution(scope, execution, opts) do
       {:ok, %{execution: execution, job: job}}
@@ -367,7 +372,9 @@ defmodule Imgd.Executions do
 
   defp resolve_version_for_execution(%Workflow{} = workflow, attrs) do
     provided_version = Map.get(attrs, :workflow_version) || Map.get(attrs, "workflow_version")
-    provided_version_id = Map.get(attrs, :workflow_version_id) || Map.get(attrs, "workflow_version_id")
+
+    provided_version_id =
+      Map.get(attrs, :workflow_version_id) || Map.get(attrs, "workflow_version_id")
 
     cond do
       match?(%WorkflowVersion{}, provided_version) ->
