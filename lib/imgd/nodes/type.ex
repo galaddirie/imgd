@@ -46,4 +46,25 @@ defmodule Imgd.Nodes.Type do
     field :inserted_at, :utc_datetime_usec
     field :updated_at, :utc_datetime_usec
   end
+
+  def changeset(node_type, attrs) do
+    node_type
+    |> cast(attrs, [:name, :category, :description, :icon, :config_schema, :input_schema, :output_schema, :executor, :node_kind])
+    |> validate_required([:name, :category, :description, :icon, :config_schema, :input_schema, :output_schema, :executor, :node_kind])
+    |> validate_map_field(:config_schema)
+    |> validate_map_field(:input_schema)
+    |> validate_map_field(:output_schema)
+    |> validate_map_field(:executor)
+    |> validate_map_field(:node_kind)
+  end
+
+  defp validate_map_field(changeset, field) do
+    validate_change(changeset, field, fn ^field, value ->
+      if is_map(value) do
+        []
+      else
+        [{field, "must be a map"}]
+      end
+    end)
+  end
 end
