@@ -34,9 +34,7 @@ defmodule Imgd.Observability.Instrumentation do
   require OpenTelemetry.Tracer, as: Tracer
 
   alias OpenTelemetry.Ctx
-  alias OpenTelemetry.Span
-  alias Imgd.Executions.{Execution, NodeExecution}
-  alias Imgd.Workflows.Workflow
+  alias Imgd.Executions.Execution
 
   # ============================================================================
   # Execution Tracing
@@ -137,7 +135,7 @@ defmodule Imgd.Observability.Instrumentation do
 
         case result do
           {:ok, output} = success ->
-            Span.set_attribute(:output_keys, output |> Map.keys() |> inspect())
+            Tracer.set_attribute(:output_keys, output |> Map.keys() |> inspect())
             emit_node_stop(execution, node_info, :completed, duration_ms, opts)
             log_node_event(:completed, execution, node_info, duration_ms: duration_ms)
             success
@@ -149,7 +147,7 @@ defmodule Imgd.Observability.Instrumentation do
             error
 
           {:skip, reason} ->
-            Span.set_attribute(:skip_reason, inspect(reason))
+            Tracer.set_attribute(:skip_reason, inspect(reason))
             emit_node_stop(execution, node_info, :skipped, duration_ms, opts)
             log_node_event(:skipped, execution, node_info, reason: reason)
             {:skip, reason}
@@ -345,7 +343,7 @@ defmodule Imgd.Observability.Instrumentation do
     Logger.log(level, message, metadata)
   end
 
-  defp log_node_event(event, %Execution{} = execution, node_info, extra \\ []) do
+  defp log_node_event(event, %Execution{} = execution, node_info, extra) do
     level = log_level_for_event(event)
     message = node_event_message(event, node_info)
 
@@ -470,13 +468,15 @@ defmodule Imgd.Observability.Instrumentation do
   end
 
   defp record_span_error(reason) do
-    Span.set_status(:error, inspect(reason))
-    Span.set_attribute(:error, true)
-    Span.set_attribute(:error_reason, inspect(reason))
+    span_ctx = Tracer.current_span_ctx()
+    OpenTelemetry.Span.set_status(span_ctx, :error, inspect(reason))
+    Tracer.set_attribute(:error, true)
+    Tracer.set_attribute(:"error.reason", inspect(reason))
   end
 
   defp record_span_exception(exception, stacktrace) do
-    Span.record_exception(exception, stacktrace)
-    Span.set_status(:error, Exception.message(exception))
+    span_ctx = Tracer.current_span_ctx()
+    OpenTelemetry.Span.record_exception(span_ctx, exception, stacktrace)
+    OpenTelemetry.Span.set_status(span_ctx, :error, Exception.message(exception))
   end
 end

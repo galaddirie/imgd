@@ -135,7 +135,10 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           [:imgd, :engine, :node, :queue_time, :milliseconds],
           event_name: [:imgd, :engine, :node, :start],
           description: "Node queue wait time in milliseconds",
-          measurement: :queue_time_ms,
+          measurement: fn measurements ->
+            # Return nil if not present, which will skip the measurement
+            measurements[:queue_time_ms]
+          end,
           tags: [:workflow_id, :node_type_id],
           tag_values: fn meta ->
             %{
@@ -144,11 +147,7 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
             }
           end,
           reporter_options: [buckets: @queue_time_buckets],
-          unit: :millisecond,
-          # Only record if queue_time_ms is present
-          keep: fn _event, measurements, _meta ->
-            is_number(measurements[:queue_time_ms])
-          end
+          unit: :millisecond
         ),
 
         counter(
