@@ -1,4 +1,4 @@
-efmodule Imgd.Utils.Expression do
+defmodule Imgd.Utils.Expression do
   @moduledoc """
   Handles expression evaluation for data flow between nodes.
 
