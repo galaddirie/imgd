@@ -240,7 +240,7 @@ defmodule ImgdWeb.WorkflowLive.Components.WorkflowGraph do
           fill={@colors.subtext}
           font-weight="500"
         >
-{duration}ms
+          {duration}ms
         </text>
       <% end %>
 

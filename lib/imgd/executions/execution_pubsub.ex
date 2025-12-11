@@ -2,7 +2,7 @@ defmodule Imgd.Workflows.ExecutionPubSub do
   @moduledoc """
   PubSub broadcasting for workflow execution updates.
 
-  Enables real-time updates to LiveViews tracking execution progress.
+  Enables real-time updates to LiveViews tracking execution and step progress.
   """
 
   @pubsub Imgd.PubSub
@@ -36,15 +36,6 @@ defmodule Imgd.Workflows.ExecutionPubSub do
     broadcast_workflow(execution.workflow_id, {:execution_failed, execution, error})
   end
 
-
-  # Broadcast generation events
-  def broadcast_generation_started(execution_id, generation, runnables_count) do
-    broadcast(execution_id, {:generation_started, generation, runnables_count})
-  end
-
-  def broadcast_generation_completed(execution_id, generation) do
-    broadcast(execution_id, {:generation_completed, generation})
-  end
 
   # Private helpers
   defp broadcast(execution_id, message) do

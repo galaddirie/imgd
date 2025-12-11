@@ -14,17 +14,22 @@ defmodule Imgd.Nodes.Type do
   import Ecto.Changeset
 
   @type t :: %__MODULE__{
-    id: String.t(),
-    name: String.t(),
-    category: String.t(),
-    description: String.t(),
-    icon: String.t(),
-    config_schema: map(),      # JSON Schema for node configuration
-    input_schema: map(),       # Expected input shape
-    output_schema: map(),      # Produced output shape
-    executor: module(),        # Module implementing NodeExecutor behaviour
-    node_kind: atom()          # :action | :trigger | :control_flow | :transform
-  }
+          id: String.t(),
+          name: String.t(),
+          category: String.t(),
+          description: String.t(),
+          icon: String.t(),
+          # JSON Schema for node configuration
+          config_schema: map(),
+          # Expected input shape
+          input_schema: map(),
+          # Produced output shape
+          output_schema: map(),
+          # Module implementing NodeExecutor behaviour
+          executor: module(),
+          # :action | :trigger | :control_flow | :transform
+          node_kind: atom()
+        }
 
   @primary_key {:id, :string, autogenerate: false}
   @timestamps_opts [type: :utc_datetime_usec]

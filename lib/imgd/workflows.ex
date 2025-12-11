@@ -77,6 +77,7 @@ defmodule Imgd.Workflows do
     case Version.parse(version_tag) do
       {:ok, %Version{major: major, minor: minor, patch: patch}} ->
         {:ok, %{major: major, minor: minor, patch: patch}}
+
       :error ->
         {:error, :invalid_semver}
     end

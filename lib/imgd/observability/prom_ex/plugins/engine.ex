@@ -160,17 +160,17 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
       |> where([e], e.status == :pending)
       |> Imgd.Repo.aggregate(:count)
 
-    running_steps = # todo: implement workflow nodes and steps
-
-    :telemetry.execute(
-      [:imgd, :engine, :stats, :poll],
-      %{
-        active_executions: active_executions,
-        pending_executions: pending_executions,
-        running_steps: running_steps
-      },
-      %{}
-    )
+    # todo: implement workflow nodes and steps
+    running_steps =
+      :telemetry.execute(
+        [:imgd, :engine, :stats, :poll],
+        %{
+          active_executions: active_executions,
+          pending_executions: pending_executions,
+          running_steps: running_steps
+        },
+        %{}
+      )
   rescue
     e ->
       Logger.warning("Failed to poll engine stats: #{Exception.message(e)}")

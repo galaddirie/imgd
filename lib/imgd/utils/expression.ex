@@ -18,9 +18,7 @@ efmodule Imgd.Utils.Expression do
 
   @expression_pattern ~r/\{\{\s*(.+?)\s*\}\}/
 
-
   # TODO implement this
 
   # todo: does this need to be a separate module? does this belong in executions?
-
 end
