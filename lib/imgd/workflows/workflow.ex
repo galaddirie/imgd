@@ -26,7 +26,8 @@ defmodule Imgd.Workflows.Workflow do
            ]}
   use Imgd.Schema
 
-  alias Imgd.Workflows.{WorkflowVersion, Execution}
+  alias Imgd.Workflows.WorkflowVersion
+  alias Imgd.Executions.Execution
   alias Imgd.Accounts.User
 
   # Embedded schema modules
