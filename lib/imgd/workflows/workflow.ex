@@ -10,13 +10,13 @@ defmodule Imgd.Workflows.Workflow do
              :id,
              :name,
              :description,
-             :version,
              :status,
-             :definition,
-             :definition_hash,
-             :trigger_config,
+             :nodes,
+             :connections,
+             :triggers,
+             :current_version_tag,
+             :published_version_id,
              :settings,
-             :published_at,
              :user_id,
              :inserted_at,
              :updated_at
@@ -27,33 +27,54 @@ defmodule Imgd.Workflows.Workflow do
   alias Imgd.Workflows.{WorkflowVersion, Execution}
   alias Imgd.Accounts.User
 
-  @type status :: :draft | :published | :archived
+  @type status :: :draft | :active | :archived
 
   schema "workflows" do
     field :name, :string
     field :description, :string
-    field :version, :integer, default: 1
-    field :status, Ecto.Enum, values: [:draft, :published, :archived], default: :draft
+    field :status, Ecto.Enum, values: [:draft, :active, :archived], default: :draft
 
-    # Serialized Runic build_log - the workflow definition
-    field :definition, :map
+    embeds_many :nodes, Node, on_replace: :delete do
+      # Unique ID within workflow
+      field :id, :string
+      # References Node.Type.id
+      field :type_id, :string
+      # User-given name
+      field :name, :string
+      # Node-specific configuration
+      field :config, :map, default: %{}
+      # {x, y} for UI
+      field :position, :map, default: %{}
+    end
 
-    # Content hash for deduplication and change detection
-    field :definition_hash, :integer
+    embeds_many :connections, Connection, on_replace: :delete do
+      field :id, :string
+      field :target_node_id, :string
+      field :target_input, :string, default: "main"
 
-    # Trigger configuration
-    # %{type: :manual | :schedule | :webhook | :event, config: %{...}}
-    field :trigger_config, :map, default: %{type: :manual, config: %{}}
+      field :source_node_id, :string
+      field :source_output, :string, default: "main"
+    end
+
+    # Note: we can have multiple triggers
+    embeds_many :triggers, Trigger, on_replace: :delete do
+      field :type, Ecto.Enum, values: [:manual, :webhook, :schedule, :event]
+      field :config, :map, default: %{}
+    end
 
     # Runtime settings
     field :settings, :map,
       default: %{
-        # 5 minutes default
         timeout_ms: 300_000,
         max_retries: 3
       }
 
-    field :published_at, :utc_datetime_usec
+    # Optional: what you're *calling* the current draft version.
+    # Could be "1.3.0-dev", "next", etc.
+    field :current_version_tag, :string
+
+    # Pointer to currently published immutable version
+    belongs_to :published_version, WorkflowVersion
 
     has_many :versions, WorkflowVersion
     has_many :executions, Execution
@@ -63,116 +84,38 @@ defmodule Imgd.Workflows.Workflow do
     timestamps()
   end
 
-  @required_fields [:name, :user_id]
-  @optional_fields [:description, :status, :definition, :trigger_config, :settings]
-
   def changeset(workflow, attrs) do
     workflow
-    |> cast(attrs, @required_fields ++ @optional_fields)
-    |> validate_required(@required_fields)
-    |> validate_length(:name, min: 1, max: 255)
-    |> maybe_compute_definition_hash()
-    |> unique_constraint(:name)
+    |> cast(attrs, [
+      :name,
+      :description,
+      :status,
+      :current_version_tag,
+      :published_version_id,
+      :user_id
+    ])
+    |> cast_embed(:nodes, with: &node_changeset/2)
+    |> cast_embed(:connections, with: &connection_changeset/2)
+    |> cast_embed(:triggers, with: &trigger_changeset/2)
+    |> cast(:settings, empty_values: [])
+    |> validate_required([:name, :user_id])
   end
 
-  def publish_changeset(workflow, attrs \\ %{}) do
-    workflow
-    |> cast(attrs, [:definition])
-    |> validate_required([:definition])
-    |> validate_definition()
-    |> maybe_compute_definition_hash()
-    |> put_change(:status, :published)
-    |> put_change(:published_at, DateTime.utc_now())
-    |> increment_version()
+  defp node_changeset(node, attrs) do
+    node
+    |> cast(attrs, [:id, :type_id, :name, :config, :position, :notes])
+    |> validate_required([:id, :type_id, :name])
   end
 
-  def archive_changeset(workflow) do
-    workflow
-    |> change(status: :archived)
+  defp connection_changeset(connection, attrs) do
+    connection
+    |> cast(attrs, [:id, :source_node_id, :source_output, :target_node_id, :target_input])
+    |> validate_required([:id, :source_node_id, :target_node_id])
   end
 
-  # Queries
-
-  def published(query \\ __MODULE__) do
-    from w in query, where: w.status == :published
-  end
-
-  def active(query \\ __MODULE__) do
-    from w in query, where: w.status in [:draft, :published]
-  end
-
-  def with_schedule(query \\ __MODULE__) do
-    from w in query, preload: [:schedule]
-  end
-
-  def with_webhook(query \\ __MODULE__) do
-    from w in query, preload: [:webhook_endpoint]
-  end
-
-  # Helpers
-
-  defp maybe_compute_definition_hash(changeset) do
-    case get_change(changeset, :definition) do
-      nil -> changeset
-      definition -> put_change(changeset, :definition_hash, :erlang.phash2(definition))
-    end
-  end
-
-  defp validate_definition(changeset) do
-    case get_change(changeset, :definition) do
-      nil ->
-        changeset
-
-      definition ->
-        case validate_runic_definition(definition) do
-          :ok -> changeset
-          {:error, reason} -> add_error(changeset, :definition, reason)
-        end
-    end
-  end
-
-  defp validate_runic_definition(definition) do
-    # Attempt to rebuild workflow from definition
-    try do
-      events = deserialize_definition(definition)
-      _workflow = Runic.Workflow.from_log(events)
-      :ok
-    rescue
-      e -> {:error, "Invalid workflow definition: #{Exception.message(e)}"}
-    end
-  end
-
-  defp increment_version(changeset) do
-    case changeset.data.version do
-      nil -> put_change(changeset, :version, 1)
-      v -> put_change(changeset, :version, v + 1)
-    end
-  end
-
-  @doc """
-  Serializes a Runic workflow build log for storage.
-  """
-  def serialize_definition(build_log) when is_list(build_log) do
-    build_log
-    |> :erlang.term_to_binary()
-    |> Base.encode64()
-  end
-
-  # TODO: may need to look at this again later
-  @doc """
-  Deserializes a stored workflow definition back to Runic events.
-  """
-  def deserialize_definition(%{"encoded" => encoded}) do
-    encoded
-    |> Base.decode64!()
-    |> :erlang.binary_to_term()
-  end
-
-  @doc """
-  Rebuilds a Runic.Workflow from the stored definition.
-  """
-  def to_runic_workflow(%__MODULE__{definition: definition}) do
-    events = deserialize_definition(definition)
-    Runic.Workflow.from_log(events)
+  defp trigger_changeset(trigger, attrs) do
+    trigger
+    |> cast(attrs, [:type, :config])
+    |> validate_required([:type])
   end
 end

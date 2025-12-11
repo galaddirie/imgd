@@ -12,12 +12,46 @@ defmodule Imgd.Workflows.WorkflowVersion do
   alias Imgd.Accounts.User
 
   schema "workflow_versions" do
-    field :version, :integer
-    field :definition, :map
-    field :definition_hash, :integer
-    field :change_summary, :string
+    # Human-friendly semver, e.g. "1.0.0", "1.2.0-beta.1"
+    field :version_tag, :string
 
-    belongs_to :published_by_user, User, foreign_key: :published_by
+    # Content hash of nodes + connections + triggers
+    field :source_hash, :string
+
+    embeds_many :nodes, Node, on_replace: :delete do
+      # Unique ID within workflow
+      field :id, :string
+      # References Node.Type.id
+      field :type_id, :string
+      # User-given name
+      field :name, :string
+      # Node-specific configuration
+      field :config, :map, default: %{}
+      # {x, y} for UI
+      field :position, :map, default: %{}
+      # User notes
+      field :notes, :string
+    end
+
+    embeds_many :connections, Connection, on_replace: :delete do
+      field :id, :string
+      field :source_node_id, :string
+      # Output port name
+      field :source_output, :string, default: "main"
+      field :target_node_id, :string
+      # Input port name
+      field :target_input, :string, default: "main"
+    end
+
+    embeds_many :triggers, Trigger, on_replace: :delete do
+      field :type, Ecto.Enum, values: [:manual, :webhook, :schedule, :event]
+      field :config, :map, default: %{}
+    end
+
+    field :changelog, :string
+
+    field :published_at, :utc_datetime
+    field :published_by, :integer
 
     belongs_to :workflow, Workflow
 
@@ -25,56 +59,25 @@ defmodule Imgd.Workflows.WorkflowVersion do
     timestamps(updated_at: false)
   end
 
-  @required_fields [:version, :definition, :workflow_id]
-  @optional_fields [:change_summary, :published_by, :definition_hash]
-
   def changeset(version, attrs) do
     version
-    |> cast(attrs, @required_fields ++ @optional_fields)
-    |> validate_required(@required_fields)
-    |> compute_definition_hash()
-    |> unique_constraint([:workflow_id, :version])
-    |> foreign_key_constraint(:workflow_id)
-  end
-
-  # Queries
-
-  def by_workflow(query \\ __MODULE__, workflow_id) do
-    from v in query,
-      where: v.workflow_id == ^workflow_id,
-      order_by: [desc: v.version]
-  end
-
-  def latest(query \\ __MODULE__) do
-    from v in query,
-      order_by: [desc: v.version],
-      limit: 1
-  end
-
-  def at_version(query \\ __MODULE__, version) do
-    from v in query, where: v.version == ^version
-  end
-
-  # Helpers
-
-  defp compute_definition_hash(changeset) do
-    case get_change(changeset, :definition) do
-      nil -> changeset
-      definition -> put_change(changeset, :definition_hash, :erlang.phash2(definition))
-    end
-  end
-
-  @doc """
-  Creates a version snapshot from a workflow.
-  """
-  def from_workflow(%Workflow{} = workflow, opts \\ []) do
-    %__MODULE__{}
-    |> changeset(%{
-      workflow_id: workflow.id,
-      version: workflow.version,
-      definition: workflow.definition,
-      change_summary: opts[:change_summary],
-      published_by: opts[:published_by]
-    })
+    |> cast(attrs, [
+      :version_tag,
+      :changelog,
+      :published_at,
+      :published_by,
+      :source_hash,
+      :workflow_id
+    ])
+    |> validate_required([:version_tag, :workflow_id])
+    |> validate_change(:version_tag, fn :version_tag, tag ->
+      case Version.parse(tag) do
+        {:ok, _parsed} ->
+          []
+        :error ->
+          [version_tag: "must be a valid semantic version, e.g. 1.2.0"]
+      end
+    end)
+    |> unique_constraint([:workflow_id, :version_tag])
   end
 end

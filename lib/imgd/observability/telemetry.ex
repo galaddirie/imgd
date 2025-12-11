@@ -29,7 +29,6 @@ defmodule Imgd.Observability.Telemetry do
   require Logger
   require OpenTelemetry.Tracer, as: Tracer
 
-  alias Imgd.Workflows.ExecutionStep
   alias OpenTelemetry.Span
 
   # ============================================================================
@@ -139,7 +138,8 @@ defmodule Imgd.Observability.Telemetry do
       end)
   """
   def with_step_span(execution, node, fact, opts \\ [], fun) when is_function(fun, 0) do
-    step_name = ExecutionStep.step_name(node)
+    # todo: implement step name
+    step_name = ""
     span_name = "step.execute #{step_name}"
 
     attributes =
@@ -259,7 +259,8 @@ defmodule Imgd.Observability.Telemetry do
   Sets step context in Logger metadata.
   """
   def set_step_log_context(execution, node, opts \\ []) do
-    step_name = ExecutionStep.step_name(node)
+    # todo: implement step name
+    step_name = ""
 
     metadata =
       [
@@ -327,7 +328,8 @@ defmodule Imgd.Observability.Telemetry do
   end
 
   defp emit_step_start(execution, node, fact, opts) do
-    step_name = ExecutionStep.step_name(node)
+    # todo: implement step name
+    step_name = ""
 
     :telemetry.execute(
       [:imgd, :engine, :step, :start],
@@ -347,7 +349,8 @@ defmodule Imgd.Observability.Telemetry do
   end
 
   defp emit_step_stop(execution, node, fact, status, duration_ms, output_fact, opts) do
-    step_name = ExecutionStep.step_name(node)
+    # todo: implement step name
+    step_name = ""
 
     :telemetry.execute(
       [:imgd, :engine, :step, :stop],
@@ -369,7 +372,8 @@ defmodule Imgd.Observability.Telemetry do
   end
 
   defp emit_step_exception(execution, node, fact, exception, stacktrace, duration_ms) do
-    step_name = ExecutionStep.step_name(node)
+    # todo: implement step name
+    step_name = ""
 
     :telemetry.execute(
       [:imgd, :engine, :step, :exception],
@@ -407,7 +411,8 @@ defmodule Imgd.Observability.Telemetry do
 
   defp step_attributes(execution, node, fact) do
     step_type = node.__struct__ |> Module.split() |> List.last()
-    step_name = ExecutionStep.step_name(node)
+    # todo: implement step name
+    step_name = ""
 
     %{
       "workflow.id": execution.workflow_id,

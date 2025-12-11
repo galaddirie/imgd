@@ -430,7 +430,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                     type="submit"
                     id="run-workflow-submit"
                     class="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-content shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none whitespace-nowrap"
-                    disabled={@running || @workflow.status != :published}
+                    disabled={@running || @workflow.status != :active}
                   >
                     <%= if @running do %>
                       <span class="flex h-4 w-4 items-center justify-center">

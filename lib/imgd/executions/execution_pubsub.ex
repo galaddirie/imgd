@@ -36,18 +36,6 @@ defmodule Imgd.Workflows.ExecutionPubSub do
     broadcast_workflow(execution.workflow_id, {:execution_failed, execution, error})
   end
 
-  # Broadcast step events
-  def broadcast_step_started(execution_id, step) do
-    broadcast(execution_id, {:step_started, step})
-  end
-
-  def broadcast_step_completed(execution_id, step) do
-    broadcast(execution_id, {:step_completed, step})
-  end
-
-  def broadcast_step_failed(execution_id, step, error) do
-    broadcast(execution_id, {:step_failed, step, error})
-  end
 
   # Broadcast generation events
   def broadcast_generation_started(execution_id, generation, runnables_count) do

@@ -25,7 +25,7 @@ defmodule ImgdWeb.Formatters do
   Returns the CSS class for a workflow status badge.
   """
   def status_badge_class(:draft), do: "badge-warning"
-  def status_badge_class(:published), do: "badge-success"
+  def status_badge_class(:active), do: "badge-success"
   def status_badge_class(:archived), do: "badge-neutral"
   def status_badge_class(_), do: "badge-ghost"
 
@@ -33,7 +33,7 @@ defmodule ImgdWeb.Formatters do
   Returns a human-readable label for a workflow status.
   """
   def status_label(:draft), do: "Draft"
-  def status_label(:published), do: "Published"
+  def status_label(:active), do: "Published"
   def status_label(:archived), do: "Archived"
   def status_label(status), do: to_string(status)
 

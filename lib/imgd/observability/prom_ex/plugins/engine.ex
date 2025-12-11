@@ -160,10 +160,7 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
       |> where([e], e.status == :pending)
       |> Imgd.Repo.aggregate(:count)
 
-    running_steps =
-      Imgd.Workflows.ExecutionStep
-      |> where([s], s.status == :running)
-      |> Imgd.Repo.aggregate(:count)
+    running_steps = # todo: implement workflow nodes and steps
 
     :telemetry.execute(
       [:imgd, :engine, :stats, :poll],
