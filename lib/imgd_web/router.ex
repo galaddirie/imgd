@@ -50,14 +50,14 @@ defmodule ImgdWeb.Router do
   scope "/", ImgdWeb do
     pipe_through [:browser, :require_authenticated_user]
 
-    # live_session :require_authenticated_user,
-    #   on_mount: [{ImgdWeb.UserAuth, :require_authenticated}] do
-    #   live "/workflows", WorkflowLive.Index, :index
-    #   live "/workflows/:id", WorkflowLive.Show, :show
-    #   live "/workflows/:workflow_id/executions/:id", WorkflowLive.ExecutionShow, :show
-    #   live "/users/settings", UserLive.Settings, :edit
-    #   live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
-    # end
+    live_session :require_authenticated_user,
+      on_mount: [{ImgdWeb.UserAuth, :require_authenticated}] do
+      live "/workflows", WorkflowLive.Index, :index
+      live "/workflows/:id", WorkflowLive.Show, :show
+      live "/workflows/:workflow_id/executions/:id", WorkflowLive.ExecutionShow, :show
+      live "/users/settings", UserLive.Settings, :edit
+      live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
+    end
 
     post "/users/update-password", UserSessionController, :update_password
   end
