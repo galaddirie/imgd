@@ -3,7 +3,7 @@ defmodule Imgd.Executions.Execution do
   Workflow execution instance.
 
   Tracks the runtime state of a single workflow execution including
-  status, timing, inputs, outputs, and error information.
+  status, timing, and error information.
   """
   @derive {Jason.Encoder,
            only: [
@@ -13,7 +13,6 @@ defmodule Imgd.Executions.Execution do
              :status,
              :trigger,
              :trigger_type,
-             :input,
              :output,
              :context,
              :error,
@@ -43,7 +42,7 @@ defmodule Imgd.Executions.Execution do
 
   @type runic_log_entry :: map()
 
-  @type metadata :: __MODULE__.Metadata.t() | nil
+  @type metadata :: __MODULE__.Metadata.t() | map() | nil
 
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
@@ -54,9 +53,8 @@ defmodule Imgd.Executions.Execution do
           trigger: trigger(),
           runic_build_log: [runic_log_entry()],
           runic_reaction_log: [runic_log_entry()],
-          input: map() | nil,
-          output: map() | nil,
           workflow_version_tag: String.t() | nil,
+          output: map(), # declared output payload from a output node
           context: map(),
           error: map() | nil,
           waiting_for: map() | nil,
@@ -84,7 +82,7 @@ defmodule Imgd.Executions.Execution do
     field :trigger, :map,
       default: %{
         type: :manual,
-        data: %{}
+        data: %{} # input data
       }
 
     # Runic integration - the event log for rebuilding state
@@ -96,7 +94,9 @@ defmodule Imgd.Executions.Execution do
     # Execution context - accumulated outputs from all nodes
     field :context, :map, default: %{}
 
-    # Todo: I hate untyped error maps
+    # Final output of the execution
+    field :output, :map
+
     field :error, :map
 
     # For waiting/paused executions
@@ -116,8 +116,6 @@ defmodule Imgd.Executions.Execution do
       field :correlation_id, :string
       field :triggered_by, :string
       field :parent_execution_id, :binary_id
-      field :input, :map
-      field :output, :map
       field :tags, :map, default: %{}
       # Arbitrary custom values callers want to persist
       field :extras, :map, default: %{}
@@ -128,8 +126,6 @@ defmodule Imgd.Executions.Execution do
     has_many :node_executions, NodeExecution
 
     # Virtual fields used by the UI
-    field :input, :map, virtual: true
-    field :output, :map, virtual: true
     field :trigger_type, :string, virtual: true
     field :workflow_version_tag, :string, virtual: true
 
@@ -148,6 +144,7 @@ defmodule Imgd.Executions.Execution do
         :runic_build_log,
         :runic_reaction_log,
         :context,
+        :output,
         :error,
         :waiting_for,
         :started_at,
@@ -162,6 +159,7 @@ defmodule Imgd.Executions.Execution do
     |> validate_required([:workflow_version_id, :workflow_id, :status, :trigger])
     |> validate_trigger()
     |> validate_map_field(:context)
+    |> validate_map_field(:output)
     |> validate_map_field(:waiting_for, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
     |> validate_list_of_maps(:runic_build_log)
@@ -263,13 +261,9 @@ defmodule Imgd.Executions.Execution do
       :correlation_id,
       :triggered_by,
       :parent_execution_id,
-      :input,
-      :output,
       :tags,
       :extras
     ])
-    |> validate_map_field(:input, allow_nil: true)
-    |> validate_map_field(:output, allow_nil: true)
     |> validate_map_field(:tags, allow_nil: true)
     |> validate_map_field(:extras, allow_nil: true)
   end

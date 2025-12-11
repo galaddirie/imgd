@@ -9,12 +9,49 @@ defmodule Imgd.Workflows.WorkflowVersion do
 
   alias Imgd.Workflows.Workflow
   alias Imgd.Accounts.User
-  alias __MODULE__.{Node, Connection, Trigger}
+
+  # Embedded schema modules
+  defmodule Node do
+    use Ecto.Schema
+    @primary_key false
+
+    embedded_schema do
+      field :id, :string
+      field :type_id, :string
+      field :name, :string
+      field :config, :map, default: %{}
+      field :position, :map, default: %{}
+      field :notes, :string
+    end
+  end
+
+  defmodule Connection do
+    use Ecto.Schema
+    @primary_key false
+
+    embedded_schema do
+      field :id, :string
+      field :source_node_id, :string
+      field :source_output, :string, default: "main"
+      field :target_node_id, :string
+      field :target_input, :string, default: "main"
+    end
+  end
+
+  defmodule Trigger do
+    use Ecto.Schema
+    @primary_key false
+
+    embedded_schema do
+      field :type, Ecto.Enum, values: [:manual, :webhook, :schedule, :event]
+      field :config, :map, default: %{}
+    end
+  end
 
   @type trigger_type :: Workflow.trigger_type()
 
   @typedoc "Node snapshot stored on a version"
-  @type node :: %Node{
+  @type workflow_node :: %Node{
           id: String.t(),
           type_id: String.t(),
           name: String.t(),
@@ -39,7 +76,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
           id: Ecto.UUID.t(),
           version_tag: String.t(),
           source_hash: String.t(),
-          nodes: [node()],
+          nodes: [workflow_node()],
           connections: [connection()],
           triggers: [trigger()],
           changelog: String.t() | nil,
@@ -58,40 +95,13 @@ defmodule Imgd.Workflows.WorkflowVersion do
     # Content hash of nodes + connections + triggers
     field :source_hash, :string
 
-    embeds_many :nodes, Node, on_replace: :delete do
-      # Unique ID within workflow
-      field :id, :string
-      # References Node.Type.id
-      field :type_id, :string
-      # User-given name
-      field :name, :string
-      # Node-specific configuration
-      field :config, :map, default: %{}
-      # {x, y} for UI
-      field :position, :map, default: %{}
-      # User notes
-      field :notes, :string
-    end
-
-    embeds_many :connections, Connection, on_replace: :delete do
-      field :id, :string
-      field :source_node_id, :string
-      # Output port name
-      field :source_output, :string, default: "main"
-      field :target_node_id, :string
-      # Input port name
-      field :target_input, :string, default: "main"
-    end
-
-    embeds_many :triggers, Trigger, on_replace: :delete do
-      field :type, Ecto.Enum, values: [:manual, :webhook, :schedule, :event]
-      field :config, :map, default: %{}
-    end
+    embeds_many :nodes, Node, on_replace: :delete
+    embeds_many :connections, Connection, on_replace: :delete
+    embeds_many :triggers, Trigger, on_replace: :delete
 
     field :changelog, :string
 
     field :published_at, :utc_datetime_usec
-    field :published_by, :binary_id
     belongs_to :published_by_user, User, foreign_key: :published_by
 
     belongs_to :workflow, Workflow

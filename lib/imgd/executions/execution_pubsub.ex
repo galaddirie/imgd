@@ -91,8 +91,8 @@ defmodule Imgd.Workflows.ExecutionPubSub do
       output_data: node_execution.output_data,
       error: node_execution.error,
       started_at: node_execution.started_at,
-      finished_at: node_execution.finished_at,
-      duration_ms: duration_ms(node_execution.started_at, node_execution.finished_at)
+      completed_at: node_execution.completed_at,
+      duration_ms: duration_ms(node_execution.started_at, node_execution.completed_at)
     }
   end
 

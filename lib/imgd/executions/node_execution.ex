@@ -16,7 +16,7 @@ defmodule Imgd.Executions.NodeExecution do
              :output_data,
              :error,
              :started_at,
-             :finished_at,
+             :completed_at,
              :attempt,
              :retry_of_id,
              :inserted_at,
@@ -37,7 +37,7 @@ defmodule Imgd.Executions.NodeExecution do
           output_data: map() | nil,
           error: map() | nil,
           started_at: DateTime.t() | nil,
-          finished_at: DateTime.t() | nil,
+          completed_at: DateTime.t() | nil,
           attempt: pos_integer(),
           retry_of_id: Ecto.UUID.t() | nil,
           inserted_at: DateTime.t(),
@@ -59,7 +59,7 @@ defmodule Imgd.Executions.NodeExecution do
     field :error, :map
 
     field :started_at, :utc_datetime_usec
-    field :finished_at, :utc_datetime_usec
+    field :completed_at, :utc_datetime_usec
 
     field :attempt, :integer, default: 1
     field :retry_of_id, :binary_id
@@ -80,7 +80,7 @@ defmodule Imgd.Executions.NodeExecution do
         :output_data,
         :error,
         :started_at,
-        :finished_at,
+        :completed_at,
         :attempt,
         :retry_of_id
       ],

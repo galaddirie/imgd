@@ -41,7 +41,7 @@ defmodule Imgd.Nodes.Type do
     field :config_schema, :map, default: %{}
     field :input_schema, :map, default: %{}
     field :output_schema, :map, default: %{}
-    field :executor, WorkflowEngine.EctoTypes.Module
+    field :executor, :string # todo proper
     field :node_kind, Ecto.Enum, values: [:action, :trigger, :control_flow, :transform]
     field :inserted_at, :utc_datetime_usec
     field :updated_at, :utc_datetime_usec

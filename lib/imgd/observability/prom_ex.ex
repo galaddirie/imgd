@@ -4,7 +4,7 @@ defmodule Imgd.Observability.PromEx do
 
   Exposes Prometheus metrics for:
   - Workflow execution counts, duration, and status
-  - Step execution latency, counts, and error rates
+  - Node execution latency, counts, and error rates
   - BEAM VM metrics (memory, processes, schedulers)
   - Phoenix request metrics
   - Ecto query metrics

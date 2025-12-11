@@ -29,11 +29,49 @@ defmodule Imgd.Workflows.Workflow do
   alias Imgd.Workflows.{WorkflowVersion, Execution}
   alias Imgd.Accounts.User
 
+  # Embedded schema modules
+  defmodule Node do
+    use Ecto.Schema
+    @primary_key false
+
+    embedded_schema do
+      field :id, :string
+      field :type_id, :string
+      field :name, :string
+      field :config, :map, default: %{}
+      field :position, :map, default: %{}
+      field :notes, :string
+    end
+  end
+
+  defmodule Connection do
+    use Ecto.Schema
+    @primary_key false
+
+    embedded_schema do
+      field :id, :string
+      field :target_node_id, :string
+      field :target_input, :string, default: "main"
+      field :source_node_id, :string
+      field :source_output, :string, default: "main"
+    end
+  end
+
+  defmodule Trigger do
+    use Ecto.Schema
+    @primary_key false
+
+    embedded_schema do
+      field :type, Ecto.Enum, values: [:manual, :webhook, :schedule, :event]
+      field :config, :map, default: %{}
+    end
+  end
+
   @type status :: :draft | :active | :archived
   @type trigger_type :: :manual | :webhook | :schedule | :event
 
   @typedoc "Embedded workflow node definition"
-  @type node :: %Node{
+  @type workflow_node :: %Node{
           id: String.t(),
           type_id: String.t(),
           name: String.t(),
@@ -66,7 +104,7 @@ defmodule Imgd.Workflows.Workflow do
           name: String.t(),
           description: String.t() | nil,
           status: status(),
-          nodes: [node()],
+          nodes: [workflow_node()],
           connections: [connection()],
           triggers: [trigger()],
           trigger_config: map() | nil,
@@ -84,35 +122,9 @@ defmodule Imgd.Workflows.Workflow do
     field :description, :string
     field :status, Ecto.Enum, values: [:draft, :active, :archived], default: :draft
 
-    embeds_many :nodes, Node, on_replace: :delete do
-      # Unique ID within workflow
-      field :id, :string
-      # References Node.Type.id
-      field :type_id, :string
-      # User-given name
-      field :name, :string
-      # Node-specific configuration
-      field :config, :map, default: %{}
-      # {x, y} for UI
-      field :position, :map, default: %{}
-      # User notes
-      field :notes, :string
-    end
-
-    embeds_many :connections, Connection, on_replace: :delete do
-      field :id, :string
-      field :target_node_id, :string
-      field :target_input, :string, default: "main"
-
-      field :source_node_id, :string
-      field :source_output, :string, default: "main"
-    end
-
-    # Note: we can have multiple triggers
-    embeds_many :triggers, Trigger, on_replace: :delete do
-      field :type, Ecto.Enum, values: [:manual, :webhook, :schedule, :event]
-      field :config, :map, default: %{}
-    end
+    embeds_many :nodes, Node, on_replace: :delete
+    embeds_many :connections, Connection, on_replace: :delete
+    embeds_many :triggers, Trigger, on_replace: :delete
 
     # Virtual fields used by the UI
     field :trigger_config, :map, virtual: true
