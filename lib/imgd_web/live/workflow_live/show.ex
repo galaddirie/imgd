@@ -7,8 +7,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
   alias Imgd.Workflows
   alias Imgd.Executions
   alias Imgd.Executions.PubSub
-  alias Imgd.Workers.ExecutionWorker
-  alias Imgd.Executions.NodeExecution
   alias ImgdWeb.WorkflowLive.Components.WorkflowGraph
   alias ImgdWeb.WorkflowLive.Components.TracePanel
   import ImgdWeb.Formatters, except: [trigger_label: 1]
@@ -237,15 +235,15 @@ defmodule ImgdWeb.WorkflowLive.Show do
     {:noreply, socket}
   end
 
+  # Catch-all for other messages
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   defp get_node_name(workflow, node_id) do
     case Enum.find(workflow.nodes, &(&1.id == node_id)) do
       nil -> node_id
       node -> node.name
     end
   end
-
-  # Catch-all for other messages
-  def handle_info(_msg, socket), do: {:noreply, socket}
 
   # Private helpers
 

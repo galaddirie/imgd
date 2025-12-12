@@ -1,8 +1,24 @@
 defmodule Imgd.Sandbox.Config do
   @moduledoc false
 
-  @enforce_keys [:timeout, :args, :fuel, :memory_mb, :max_output_size, :max_code_size, :quickjs_wasm_path]
-  defstruct [:timeout, :args, :fuel, :memory_mb, :max_output_size, :max_code_size, :quickjs_wasm_path]
+  @enforce_keys [
+    :timeout,
+    :args,
+    :fuel,
+    :memory_mb,
+    :max_output_size,
+    :max_code_size,
+    :quickjs_wasm_path
+  ]
+  defstruct [
+    :timeout,
+    :args,
+    :fuel,
+    :memory_mb,
+    :max_output_size,
+    :max_code_size,
+    :quickjs_wasm_path
+  ]
 
   @type t :: %__MODULE__{
           timeout: pos_integer(),
@@ -46,7 +62,7 @@ defmodule Imgd.Sandbox.Config do
     end
   end
 
-  defp validate_pos_int(value, name) when is_integer(value) and value > 0, do: :ok
+  defp validate_pos_int(value, _name) when is_integer(value) and value > 0, do: :ok
 
   defp validate_pos_int(_value, name),
     do: {:error, {:validation_error, "#{name} must be a positive integer"}}

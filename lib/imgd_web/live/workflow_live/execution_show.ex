@@ -7,9 +7,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   """
   use ImgdWeb, :live_view
 
-  alias Imgd.Workflows
   alias Imgd.Executions
-  alias Imgd.Executions.NodeExecution
   alias ImgdWeb.WorkflowLive.Components.TracePanel
   import ImgdWeb.Formatters, except: [trigger_label: 1]
 

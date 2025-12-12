@@ -17,7 +17,6 @@ defmodule Imgd.Workflows.Workflow do
              :user
            ]}
   use Imgd.Schema
-  import Imgd.ChangesetHelpers
 
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Workflows.Embeds.{Node, Connection, Trigger}

@@ -24,7 +24,6 @@ defmodule Imgd.Executions.Execution do
   @type trigger_type :: :manual | :schedule | :webhook | :event
 
   @statuses [:pending, :running, :paused, :completed, :failed, :cancelled, :timeout]
-  @trigger_types [:manual, :schedule, :webhook, :event]
 
   defmodule Trigger do
     @moduledoc "Embedded trigger data for an execution"
