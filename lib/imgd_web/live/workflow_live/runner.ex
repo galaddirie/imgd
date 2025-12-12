@@ -52,6 +52,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:selected_node_id, nil)
           |> assign(:running?, false)
           |> assign(:can_run?, workflow.published_version_id != nil)
+          |> assign(:trace_log_count, 0)
           |> stream(:trace_log, [], dom_id: &"trace-#{&1.id}")
 
         {:ok, socket}
@@ -110,6 +111,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             |> assign(:execution, execution)
             |> assign(:running?, true)
             |> assign(:node_states, %{})
+            |> assign(:trace_log_count, 0)
             |> stream(:trace_log, [], reset: true)
             |> append_trace_log(:info, "Execution started", %{execution_id: execution.id})
             |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
@@ -270,7 +272,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   defp maybe_stream_existing_logs(socket, %Execution{} = execution) do
     logs = build_logs_from_execution(execution)
-    stream(socket, :trace_log, logs, reset: true)
+
+    socket
+    |> assign(:trace_log_count, length(logs))
+    |> stream(:trace_log, logs, reset: true)
   end
 
   defp build_logs_from_execution(%Execution{} = execution) do
@@ -366,7 +371,15 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       data: data
     }
 
-    stream_insert(socket, :trace_log, entry, at: -1, limit: @trace_log_limit)
+    new_count =
+      socket.assigns
+      |> Map.get(:trace_log_count, 0)
+      |> Kernel.+(1)
+      |> min(@trace_log_limit)
+
+    socket
+    |> assign(:trace_log_count, new_count)
+    |> stream_insert(:trace_log, entry, at: -1, limit: @trace_log_limit)
   end
 
   # ============================================================================
@@ -433,7 +446,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             selected_node_id={@selected_node_id}
           />
 
-          <.trace_log_panel trace_log={@streams.trace_log} />
+          <.trace_log_panel
+            trace_log={@streams.trace_log}
+            trace_log_count={@trace_log_count}
+          />
         </div>
       </div>
 
@@ -823,7 +839,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         </div>
 
         <div
-          :if={Enum.empty?(@trace_log)}
+          :if={@trace_log_count == 0}
           class="text-center py-8 text-base-content/60"
         >
           <p class="text-sm">No log entries yet</p>
