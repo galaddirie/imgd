@@ -101,6 +101,15 @@ defmodule ImgdWeb.WorkflowLive.Show do
                   {status_label(@workflow.status)}
                 </span>
               </div>
+              <div class="flex items-center gap-3">
+                <.link
+                  navigate={~p"/workflows/#{@workflow.id}/run"}
+                  class="btn btn-primary gap-2"
+                >
+                  <.icon name="hero-play" class="size-4" />
+                  <span>Run Workflow</span>
+                </.link>
+              </div>
               <p class="max-w-2xl text-sm text-muted">
                 {@workflow.description || "No description provided."}
               </p>

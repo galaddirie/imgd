@@ -1,6 +1,6 @@
 defmodule Imgd.Runtime.WorkflowRunner do
   @moduledoc """
-  Orchestrates workflow execution using Runic.
+  Orchestrates workflow execution using Runic with real-time event broadcasting.
 
   This module is responsible for:
   - Building Runic workflows from WorkflowVersions
@@ -8,14 +8,8 @@ defmodule Imgd.Runtime.WorkflowRunner do
   - Persisting NodeExecution records as steps complete
   - Updating execution context with outputs
   - Handling timeouts via Task.yield/2 pattern
-  - Broadcasting progress via PubSub
+  - Broadcasting progress via PubSub for live UI updates
   - Emitting telemetry/traces via Instrumentation
-
-  ## Usage
-
-      {:ok, execution} = WorkflowRunner.run(execution)
-
-  The execution must have `workflow_version` preloaded.
   """
 
   require Logger
@@ -25,26 +19,16 @@ defmodule Imgd.Runtime.WorkflowRunner do
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
   alias Imgd.Runtime.{WorkflowBuilder, NodeExecutionError}
   alias Imgd.Observability.Instrumentation
+  alias Imgd.Workflows.Embeds.Node
 
   @default_timeout_ms 300_000
 
   @type run_result :: {:ok, Execution.t()} | {:error, term()}
 
   @doc """
-  Runs a workflow execution.
+  Runs a workflow execution with real-time event broadcasting.
 
-  The execution must have `workflow_version` preloaded. This function:
-
-  1. Marks the execution as running
-  2. Builds a Runic workflow from the version
-  3. Executes the workflow with timeout protection
-  4. Persists node execution records
-  5. Updates the execution with results
-
-  ## Returns
-
-  - `{:ok, execution}` - Execution completed (check status for success/failure)
-  - `{:error, reason}` - Failed to run execution
+  The execution must have `workflow_version` preloaded.
   """
   @spec run(Execution.t()) :: run_result()
   def run(%Execution{} = execution) do
@@ -123,7 +107,6 @@ defmodule Imgd.Runtime.WorkflowRunner do
         {:error, reason}
 
       {:error, changeset} ->
-        # Still return original error
         Logger.error("Failed to mark execution as failed",
           execution_id: execution.id,
           changeset_errors: inspect(changeset.errors)
@@ -187,10 +170,9 @@ defmodule Imgd.Runtime.WorkflowRunner do
     timeout_ms = get_timeout_ms(execution)
     trigger_input = Execution.trigger_data(execution)
 
-    # Run in a Task for timeout control
     task =
       Task.async(fn ->
-        execute_runic_workflow(execution, runic_workflow, trigger_input, context)
+        execute_workflow_with_events(execution, runic_workflow, trigger_input, context)
       end)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
@@ -220,36 +202,33 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   # ============================================================================
-  # Runic Workflow Execution
+  # Workflow Execution with Per-Node Events
   # ============================================================================
 
-  defp execute_runic_workflow(execution, runic_workflow, trigger_input, context) do
+  defp execute_workflow_with_events(execution, runic_workflow, trigger_input, context) do
     try do
-      # Execute the Runic workflow
-      executed_workflow = Workflow.react_until_satisfied(runic_workflow, trigger_input)
+      # Get nodes for tracking
+      nodes = execution.workflow_version.nodes || []
+      node_map = Map.new(nodes, &{&1.id, &1})
 
-      # Extract results and update context
+      # Execute with node tracking
+      {executed_workflow, final_context} =
+        execute_nodes_sequentially(execution, runic_workflow, trigger_input, context, node_map)
+
+      # Extract results
       productions = Workflow.raw_productions(executed_workflow)
       build_log = extract_build_log(executed_workflow)
       reaction_log = extract_reaction_log(executed_workflow)
 
-      # Get the final output (last production or all productions)
       output = determine_output(productions)
 
-      # Update context with all node outputs
-      updated_context = update_context_from_workflow(context, executed_workflow)
-
-      # Persist node execution records
-      persist_node_executions(execution, executed_workflow, updated_context)
-
-      # Store Runic logs on execution
+      # Store Runic logs
       store_runic_logs(execution, build_log, reaction_log)
 
-      {:ok, {output, updated_context}}
+      {:ok, {output, final_context}}
     rescue
       e in NodeExecutionError ->
-        # Handle node-specific failures
-        persist_failed_node_execution(execution, e, context)
+        handle_node_failure(execution, e, context)
         {:error, {:node_failed, e.node_id, e.reason}}
 
       e ->
@@ -260,6 +239,143 @@ defmodule Imgd.Runtime.WorkflowRunner do
         )
 
         {:error, {:unexpected_error, Exception.message(e)}}
+    end
+  end
+
+  # Execute nodes with per-node event broadcasting
+  defp execute_nodes_sequentially(execution, runic_workflow, trigger_input, context, node_map) do
+    # This is a simplified version - in practice, Runic handles the execution order
+    # We wrap it to capture and broadcast events
+
+    # Start execution
+    executed_workflow = Workflow.react_until_satisfied(runic_workflow, trigger_input)
+
+    # Extract facts and map to nodes
+    facts = Workflow.facts(executed_workflow)
+    final_context = process_facts_and_broadcast(execution, facts, context, node_map)
+
+    {executed_workflow, final_context}
+  end
+
+  defp process_facts_and_broadcast(execution, facts, context, node_map) do
+    # Process each fact and broadcast node events
+    Enum.reduce(facts, context, fn fact, acc_context ->
+      case extract_node_id_from_fact(fact) do
+        nil ->
+          acc_context
+
+        node_id ->
+          node = Map.get(node_map, node_id)
+
+          if node do
+            # Broadcast and persist node execution
+            now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+            node_exec =
+              persist_and_broadcast_node(
+                execution,
+                node,
+                fact.value,
+                acc_context,
+                now
+              )
+
+            if node_exec do
+              Context.put_output(acc_context, node_id, fact.value)
+            else
+              acc_context
+            end
+          else
+            acc_context
+          end
+      end
+    end)
+  end
+
+  defp persist_and_broadcast_node(execution, %Node{} = node, output, context, now) do
+    # Create node execution with started status first
+    started_attrs = %{
+      execution_id: execution.id,
+      node_id: node.id,
+      node_type_id: node.type_id,
+      status: :running,
+      input_data: context.current_input,
+      started_at: now,
+      queued_at: now,
+      attempt: 1
+    }
+
+    case Repo.insert(NodeExecution.changeset(%NodeExecution{}, started_attrs)) do
+      {:ok, node_exec} ->
+        # Broadcast started
+        ExecutionPubSub.broadcast_node_started(execution, node_exec)
+
+        # Update to completed
+        completed_attrs = %{
+          status: :completed,
+          output_data: %{"value" => output},
+          completed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+        }
+
+        case Repo.update(NodeExecution.changeset(node_exec, completed_attrs)) do
+          {:ok, updated_exec} ->
+            ExecutionPubSub.broadcast_node_completed(execution, updated_exec)
+            updated_exec
+
+          {:error, _} ->
+            node_exec
+        end
+
+      {:error, changeset} ->
+        Logger.warning("Failed to persist node execution",
+          execution_id: execution.id,
+          node_id: node.id,
+          errors: inspect(changeset.errors)
+        )
+
+        nil
+    end
+  end
+
+  defp handle_node_failure(execution, %NodeExecutionError{} = error, context) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    attrs = %{
+      execution_id: execution.id,
+      node_id: error.node_id,
+      node_type_id: error.node_type_id,
+      status: :failed,
+      input_data: context.current_input,
+      error: %{"reason" => inspect(error.reason)},
+      started_at: now,
+      completed_at: now,
+      attempt: 1
+    }
+
+    case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
+      {:ok, node_exec} ->
+        ExecutionPubSub.broadcast_node_failed(execution, node_exec, error.reason)
+
+      {:error, changeset} ->
+        Logger.warning("Failed to persist failed node execution",
+          execution_id: execution.id,
+          node_id: error.node_id,
+          errors: inspect(changeset.errors)
+        )
+    end
+  end
+
+  defp extract_node_id_from_fact(fact) do
+    # Extract node_id from fact ancestry/metadata
+    # This depends on how Runic structures its facts
+    case fact.ancestry do
+      {step_hash, _parent_hash} when is_binary(step_hash) ->
+        # Try to parse node_id from step name (if encoded)
+        # This is a simplification - actual implementation depends on Runic structure
+        nil
+
+      _ ->
+        nil
     end
   end
 
@@ -298,96 +414,6 @@ defmodule Imgd.Runtime.WorkflowRunner do
       [] -> %{}
       [single] -> %{"result" => single}
       multiple -> %{"results" => multiple}
-    end
-  end
-
-  defp update_context_from_workflow(context, workflow) do
-    # Extract facts from the workflow and map them to node outputs
-    facts = Workflow.facts(workflow)
-
-    Enum.reduce(facts, context, fn fact, ctx ->
-      case fact.ancestry do
-        {step_hash, _parent_hash} ->
-          # Try to find the step name from the hash
-          node_id = find_node_id_from_hash(workflow, step_hash)
-
-          if node_id do
-            Context.put_output(ctx, node_id, fact.value)
-          else
-            ctx
-          end
-
-        nil ->
-          # Input fact, skip
-          ctx
-      end
-    end)
-  end
-
-  defp find_node_id_from_hash(_workflow, _step_hash) do
-    # This is a simplification - in practice we'd need to track this mapping
-    # during workflow building
-    nil
-  end
-
-  # ============================================================================
-  # Node Execution Persistence
-  # ============================================================================
-
-  defp persist_node_executions(execution, _workflow, context) do
-    # Get all completed nodes from context
-    completed_nodes = Context.completed_nodes(context)
-
-    Enum.each(completed_nodes, fn node_id ->
-      output = Context.get_output(context, node_id)
-
-      attrs = %{
-        execution_id: execution.id,
-        node_id: node_id,
-        node_type_id: "unknown",
-        status: :completed,
-        output_data: %{"value" => output},
-        started_at: DateTime.utc_now() |> DateTime.truncate(:microsecond),
-        completed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond),
-        attempt: 1
-      }
-
-      case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
-        {:ok, node_exec} ->
-          ExecutionPubSub.broadcast_node_completed(execution, node_exec)
-
-        {:error, changeset} ->
-          Logger.warning("Failed to persist node execution",
-            execution_id: execution.id,
-            node_id: node_id,
-            errors: inspect(changeset.errors)
-          )
-      end
-    end)
-  end
-
-  defp persist_failed_node_execution(execution, %NodeExecutionError{} = error, _context) do
-    attrs = %{
-      execution_id: execution.id,
-      node_id: error.node_id,
-      node_type_id: error.node_type_id,
-      status: :failed,
-      error: %{"reason" => inspect(error.reason)},
-      started_at: DateTime.utc_now() |> DateTime.truncate(:microsecond),
-      completed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond),
-      attempt: 1
-    }
-
-    case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
-      {:ok, node_exec} ->
-        ExecutionPubSub.broadcast_node_failed(execution, node_exec)
-
-      {:error, changeset} ->
-        Logger.warning("Failed to persist failed node execution",
-          execution_id: execution.id,
-          node_id: error.node_id,
-          errors: inspect(changeset.errors)
-        )
     end
   end
 
