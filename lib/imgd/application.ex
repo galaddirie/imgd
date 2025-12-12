@@ -9,7 +9,7 @@ defmodule Imgd.Application do
     Imgd.Observability.Telemetry.setup()
     Imgd.Sandbox.Telemetry.setup()
 
-    flame_parent = FLAME.Parent.get()
+    _flame_parent = FLAME.Parent.get()
 
     children = [
       ImgdWeb.Telemetry,
@@ -20,6 +20,8 @@ defmodule Imgd.Application do
       {Phoenix.PubSub, name: Imgd.PubSub},
       # Node type registry - must start before endpoint so types are available
       Imgd.Nodes.Registry,
+      # Add before Sandbox.Supervisor
+      Imgd.Runtime.Expression.Cache,
       Imgd.Sandbox.Supervisor,
       ImgdWeb.Endpoint
     ]

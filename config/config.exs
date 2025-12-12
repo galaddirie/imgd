@@ -42,6 +42,17 @@ config :imgd, Imgd.Sandbox.Pool,
   max_concurrency: 20,
   idle_shutdown_after: 30_000
 
+# Expression cache settings
+config :imgd, Imgd.Runtime.Expression.Cache,
+  max_entries: 10_000,
+  ttl_seconds: 3600
+
+# Allowed environment variables (security)
+config :imgd, :allowed_env_vars, ~w(
+  MIX_ENV
+  APP_ENV
+)
+
 # Configure the endpoint
 config :imgd, ImgdWeb.Endpoint,
   url: [host: "localhost"],

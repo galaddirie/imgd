@@ -85,6 +85,7 @@ defmodule Imgd.MixProject do
       #runtime
       {:wasmex, "~> 0.13.0"},
       {:flame, "~> 0.5.3"},
+      {:solid, "~> 1.2"},
       # Metrics
       {:prom_ex, "~> 1.11"},
 

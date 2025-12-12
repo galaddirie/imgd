@@ -25,6 +25,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   alias Imgd.Workflows.Embeds.Node
   alias Imgd.Executions.Context
   alias Imgd.Runtime.NodeExecutor
+  alias Imgd.Runtime.Expression.Evaluator
   # Instrumentation is used via telemetry events
 
   @type build_result :: {:ok, Workflow.t()} | {:error, term()}
@@ -107,9 +108,6 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     end
   end
 
-  # ============================================================================
-  # Topological Sort (Kahn's Algorithm)
-  # ============================================================================
 
   @doc false
   def topological_sort(graph, nodes) do
@@ -229,21 +227,31 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     # Update context with current node info
     ctx = Context.set_current_node(context, node.id, input)
 
-    # Execute via NodeExecutor behaviour
-    case NodeExecutor.execute(node.type_id, node.config, input, ctx) do
-      {:ok, output} ->
-        output
+    # Resolve expressions in config
+    case Evaluator.resolve_config(node.config, ctx) do
+      {:ok, resolved_config} ->
+        # Execute via NodeExecutor behaviour
+        case NodeExecutor.execute(node.type_id, resolved_config, input, ctx) do
+          {:ok, output} ->
+            output
+
+          {:error, reason} ->
+            # Wrap error to propagate through Runic
+            raise Imgd.Runtime.NodeExecutionError,
+              node_id: node.id,
+              node_type_id: node.type_id,
+              reason: reason
+
+          {:skip, reason} ->
+            # Return a skip marker that the runner can detect
+            {:__skipped__, node.id, reason}
+        end
 
       {:error, reason} ->
-        # Wrap error to propagate through Runic
         raise Imgd.Runtime.NodeExecutionError,
           node_id: node.id,
           node_type_id: node.type_id,
-          reason: reason
-
-      {:skip, reason} ->
-        # Return a skip marker that the runner can detect
-        {:__skipped__, node.id, reason}
+          reason: {:expression_error, reason}
     end
   end
 
