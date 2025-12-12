@@ -177,6 +177,9 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     base_workflow =
       Runic.workflow(name: "workflow_#{version.workflow_id}_v#{version.version_tag}")
 
+    # Build a map of node_id -> node_type_id for telemetry
+    node_type_map = Map.new(sorted_nodes, &{&1.id, &1.type_id})
+
     # Build a map of node_id -> Runic step for wiring dependencies
     {workflow, step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
@@ -203,8 +206,8 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         {wf, Map.put(steps, node.id, step)}
       end)
 
-    # Install observability hooks
-    workflow = install_hooks(workflow, step_map, context)
+    # Install observability hooks with node type information
+    workflow = install_hooks(workflow, step_map, node_type_map, context)
 
     {:ok, workflow}
   rescue
@@ -214,6 +217,8 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
   defp create_runic_step(%Node{} = node, %Context{} = context) do
     # Create a step that wraps the NodeExecutor
+    # The work function is wrapped to catch any exceptions and convert them to
+    # NodeExecutionError for proper error handling in the workflow runner
     Runic.step(
       name: String.to_atom(node.id),
       work: fn input ->
@@ -229,28 +234,45 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     # Resolve expressions in config
     case Evaluator.resolve_config(node.config, ctx) do
       {:ok, resolved_config} ->
-        # Execute via NodeExecutor behaviour
-        case NodeExecutor.execute(node.type_id, resolved_config, input, ctx) do
-          {:ok, output} ->
-            output
-
-          {:error, reason} ->
-            # Wrap error to propagate through Runic
-            raise Imgd.Runtime.NodeExecutionError,
-              node_id: node.id,
-              node_type_id: node.type_id,
-              reason: reason
-
-          {:skip, reason} ->
-            # Return a skip marker that the runner can detect
-            {:__skipped__, node.id, reason}
-        end
+        execute_with_config(node, resolved_config, input, ctx)
 
       {:error, reason} ->
         raise Imgd.Runtime.NodeExecutionError,
           node_id: node.id,
           node_type_id: node.type_id,
           reason: {:expression_error, reason}
+    end
+  end
+
+  defp execute_with_config(%Node{} = node, config, input, ctx) do
+    # Execute via NodeExecutor behaviour with error handling
+    try do
+      case NodeExecutor.execute(node.type_id, config, input, ctx) do
+        {:ok, output} ->
+          output
+
+        {:error, reason} ->
+          # Wrap error to propagate through Runic
+          raise Imgd.Runtime.NodeExecutionError,
+            node_id: node.id,
+            node_type_id: node.type_id,
+            reason: reason
+
+        {:skip, reason} ->
+          # Return a skip marker that the runner can detect
+          {:__skipped__, node.id, reason}
+      end
+    rescue
+      e in Imgd.Runtime.NodeExecutionError ->
+        # Re-raise NodeExecutionError as-is
+        reraise e, __STACKTRACE__
+
+      e ->
+        # Wrap any other exception
+        raise Imgd.Runtime.NodeExecutionError,
+          node_id: node.id,
+          node_type_id: node.type_id,
+          reason: {:execution_exception, Exception.message(e)}
     end
   end
 
@@ -266,24 +288,25 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   # Observability Hooks
   # ============================================================================
 
-  defp install_hooks(workflow, step_map, context) do
+  defp install_hooks(workflow, step_map, node_type_map, context) do
     # Install before/after hooks for each step to emit telemetry
     Enum.reduce(step_map, workflow, fn {node_id, _step}, wf ->
       step_name = String.to_atom(node_id)
+      node_type_id = Map.get(node_type_map, node_id, "unknown")
 
       wf
       |> Workflow.attach_before_hook(step_name, fn _step, workflow, _fact ->
-        emit_node_started(context, node_id)
+        emit_node_started(context, node_id, node_type_id)
         workflow
       end)
       |> Workflow.attach_after_hook(step_name, fn _step, workflow, _fact ->
-        emit_node_completed(context, node_id)
+        emit_node_completed(context, node_id, node_type_id)
         workflow
       end)
     end)
   end
 
-  defp emit_node_started(context, node_id) do
+  defp emit_node_started(context, node_id, node_type_id) do
     :telemetry.execute(
       [:imgd, :engine, :node, :start],
       %{system_time: System.system_time(), queue_time_ms: nil},
@@ -292,13 +315,13 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         workflow_id: context.workflow_id,
         workflow_version_id: context.workflow_version_id,
         node_id: node_id,
-        node_type_id: "unknown",
+        node_type_id: node_type_id,
         attempt: 1
       }
     )
   end
 
-  defp emit_node_completed(context, node_id) do
+  defp emit_node_completed(context, node_id, node_type_id) do
     :telemetry.execute(
       [:imgd, :engine, :node, :stop],
       %{duration_ms: 0},
@@ -307,7 +330,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         workflow_id: context.workflow_id,
         workflow_version_id: context.workflow_version_id,
         node_id: node_id,
-        node_type_id: "unknown",
+        node_type_id: node_type_id,
         attempt: 1,
         status: :completed
       }

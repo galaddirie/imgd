@@ -19,7 +19,6 @@ defmodule Imgd.Runtime.WorkflowRunner do
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
   alias Imgd.Runtime.{WorkflowBuilder, NodeExecutionError}
   alias Imgd.Observability.Instrumentation
-  alias Imgd.Workflows.Embeds.Node
 
   @default_timeout_ms 300_000
 
@@ -40,13 +39,40 @@ defmodule Imgd.Runtime.WorkflowRunner do
   defp do_run(%Execution{} = execution) do
     with {:ok, execution} <- mark_running(execution),
          {:ok, context} <- build_context(execution),
-         {:ok, runic_workflow} <- WorkflowBuilder.build(execution.workflow_version, context),
-         {:ok, result} <- execute_with_timeout(execution, runic_workflow, context) do
-      handle_result(execution, result)
+         {:ok, runic_workflow} <- build_workflow_safe(execution, context),
+         result <- execute_with_timeout(execution, runic_workflow, context) do
+      handle_execution_result(execution, result)
     else
       {:error, reason} ->
         mark_failed(execution, reason)
     end
+  end
+
+  defp build_workflow_safe(execution, context) do
+    case WorkflowBuilder.build(execution.workflow_version, context) do
+      {:ok, workflow} ->
+        {:ok, workflow}
+
+      {:error, reason} ->
+        Logger.error("Failed to build workflow",
+          execution_id: execution.id,
+          reason: inspect(reason)
+        )
+
+        {:error, {:workflow_build_failed, reason}}
+    end
+  end
+
+  defp handle_execution_result(execution, {:ok, result}) do
+    handle_result(execution, {:ok, result})
+  end
+
+  defp handle_execution_result(execution, {:error, reason}) do
+    mark_failed(execution, reason)
+  end
+
+  defp handle_execution_result(execution, {:timeout, context}) do
+    handle_result(execution, {:timeout, context})
   end
 
   # ============================================================================
@@ -211,6 +237,12 @@ defmodule Imgd.Runtime.WorkflowRunner do
       nodes = execution.workflow_version.nodes || []
       node_map = Map.new(nodes, &{&1.id, &1})
 
+      Logger.debug("Starting workflow execution",
+        execution_id: execution.id,
+        node_count: map_size(node_map),
+        trigger_input: inspect(trigger_input)
+      )
+
       # Execute with node tracking
       {executed_workflow, final_context} =
         execute_nodes_sequentially(execution, runic_workflow, trigger_input, context, node_map)
@@ -222,12 +254,24 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
       output = determine_output(productions)
 
+      Logger.debug("Workflow execution completed",
+        execution_id: execution.id,
+        productions_count: length(productions)
+      )
+
       # Store Runic logs
       store_runic_logs(execution, build_log, reaction_log)
 
       {:ok, {output, final_context}}
     rescue
       e in NodeExecutionError ->
+        Logger.error("Node execution failed",
+          execution_id: execution.id,
+          node_id: e.node_id,
+          node_type_id: e.node_type_id,
+          reason: inspect(e.reason)
+        )
+
         handle_node_failure(execution, e, context)
         {:error, {:node_failed, e.node_id, e.reason}}
 
@@ -239,16 +283,26 @@ defmodule Imgd.Runtime.WorkflowRunner do
         )
 
         {:error, {:unexpected_error, Exception.message(e)}}
+    catch
+      kind, reason ->
+        Logger.error("Caught error during workflow execution",
+          execution_id: execution.id,
+          kind: kind,
+          reason: inspect(reason),
+          stacktrace: Exception.format_stacktrace(__STACKTRACE__)
+        )
+
+        {:error, {:caught_error, kind, reason}}
     end
   end
 
   # Execute nodes with per-node event broadcasting
   defp execute_nodes_sequentially(execution, runic_workflow, trigger_input, context, node_map) do
-    # This is a simplified version - in practice, Runic handles the execution order
-    # We wrap it to capture and broadcast events
+    # Execute the workflow with a maximum iteration guard to prevent infinite loops
+    max_iterations = map_size(node_map) * 2 + 10
 
-    # Start execution
-    executed_workflow = Workflow.react_until_satisfied(runic_workflow, trigger_input)
+    executed_workflow =
+      execute_workflow_bounded(runic_workflow, trigger_input, max_iterations)
 
     # Extract facts and map to nodes
     facts = Workflow.facts(executed_workflow)
@@ -257,84 +311,63 @@ defmodule Imgd.Runtime.WorkflowRunner do
     {executed_workflow, final_context}
   end
 
-  defp process_facts_and_broadcast(execution, facts, context, node_map) do
-    # Process each fact and broadcast node events
-    Enum.reduce(facts, context, fn fact, acc_context ->
-      case extract_node_id_from_fact(fact) do
-        nil ->
-          acc_context
+  # Execute workflow with bounded iterations to prevent infinite loops
+  defp execute_workflow_bounded(workflow, input, max_iterations) do
+    # First, react to the input to set up initial runnables
+    workflow = Workflow.react(workflow, input)
 
-        node_id ->
-          node = Map.get(node_map, node_id)
-
-          if node do
-            # Broadcast and persist node execution
-            now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-
-            node_exec =
-              persist_and_broadcast_node(
-                execution,
-                node,
-                fact.value,
-                acc_context,
-                now
-              )
-
-            if node_exec do
-              Context.put_output(acc_context, node_id, fact.value)
-            else
-              acc_context
-            end
-          else
-            acc_context
-          end
-      end
-    end)
+    # Then iterate with a bound
+    do_bounded_execution(workflow, max_iterations, 0)
   end
 
-  defp persist_and_broadcast_node(execution, %Node{} = node, output, context, now) do
-    # Create node execution with started status first
-    started_attrs = %{
-      execution_id: execution.id,
-      node_id: node.id,
-      node_type_id: node.type_id,
-      status: :running,
-      input_data: context.current_input,
-      started_at: now,
-      queued_at: now,
-      attempt: 1
-    }
+  defp do_bounded_execution(workflow, max_iterations, current_iteration)
+       when current_iteration >= max_iterations do
+    Logger.warning("Workflow execution reached maximum iterations",
+      max_iterations: max_iterations,
+      current_iteration: current_iteration
+    )
 
-    case Repo.insert(NodeExecution.changeset(%NodeExecution{}, started_attrs)) do
-      {:ok, node_exec} ->
-        # Broadcast started
-        ExecutionPubSub.broadcast_node_started(execution, node_exec)
+    workflow
+  end
 
-        # Update to completed
-        completed_attrs = %{
-          status: :completed,
-          output_data: %{"value" => output},
-          completed_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
-        }
+  defp do_bounded_execution(workflow, max_iterations, current_iteration) do
+    if Workflow.is_runnable?(workflow) do
+      runnables = Workflow.next_runnables(workflow)
 
-        case Repo.update(NodeExecution.changeset(node_exec, completed_attrs)) do
-          {:ok, updated_exec} ->
-            ExecutionPubSub.broadcast_node_completed(execution, updated_exec)
-            updated_exec
+      if Enum.empty?(runnables) do
+        workflow
+      else
+        # Execute all current runnables
+        workflow =
+          Enum.reduce(runnables, workflow, fn {node, fact}, wrk ->
+            Workflow.invoke(wrk, node, fact)
+          end)
 
-          {:error, _} ->
-            node_exec
-        end
-
-      {:error, changeset} ->
-        Logger.warning("Failed to persist node execution",
-          execution_id: execution.id,
-          node_id: node.id,
-          errors: inspect(changeset.errors)
-        )
-
-        nil
+        do_bounded_execution(workflow, max_iterations, current_iteration + 1)
+      end
+    else
+      workflow
     end
+  end
+
+  defp process_facts_and_broadcast(_execution, facts, context, _node_map) do
+    # Facts produced by Runic contain values from node executions.
+    # The telemetry and PubSub broadcasts are handled by the hooks in WorkflowBuilder,
+    # so here we just accumulate the outputs in the context for reference.
+    #
+    # Note: Runic facts have ancestry as {step_hash, parent_fact_hash} where step_hash
+    # is an integer. Without a reverse lookup from hash to node_id, we can't reliably
+    # map facts back to nodes. The hooks handle the actual broadcasting.
+    Enum.reduce(facts, context, fn fact, acc_context ->
+      # Just accumulate fact values in context for debugging/logging purposes
+      # The actual node output tracking is done through the hooks
+      Logger.debug("Processed fact",
+        value: inspect(fact.value, limit: 100),
+        ancestry: inspect(fact.ancestry)
+      )
+
+      acc_context
+    end)
   end
 
   defp handle_node_failure(execution, %NodeExecutionError{} = error, context) do
@@ -362,20 +395,6 @@ defmodule Imgd.Runtime.WorkflowRunner do
           node_id: error.node_id,
           errors: inspect(changeset.errors)
         )
-    end
-  end
-
-  defp extract_node_id_from_fact(fact) do
-    # Extract node_id from fact ancestry/metadata
-    # This depends on how Runic structures its facts
-    case fact.ancestry do
-      {step_hash, _parent_hash} when is_binary(step_hash) ->
-        # Try to parse node_id from step name (if encoded)
-        # This is a simplification - actual implementation depends on Runic structure
-        nil
-
-      _ ->
-        nil
     end
   end
 
@@ -434,10 +453,6 @@ defmodule Imgd.Runtime.WorkflowRunner do
     mark_completed(execution, output, context)
   end
 
-  defp handle_result(execution, {:error, reason}) do
-    mark_failed(execution, reason)
-  end
-
   defp handle_result(execution, {:timeout, _context}) do
     mark_timeout(execution)
   end
@@ -449,6 +464,12 @@ defmodule Imgd.Runtime.WorkflowRunner do
           "type" => "node_failure",
           "node_id" => node_id,
           "reason" => inspect(node_reason)
+        }
+
+      {:workflow_build_failed, build_reason} ->
+        %{
+          "type" => "workflow_build_failed",
+          "reason" => inspect(build_reason)
         }
 
       {:build_failed, message} ->
@@ -479,6 +500,13 @@ defmodule Imgd.Runtime.WorkflowRunner do
         %{
           "type" => "unexpected_error",
           "message" => message
+        }
+
+      {:caught_error, kind, caught_reason} ->
+        %{
+          "type" => "caught_error",
+          "kind" => inspect(kind),
+          "reason" => inspect(caught_reason)
         }
 
       other ->
