@@ -17,7 +17,9 @@ defmodule Imgd.Sandbox.ValidatorTest do
 
     test "returns error when code is not a binary" do
       config = Config.build(max_code_size: 100)
-      assert {:error, {:validation_error, "code must be a string"}} = Validator.validate_code(123, config)
+
+      assert {:error, {:validation_error, "code must be a string"}} =
+               Validator.validate_code(123, config)
     end
   end
 

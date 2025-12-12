@@ -33,7 +33,17 @@ defmodule Imgd.Nodes.Executors.Transform do
       "operation" => %{
         "type" => "string",
         "title" => "Operation",
-        "enum" => ["map", "filter", "pick", "omit", "merge", "set", "rename", "flatten", "passthrough"],
+        "enum" => [
+          "map",
+          "filter",
+          "pick",
+          "omit",
+          "merge",
+          "set",
+          "rename",
+          "flatten",
+          "passthrough"
+        ],
         "description" => "The transformation operation to perform"
       },
       "options" => %{
@@ -42,7 +52,11 @@ defmodule Imgd.Nodes.Executors.Transform do
         "description" => "Operation-specific options",
         "properties" => %{
           "field" => %{"type" => "string", "description" => "Field name to operate on"},
-          "fields" => %{"type" => "array", "items" => %{"type" => "string"}, "description" => "List of field names"},
+          "fields" => %{
+            "type" => "array",
+            "items" => %{"type" => "string"},
+            "description" => "List of field names"
+          },
           "value" => %{"description" => "Value to use in the operation"},
           "operator" => %{
             "type" => "string",

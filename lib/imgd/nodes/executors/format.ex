@@ -25,7 +25,8 @@ defmodule Imgd.Nodes.Executors.Format do
       "template" => %{
         "type" => "string",
         "title" => "Template",
-        "description" => "Template string with {{field}} placeholders. Supports nested paths like {{user.name}}"
+        "description" =>
+          "Template string with {{field}} placeholders. Supports nested paths like {{user.name}}"
       }
     }
   }

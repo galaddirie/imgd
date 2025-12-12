@@ -166,10 +166,17 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
 
     errors =
       case Map.get(config, "method") do
-        nil -> errors
-        method when method in ~w(GET POST PUT PATCH DELETE HEAD OPTIONS) -> errors
-        method when is_binary(method) -> [{:method, "must be one of: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"} | errors]
-        _ -> [{:method, "must be a string"} | errors]
+        nil ->
+          errors
+
+        method when method in ~w(GET POST PUT PATCH DELETE HEAD OPTIONS) ->
+          errors
+
+        method when is_binary(method) ->
+          [{:method, "must be one of: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"} | errors]
+
+        _ ->
+          [{:method, "must be a string"} | errors]
       end
 
     errors =
@@ -215,11 +222,17 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
 
   defp validate_url(url, errors) do
     case URI.parse(url) do
-      %URI{scheme: nil} -> [{:url, "must include scheme (http:// or https://)"} | errors]
-      %URI{host: nil} -> [{:url, "must include host"} | errors]
+      %URI{scheme: nil} ->
+        [{:url, "must include scheme (http:// or https://)"} | errors]
+
+      %URI{host: nil} ->
+        [{:url, "must include host"} | errors]
+
       %URI{scheme: scheme} when scheme not in ["http", "https"] ->
         [{:url, "scheme must be http or https"} | errors]
-      _ -> errors
+
+      _ ->
+        errors
     end
   end
 

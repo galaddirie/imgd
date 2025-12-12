@@ -108,7 +108,6 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     end
   end
 
-
   @doc false
   def topological_sort(graph, nodes) do
     node_map = Map.new(nodes, &{&1.id, &1})

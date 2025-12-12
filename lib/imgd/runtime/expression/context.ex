@@ -191,7 +191,8 @@ defmodule Imgd.Runtime.Expression.Context do
     Enum.map(value, &normalize_value/1)
   end
 
-  def normalize_value(value) when is_atom(value) and not is_boolean(value) and not is_nil(value) do
+  def normalize_value(value)
+      when is_atom(value) and not is_boolean(value) and not is_nil(value) do
     Atom.to_string(value)
   end
 

@@ -30,6 +30,7 @@ defmodule Imgd.Runtime.ExpressionTest do
       node_outputs = %{
         "HTTP" => %{"status" => 200, "body" => "OK"}
       }
+
       ctx = build_context(%{}, node_outputs)
 
       assert {:ok, "Status: 200"} =
@@ -172,7 +173,10 @@ defmodule Imgd.Runtime.ExpressionTest do
 
     test "default filter" do
       ctx = build_context(%{"empty" => nil, "present" => "value"})
-      assert {:ok, "fallback"} = Expression.evaluate("{{ json.empty | default: 'fallback' }}", ctx)
+
+      assert {:ok, "fallback"} =
+               Expression.evaluate("{{ json.empty | default: 'fallback' }}", ctx)
+
       assert {:ok, "value"} = Expression.evaluate("{{ json.present | default: 'fallback' }}", ctx)
     end
 
@@ -187,41 +191,51 @@ defmodule Imgd.Runtime.ExpressionTest do
     end
 
     test "where_eq filter" do
-      ctx = build_context(%{
-        "items" => [
-          %{"status" => "active", "name" => "a"},
-          %{"status" => "inactive", "name" => "b"},
-          %{"status" => "active", "name" => "c"}
-        ]
-      })
-      assert {:ok, result} = Expression.evaluate(
-        "{{ json.items | where_eq: 'status', 'active' | pluck: 'name' | json }}",
-        ctx
-      )
+      ctx =
+        build_context(%{
+          "items" => [
+            %{"status" => "active", "name" => "a"},
+            %{"status" => "inactive", "name" => "b"},
+            %{"status" => "active", "name" => "c"}
+          ]
+        })
+
+      assert {:ok, result} =
+               Expression.evaluate(
+                 "{{ json.items | where_eq: 'status', 'active' | pluck: 'name' | json }}",
+                 ctx
+               )
+
       assert result == ~s(["a","c"])
     end
 
     test "sort_by filter" do
-      ctx = build_context(%{
-        "items" => [
-          %{"name" => "c"},
-          %{"name" => "a"},
-          %{"name" => "b"}
-        ]
-      })
-      assert {:ok, result} = Expression.evaluate(
-        "{{ json.items | sort_by: 'name' | pluck: 'name' | json }}",
-        ctx
-      )
+      ctx =
+        build_context(%{
+          "items" => [
+            %{"name" => "c"},
+            %{"name" => "a"},
+            %{"name" => "b"}
+          ]
+        })
+
+      assert {:ok, result} =
+               Expression.evaluate(
+                 "{{ json.items | sort_by: 'name' | pluck: 'name' | json }}",
+                 ctx
+               )
+
       assert result == ~s(["a","b","c"])
     end
 
     test "format_date filter" do
       ctx = build_context(%{"date" => "2024-01-15T10:30:00Z"})
-      assert {:ok, "2024-01-15"} = Expression.evaluate(
-        "{{ json.date | format_date: '%Y-%m-%d' }}",
-        ctx
-      )
+
+      assert {:ok, "2024-01-15"} =
+               Expression.evaluate(
+                 "{{ json.date | format_date: '%Y-%m-%d' }}",
+                 ctx
+               )
     end
 
     test "add_days filter" do
@@ -243,16 +257,20 @@ defmodule Imgd.Runtime.ExpressionTest do
     end
 
     test "chained filters" do
-      ctx = build_context(%{
-        "items" => [
-          %{"name" => "HELLO"},
-          %{"name" => "WORLD"}
-        ]
-      })
-      assert {:ok, result} = Expression.evaluate(
-        "{{ json.items | pluck: 'name' | first | downcase }}",
-        ctx
-      )
+      ctx =
+        build_context(%{
+          "items" => [
+            %{"name" => "HELLO"},
+            %{"name" => "WORLD"}
+          ]
+        })
+
+      assert {:ok, result} =
+               Expression.evaluate(
+                 "{{ json.items | pluck: 'name' | first | downcase }}",
+                 ctx
+               )
+
       assert result == "hello"
     end
   end
@@ -269,6 +287,7 @@ defmodule Imgd.Runtime.ExpressionTest do
         %{"type" => "b", "val" => 2},
         %{"type" => "a", "val" => 3}
       ]
+
       result = Filters.group_by(items, "type")
       assert length(result["a"]) == 2
       assert length(result["b"]) == 1

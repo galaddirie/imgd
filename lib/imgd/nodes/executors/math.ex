@@ -91,14 +91,20 @@ defmodule Imgd.Nodes.Executors.Math do
 
     errors =
       case Map.get(config, "operand") do
-        nil -> [{:operand, "is required"} | errors]
-        val when is_number(val) -> errors
+        nil ->
+          [{:operand, "is required"} | errors]
+
+        val when is_number(val) ->
+          errors
+
         val when is_binary(val) ->
           case Float.parse(val) do
             {_, ""} -> errors
             _ -> [{:operand, "must be a number"} | errors]
           end
-        _ -> [{:operand, "must be a number"} | errors]
+
+        _ ->
+          [{:operand, "must be a number"} | errors]
       end
 
     if errors == [] do
@@ -115,12 +121,14 @@ defmodule Imgd.Nodes.Executors.Math do
   defp calculate("divide", a, b), do: {:ok, a / b}
 
   defp validate_number(n) when is_number(n), do: {:ok, n}
+
   defp validate_number(n) when is_binary(n) do
     case Float.parse(n) do
       {num, ""} -> {:ok, num}
       _ -> {:error, "invalid number: #{inspect(n)}"}
     end
   end
+
   defp validate_number(other), do: {:error, "expected a number, got: #{inspect(other)}"}
 
   defp get_nested(map, path) do

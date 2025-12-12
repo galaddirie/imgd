@@ -182,12 +182,13 @@ defmodule Imgd.Runtime.Expression do
   defp do_evaluate(template, vars, opts) do
     timeout = Keyword.get(opts, :timeout_ms, 1_000)
 
-    task = Task.async(fn ->
-      with {:ok, compiled} <- Cache.get_or_compile(template),
-           {:ok, result} <- do_render(compiled, vars, opts) do
-        {:ok, result}
-      end
-    end)
+    task =
+      Task.async(fn ->
+        with {:ok, compiled} <- Cache.get_or_compile(template),
+             {:ok, result} <- do_render(compiled, vars, opts) do
+          {:ok, result}
+        end
+      end)
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
       {:ok, result} -> result

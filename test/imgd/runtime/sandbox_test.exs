@@ -38,6 +38,7 @@ defmodule Imgd.SandboxTest do
       a.self = a;
       return a;
       """
+
       # The safeValue implementation returns "[Circular]" for circular refs
       assert {:ok, %{"name" => "a", "self" => "[Circular]"}} = Sandbox.eval(code)
     end
@@ -94,8 +95,9 @@ defmodule Imgd.SandboxTest do
       assert {:error, error} = Sandbox.eval(code, memory_mb: 2)
 
       assert error.type in [:memory_exceeded, :internal_error, :runtime_error]
+
       if error.type == :memory_exceeded do
-         assert error.message =~ "memory"
+        assert error.message =~ "memory"
       end
     end
 
@@ -110,6 +112,7 @@ defmodule Imgd.SandboxTest do
 
     test "enforces max code size" do
       code = String.duplicate("a", 200)
+
       assert {:error, %Error{type: :validation_error, message: msg}} =
                Sandbox.eval(code, max_code_size: 100)
 

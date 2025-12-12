@@ -7,6 +7,7 @@ defmodule Imgd.SandboxSecurityTest do
     unless Process.whereis(Imgd.Sandbox.Runner) do
       start_supervised!(Imgd.Sandbox.Supervisor)
     end
+
     :ok
   end
 
@@ -53,18 +54,18 @@ defmodule Imgd.SandboxSecurityTest do
     end
 
     test "cannot write files" do
-       code = """
-       import * as std from 'std';
-       const fd = std.open('hacked.txt', 'w');
-       if (fd) {
-         fd.puts('pwned');
-         fd.close();
-         return 'wrote file';
-       }
-       return 'failed';
-       """
+      code = """
+      import * as std from 'std';
+      const fd = std.open('hacked.txt', 'w');
+      if (fd) {
+        fd.puts('pwned');
+        fd.close();
+        return 'wrote file';
+      }
+      return 'failed';
+      """
 
-       assert {:error, %Error{}} = Sandbox.eval(code)
+      assert {:error, %Error{}} = Sandbox.eval(code)
     end
   end
 
@@ -79,14 +80,21 @@ defmodule Imgd.SandboxSecurityTest do
       # Or the import fails.
 
       case Sandbox.eval(code) do
-        {:ok, nil} -> assert true
-        {:ok, ""} -> assert true
-        {:error, _} -> assert true # Import failure is also secure
+        {:ok, nil} ->
+          assert true
+
+        {:ok, ""} ->
+          assert true
+
+        # Import failure is also secure
+        {:error, _} ->
+          assert true
+
         {:ok, val} ->
-           # If we get a value, it must NOT be the host's PATH (which is likely non-empty)
-           # WASI env is usually empty unless explicitly passed.
-           # We passed %{} in Executor.
-           assert val == nil or val == ""
+          # If we get a value, it must NOT be the host's PATH (which is likely non-empty)
+          # WASI env is usually empty unless explicitly passed.
+          # We passed %{} in Executor.
+          assert val == nil or val == ""
       end
     end
   end
@@ -110,17 +118,18 @@ defmodule Imgd.SandboxSecurityTest do
 
   describe "Global Namespace Pollution" do
     test "globals are restricted" do
-       code = """
-       return Object.keys(globalThis).filter(k => k !== 'args' && k !== 'console' && k !== 'print');
-       """
-       # This is an exploratory test. We want to see what's exposed.
-       # We just assert it returns a list, and we can inspect it if needed.
-       assert {:ok, keys} = Sandbox.eval(code)
-       assert is_list(keys)
+      code = """
+      return Object.keys(globalThis).filter(k => k !== 'args' && k !== 'console' && k !== 'print');
+      """
 
-       # Critical checks: no 'process' (Node.js), no 'window' (Browser)
-       refute "process" in keys
-       refute "window" in keys
+      # This is an exploratory test. We want to see what's exposed.
+      # We just assert it returns a list, and we can inspect it if needed.
+      assert {:ok, keys} = Sandbox.eval(code)
+      assert is_list(keys)
+
+      # Critical checks: no 'process' (Node.js), no 'window' (Browser)
+      refute "process" in keys
+      refute "window" in keys
     end
   end
 end

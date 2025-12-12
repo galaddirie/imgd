@@ -11,21 +11,22 @@ defmodule Imgd.Application do
 
     _flame_parent = FLAME.Parent.get()
 
-    children = [
-      ImgdWeb.Telemetry,
-      Imgd.Observability.PromEx,
-      Imgd.Repo,
-      {Oban, Application.fetch_env!(:imgd, Oban)},
-      {DNSCluster, query: Application.get_env(:imgd, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Imgd.PubSub},
-      # Node type registry - must start before endpoint so types are available
-      Imgd.Nodes.Registry,
-      # Add before Sandbox.Supervisor
-      Imgd.Runtime.Expression.Cache,
-      Imgd.Sandbox.Supervisor,
-      ImgdWeb.Endpoint
-    ]
-    |> Enum.filter(& &1)
+    children =
+      [
+        ImgdWeb.Telemetry,
+        Imgd.Observability.PromEx,
+        Imgd.Repo,
+        {Oban, Application.fetch_env!(:imgd, Oban)},
+        {DNSCluster, query: Application.get_env(:imgd, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: Imgd.PubSub},
+        # Node type registry - must start before endpoint so types are available
+        Imgd.Nodes.Registry,
+        # Add before Sandbox.Supervisor
+        Imgd.Runtime.Expression.Cache,
+        Imgd.Sandbox.Supervisor,
+        ImgdWeb.Endpoint
+      ]
+      |> Enum.filter(& &1)
 
     opts = [strategy: :one_for_one, name: Imgd.Supervisor]
     Supervisor.start_link(children, opts)

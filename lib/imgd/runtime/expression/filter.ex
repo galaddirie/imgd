@@ -92,12 +92,14 @@ defmodule Imgd.Runtime.Expression.Filters do
   @doc "Convert to integer"
   def to_int(value) when is_integer(value), do: value
   def to_int(value) when is_float(value), do: trunc(value)
+
   def to_int(value) when is_binary(value) do
     case Integer.parse(value) do
       {int, _} -> int
       :error -> 0
     end
   end
+
   def to_int(true), do: 1
   def to_int(false), do: 0
   def to_int(_), do: 0
@@ -105,12 +107,14 @@ defmodule Imgd.Runtime.Expression.Filters do
   @doc "Convert to float"
   def to_float(value) when is_float(value), do: value
   def to_float(value) when is_integer(value), do: value * 1.0
+
   def to_float(value) when is_binary(value) do
     case Float.parse(value) do
       {float, _} -> float
       :error -> 0.0
     end
   end
+
   def to_float(_), do: 0.0
 
   @doc "Convert to string"
@@ -147,24 +151,28 @@ defmodule Imgd.Runtime.Expression.Filters do
       :error -> value
     end
   end
+
   def base64_decode(value), do: value
 
   @doc "SHA-256 hash (hex encoded)"
   def sha256(value) when is_binary(value) do
     :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
   end
+
   def sha256(value), do: value |> to_string() |> sha256()
 
   @doc "MD5 hash (hex encoded)"
   def md5(value) when is_binary(value) do
     :crypto.hash(:md5, value) |> Base.encode16(case: :lower)
   end
+
   def md5(value), do: value |> to_string() |> md5()
 
   @doc "HMAC-SHA256 with secret"
   def hmac_sha256(value, secret) when is_binary(value) and is_binary(secret) do
     :crypto.mac(:hmac, :sha256, secret, value) |> Base.encode16(case: :lower)
   end
+
   def hmac_sha256(value, secret), do: hmac_sha256(to_string(value), to_string(secret))
 
   # ============================================================================
@@ -176,20 +184,24 @@ defmodule Imgd.Runtime.Expression.Filters do
     keys = String.split(path, ".")
     get_nested(value, keys)
   end
+
   def dig(value, _), do: value
 
   defp get_nested(value, []), do: value
   defp get_nested(nil, _), do: nil
+
   defp get_nested(value, [key | rest]) when is_map(value) do
     next = Map.get(value, key) || Map.get(value, String.to_atom(key))
     get_nested(next, rest)
   end
+
   defp get_nested(value, [key | rest]) when is_list(value) do
     case Integer.parse(key) do
       {index, ""} -> get_nested(Enum.at(value, index), rest)
       _ -> nil
     end
   end
+
   defp get_nested(_, _), do: nil
 
   @doc "Extract field from list of maps: {{ items | pluck: 'name' }}"
@@ -198,6 +210,7 @@ defmodule Imgd.Runtime.Expression.Filters do
       if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: nil
     end)
   end
+
   def pluck(value, _), do: value
 
   @doc "Group list by field: {{ items | group_by: 'category' }}"
@@ -206,6 +219,7 @@ defmodule Imgd.Runtime.Expression.Filters do
       if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: nil
     end)
   end
+
   def group_by(value, _), do: value
 
   @doc "Sort list by field: {{ items | sort_by: 'name' }}"
@@ -214,14 +228,22 @@ defmodule Imgd.Runtime.Expression.Filters do
       if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: nil
     end)
   end
+
   def sort_by(value, _), do: value
 
   @doc "Sort list by field descending: {{ items | sort_by_desc: 'count' }}"
   def sort_by_desc(list, field) when is_list(list) and is_binary(field) do
-    Enum.sort_by(list, fn item ->
-      if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: nil
-    end, :desc)
+    Enum.sort_by(
+      list,
+      fn item ->
+        if is_map(item),
+          do: Map.get(item, field) || Map.get(item, String.to_atom(field)),
+          else: nil
+      end,
+      :desc
+    )
   end
+
   def sort_by_desc(value, _), do: value
 
   @doc "Filter where field equals value: {{ items | where_eq: 'status', 'active' }}"
@@ -235,6 +257,7 @@ defmodule Imgd.Runtime.Expression.Filters do
       end
     end)
   end
+
   def where_eq(value, _, _), do: value
 
   @doc "Filter where field not equals value: {{ items | where_ne: 'status', 'deleted' }}"
@@ -248,23 +271,32 @@ defmodule Imgd.Runtime.Expression.Filters do
       end
     end)
   end
+
   def where_ne(value, _, _), do: value
 
   @doc "Unique by field: {{ items | unique_by: 'id' }}"
   def unique_by(list, field) when is_list(list) and is_binary(field) do
     Enum.uniq_by(list, fn item ->
-      if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: item
+      if is_map(item),
+        do: Map.get(item, field) || Map.get(item, String.to_atom(field)),
+        else: item
     end)
   end
+
   def unique_by(value, _), do: value
 
   @doc "Index list by field: {{ items | index_by: 'id' }}"
   def index_by(list, field) when is_list(list) and is_binary(field) do
     Map.new(list, fn item ->
-      key = if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: nil
+      key =
+        if is_map(item),
+          do: Map.get(item, field) || Map.get(item, String.to_atom(field)),
+          else: nil
+
       {key, item}
     end)
   end
+
   def index_by(value, _), do: value
 
   @doc "Get keys from map: {{ data | keys }}"
@@ -284,6 +316,7 @@ defmodule Imgd.Runtime.Expression.Filters do
     keys = keys_str |> String.split(",") |> Enum.map(&String.trim/1)
     Map.take(value, keys)
   end
+
   def pick(value, _), do: value
 
   @doc "Omit specific keys: {{ data | omit: 'password,secret' }}"
@@ -291,6 +324,7 @@ defmodule Imgd.Runtime.Expression.Filters do
     keys = keys_str |> String.split(",") |> Enum.map(&String.trim/1)
     Map.drop(value, keys)
   end
+
   def omit(value, _), do: value
 
   # ============================================================================
@@ -306,17 +340,20 @@ defmodule Imgd.Runtime.Expression.Filters do
     |> String.replace(~r/-+/, "-")
     |> String.trim("-")
   end
+
   def slugify(value), do: value |> to_string() |> slugify()
 
   @doc "Truncate to N words: {{ text | truncate_words: 10 }}"
   def truncate_words(value, count) when is_binary(value) and is_integer(count) do
     words = String.split(value)
+
     if length(words) > count do
       words |> Enum.take(count) |> Enum.join(" ") |> Kernel.<>("...")
     else
       value
     end
   end
+
   def truncate_words(value, count) when is_binary(count), do: truncate_words(value, to_int(count))
   def truncate_words(value, _), do: value
 
@@ -328,9 +365,12 @@ defmodule Imgd.Runtime.Expression.Filters do
           [match | _] -> match
           nil -> ""
         end
-      {:error, _} -> ""
+
+      {:error, _} ->
+        ""
     end
   end
+
   def extract(value, _), do: value
 
   @doc "Regex match test: {{ text | match: '^\\d+$' }}"
@@ -340,20 +380,25 @@ defmodule Imgd.Runtime.Expression.Filters do
       {:error, _} -> false
     end
   end
+
   def match(_, _), do: false
 
   @doc "Pad left: {{ num | pad_left: 5, '0' }}"
   def pad_left(value, length, pad \\ " ")
+
   def pad_left(value, length, pad) when is_binary(value) and is_integer(length) do
     String.pad_leading(value, length, pad)
   end
+
   def pad_left(value, length, pad), do: value |> to_string() |> pad_left(to_int(length), pad)
 
   @doc "Pad right: {{ text | pad_right: 20 }}"
   def pad_right(value, length, pad \\ " ")
+
   def pad_right(value, length, pad) when is_binary(value) and is_integer(length) do
     String.pad_trailing(value, length, pad)
   end
+
   def pad_right(value, length, pad), do: value |> to_string() |> pad_right(to_int(length), pad)
 
   # ============================================================================
@@ -376,6 +421,7 @@ defmodule Imgd.Runtime.Expression.Filters do
   def round_to(value, decimals) when is_number(value) and is_integer(decimals) do
     Float.round(value * 1.0, decimals)
   end
+
   def round_to(value, decimals), do: round_to(to_float(value), to_int(decimals))
 
   @doc "Clamp between min and max: {{ num | clamp: 0, 100 }}"
@@ -398,6 +444,7 @@ defmodule Imgd.Runtime.Expression.Filters do
       :error -> value
     end
   end
+
   def format_date(value, _), do: value
 
   @doc "Add days: {{ date | add_days: 7 }}"
@@ -407,9 +454,12 @@ defmodule Imgd.Runtime.Expression.Filters do
         datetime
         |> DateTime.add(days * 86400, :second)
         |> DateTime.to_iso8601()
-      :error -> value
+
+      :error ->
+        value
     end
   end
+
   def add_days(value, days), do: add_days(value, to_int(days))
 
   @doc "Add hours: {{ date | add_hours: 2 }}"
@@ -419,9 +469,12 @@ defmodule Imgd.Runtime.Expression.Filters do
         datetime
         |> DateTime.add(hours * 3600, :second)
         |> DateTime.to_iso8601()
-      :error -> value
+
+      :error ->
+        value
     end
   end
+
   def add_hours(value, hours), do: add_hours(value, to_int(hours))
 
   @doc "Add minutes: {{ date | add_minutes: 30 }}"
@@ -431,18 +484,25 @@ defmodule Imgd.Runtime.Expression.Filters do
         datetime
         |> DateTime.add(minutes * 60, :second)
         |> DateTime.to_iso8601()
-      :error -> value
+
+      :error ->
+        value
     end
   end
+
   def add_minutes(value, mins), do: add_minutes(value, to_int(mins))
 
   defp parse_datetime(%DateTime{} = dt), do: {:ok, dt}
+
   defp parse_datetime(%NaiveDateTime{} = ndt) do
     {:ok, DateTime.from_naive!(ndt, "Etc/UTC")}
   end
+
   defp parse_datetime(value) when is_binary(value) do
     case DateTime.from_iso8601(value) do
-      {:ok, datetime, _offset} -> {:ok, datetime}
+      {:ok, datetime, _offset} ->
+        {:ok, datetime}
+
       {:error, _} ->
         case NaiveDateTime.from_iso8601(value) do
           {:ok, ndt} -> {:ok, DateTime.from_naive!(ndt, "Etc/UTC")}
@@ -450,6 +510,7 @@ defmodule Imgd.Runtime.Expression.Filters do
         end
     end
   end
+
   defp parse_datetime(_), do: :error
 
   # ============================================================================

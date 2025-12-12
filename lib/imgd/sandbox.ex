@@ -25,7 +25,8 @@ defmodule Imgd.Sandbox do
       {final_result, status_meta} =
         case result do
           {:ok, value, metrics} ->
-            {{:ok, value}, Map.merge(metadata, %{status: :ok, fuel_consumed: metrics[:fuel_consumed]})}
+            {{:ok, value},
+             Map.merge(metadata, %{status: :ok, fuel_consumed: metrics[:fuel_consumed]})}
 
           {:error, error} ->
             {{:error, error}, Map.merge(metadata, %{status: :error})}
