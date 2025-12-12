@@ -15,23 +15,27 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   def mount(%{"workflow_id" => workflow_id, "id" => execution_id}, _session, socket) do
     scope = socket.assigns.current_scope
 
-    with {:ok, execution} <- fetch_execution(scope, workflow_id, execution_id) do
-      steps = Executions.list_node_executions(scope, execution)
+    with {:ok, execution} <- fetch_execution(scope, workflow_id, execution_id),
+         {:ok, steps} <- Executions.list_node_executions(scope, execution) do
+      decorated_steps = decorate_steps(steps, execution.workflow)
+      metadata = execution.metadata || %{}
 
       socket =
         socket
         |> assign(:workflow, execution.workflow)
         |> assign(:execution, execution)
+        |> assign(:execution_metadata, metadata)
         |> assign(:steps, steps)
+        |> assign(:workflow_version_tag, derive_version_tag(execution))
         |> assign(:page_title, "Execution #{short_id(execution.id)}")
         |> assign(:duration_ms, execution_duration_ms(execution))
         |> assign(:steps_empty?, steps == [])
         # Decorate steps with node names for trace panel
-        |> assign(:trace_steps, decorate_steps(steps, execution.workflow))
+        |> assign(:trace_steps, decorated_steps)
         |> assign(:input_schema, workflow_input_schema(execution.workflow))
         |> assign(:node_schemas, node_schemas(execution.workflow))
         # Stream decorated steps
-        |> stream(:steps, decorate_steps(steps, execution.workflow), reset: true)
+        |> stream(:steps, decorated_steps, reset: true)
 
       {:ok, socket}
     else
@@ -46,7 +50,8 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   end
 
   defp fetch_execution(scope, workflow_id, execution_id) do
-    execution = Executions.get_execution!(scope, execution_id)
+    execution =
+      Executions.get_execution!(scope, execution_id, preload: [:workflow, :workflow_version])
 
     if execution.workflow_id == workflow_id do
       {:ok, execution}
@@ -95,7 +100,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                   {@execution.status}
                 </span>
                 <span class="badge badge-ghost badge-xs">
-                  v{@execution.workflow_version_tag || "unknown"}
+                  v{@workflow_version_tag || "unknown"}
                 </span>
               </div>
               <p class="max-w-2xl text-sm text-muted">
@@ -174,7 +179,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                   <.metric
                     title="Workflow Version"
                     icon="hero-arrow-up-on-square-stack"
-                    value={"v#{@execution.workflow_version_tag || "unknown"}"}
+                    value={"v#{@workflow_version_tag || "unknown"}"}
                   />
                 </div>
               </div>
@@ -214,7 +219,8 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                       Triggered By
                     </p>
                     <p class="text-sm text-base-content/80">
-                      {@execution.metadata.triggered_by || "User"}
+                      {Map.get(@execution_metadata, :triggered_by) ||
+                         Map.get(@execution_metadata, "triggered_by") || "User"}
                     </p>
                   </div>
                   <div class="space-y-2">
@@ -234,7 +240,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                       Metadata
                     </p>
                     <pre class="rounded-xl bg-base-200/60 p-3 text-xs font-mono text-base-content/90 shadow-inner whitespace-pre-wrap">
-                      <code><%= pretty_data(@execution.metadata) %></code>
+                      <code><%= pretty_data(@execution_metadata) %></code>
                     </pre>
                   </div>
                 </div>
@@ -499,6 +505,20 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
 
   defp node_schemas(workflow) do
     workflow.settings[:node_schemas] || workflow.settings["node_schemas"]
+  end
+
+  defp derive_version_tag(execution) do
+    cond do
+      execution.workflow_version && Map.has_key?(execution.workflow_version, :version_tag) &&
+          execution.workflow_version.version_tag ->
+        execution.workflow_version.version_tag
+
+      execution.workflow && Map.has_key?(execution.workflow, :current_version_tag) ->
+        execution.workflow.current_version_tag
+
+      true ->
+        nil
+    end
   end
 
   defp render_schema(nil), do: "Not provided"

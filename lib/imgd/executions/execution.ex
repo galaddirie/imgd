@@ -27,6 +27,7 @@ defmodule Imgd.Executions.Execution do
 
   defmodule Trigger do
     @moduledoc "Embedded trigger data for an execution"
+    @derive Jason.Encoder
     use Ecto.Schema
 
     @type t :: %__MODULE__{

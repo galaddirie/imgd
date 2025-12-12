@@ -3,6 +3,8 @@ defmodule Imgd.Workflows.Embeds.Connection do
   Embedded schema for workflow connections (edges between nodes).
   Shared between Workflow (mutable) and WorkflowVersion (immutable).
   """
+  @derive Jason.Encoder
+
   use Ecto.Schema
   import Ecto.Changeset
 

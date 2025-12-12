@@ -3,8 +3,10 @@ defmodule Imgd.Workflows.Embeds.Node do
   Embedded schema for workflow nodes.
   Shared between Workflow (mutable) and WorkflowVersion (immutable).
   """
+  @derive Jason.Encoder
   use Ecto.Schema
   import Ecto.Changeset
+  import Imgd.ChangesetHelpers
 
   @primary_key false
 
@@ -32,11 +34,5 @@ defmodule Imgd.Workflows.Embeds.Node do
     |> validate_required([:id, :type_id, :name])
     |> validate_map_field(:config)
     |> validate_map_field(:position)
-  end
-
-  defp validate_map_field(changeset, field) do
-    validate_change(changeset, field, fn ^field, value ->
-      if is_map(value), do: [], else: [{field, "must be a map"}]
-    end)
   end
 end

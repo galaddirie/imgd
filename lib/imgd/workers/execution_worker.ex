@@ -167,10 +167,7 @@ defmodule Imgd.Workers.ExecutionWorker do
       |> Keyword.take([:scheduled_at, :priority])
       |> Keyword.put_new(:priority, 1)
 
-    job_opts = Keyword.put(job_opts, :args, args)
-
-    __MODULE__
-    |> Oban.Job.new(job_opts)
+    __MODULE__.new(args, job_opts)
   end
 
   @doc """

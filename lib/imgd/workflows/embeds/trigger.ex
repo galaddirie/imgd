@@ -3,8 +3,10 @@ defmodule Imgd.Workflows.Embeds.Trigger do
   Embedded schema for workflow triggers.
   Shared between Workflow (mutable) and WorkflowVersion (immutable).
   """
+  @derive Jason.Encoder
   use Ecto.Schema
   import Ecto.Changeset
+  import Imgd.ChangesetHelpers
 
   @primary_key false
 
@@ -25,11 +27,5 @@ defmodule Imgd.Workflows.Embeds.Trigger do
     |> cast(attrs, [:type, :config])
     |> validate_required([:type])
     |> validate_map_field(:config)
-  end
-
-  defp validate_map_field(changeset, field) do
-    validate_change(changeset, field, fn ^field, value ->
-      if is_map(value), do: [], else: [{field, "must be a map"}]
-    end)
   end
 end
