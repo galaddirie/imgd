@@ -184,7 +184,9 @@ defmodule ImgdWeb.WorkflowLive.Index do
                 <div class="space-y-2">
                   <div class="flex flex-wrap items-center gap-2">
                     <p class="text-sm font-semibold text-base-content">{workflow.name}</p>
-                    <span class="badge badge-ghost badge-xs">v{workflow.version}</span>
+                    <span :if={workflow.current_version_tag} class="badge badge-ghost badge-xs">
+                      v{workflow.current_version_tag}
+                    </span>
                   </div>
                   <p class="text-xs leading-relaxed text-base-content/70">
                     {workflow.description}

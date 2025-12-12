@@ -1,14 +1,11 @@
 defmodule ImgdWeb.WorkflowLive.Show do
   @moduledoc """
-  LiveView for showing a workflow with graph visualization and live execution tracking.
+  LiveView for showing workflow details and execution history.
   """
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
   alias Imgd.Executions
-  alias Imgd.Executions.PubSub
-  alias ImgdWeb.WorkflowLive.Components.WorkflowGraph
-  alias ImgdWeb.WorkflowLive.Components.TracePanel
   import ImgdWeb.Formatters, except: [trigger_label: 1]
 
   @impl true
@@ -19,21 +16,12 @@ defmodule ImgdWeb.WorkflowLive.Show do
       workflow = Workflows.get_workflow!(scope, id)
       executions = Executions.list_executions(scope, workflow: workflow, limit: 10)
 
-      # Subscribe to workflow execution updates
-      if connected?(socket) do
-        PubSub.subscribe_workflow_executions(workflow.id)
-      end
 
       socket =
         socket
         |> assign(:page_title, workflow.name)
         |> assign(:workflow, workflow)
         |> assign(:executions, executions)
-        |> assign(:running, false)
-        |> assign(:current_execution, nil)
-        |> assign(:execution_steps, %{})
-        |> assign(:trace_steps, [])
-        |> assign_run_form("5")
 
       {:ok, socket}
     rescue
@@ -47,246 +35,9 @@ defmodule ImgdWeb.WorkflowLive.Show do
     end
   end
 
-  @impl true
-  def handle_event("update_input", %{"run" => %{"input" => input}}, socket) do
-    {:noreply, assign_run_form(socket, input)}
-  end
 
-  def handle_event("update_input", %{"input" => input}, socket) do
-    {:noreply, assign_run_form(socket, input)}
-  end
 
-  @impl true
-  def handle_event("run_workflow", %{"run" => %{"input" => input}}, socket) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
 
-    # Parse input
-    parsed_input = parse_input(input)
-    trigger_data = if is_map(parsed_input), do: parsed_input, else: %{"value" => parsed_input}
-
-    # Start execution via the Executions context
-    attrs = %{
-      trigger: %{
-        type: :manual,
-        data: trigger_data
-      }
-    }
-
-    case Executions.start_and_enqueue_execution(scope, workflow, attrs) do
-      {:ok, %{execution: execution}} ->
-        # Subscribe to this specific execution's updates
-        PubSub.subscribe_execution(execution.id)
-
-        socket =
-          socket
-          |> assign(running: true)
-          |> assign(current_execution: execution)
-          |> assign(execution_steps: %{})
-          |> assign(trace_steps: [])
-          |> assign_run_form(input)
-
-        {:noreply, socket}
-
-      {:error, :not_published} ->
-        {:noreply, put_flash(socket, :error, "Workflow must be published before running")}
-
-      {:error, changeset} when is_struct(changeset, Ecto.Changeset) ->
-        errors =
-          Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-            Regex.replace(~r"%\{(\w+)\}", msg, fn _, key ->
-              opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-            end)
-          end)
-
-        {:noreply, put_flash(socket, :error, "Validation failed: #{inspect(errors)}")}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to start execution: #{inspect(reason)}")}
-    end
-  end
-
-  def handle_event("run_workflow", _params, socket) do
-    handle_event("run_workflow", %{"run" => %{"input" => socket.assigns.run_input}}, socket)
-  end
-
-  # PubSub message handlers for execution updates
-
-  @impl true
-  def handle_info({:execution_started, execution}, socket) do
-    socket =
-      socket
-      |> assign(current_execution: execution)
-      |> assign(running: true)
-
-    {:noreply, socket}
-  end
-
-  def handle_info({:execution_completed, execution}, socket) do
-    # Refresh executions list
-    executions =
-      Executions.list_executions(
-        socket.assigns.current_scope,
-        workflow: socket.assigns.workflow,
-        limit: 10
-      )
-
-    socket =
-      socket
-      |> assign(current_execution: execution)
-      |> assign(running: false)
-      |> assign(executions: executions)
-
-    {:noreply, socket}
-  end
-
-  def handle_info({:execution_failed, execution, _error}, socket) do
-    executions =
-      Executions.list_executions(
-        socket.assigns.current_scope,
-        workflow: socket.assigns.workflow,
-        limit: 10
-      )
-
-    socket =
-      socket
-      |> assign(current_execution: execution)
-      |> assign(running: false)
-      |> assign(executions: executions)
-
-    {:noreply, socket}
-  end
-
-  def handle_info({:node_started, payload}, socket) do
-    # Update execution_steps map (keyed by node_id)
-    execution_steps =
-      Map.put(socket.assigns.execution_steps, payload.node_id, :running)
-
-    # Add to trace steps
-    trace_step =
-      payload
-      |> Map.put(:step_name, get_node_name(socket.assigns.workflow, payload.node_id))
-
-    trace_steps = socket.assigns.trace_steps ++ [trace_step]
-
-    socket =
-      socket
-      |> assign(execution_steps: execution_steps)
-      |> assign(trace_steps: trace_steps)
-
-    {:noreply, socket}
-  end
-
-  def handle_info({:node_completed, payload}, socket) do
-    # Update execution_steps map
-    execution_steps =
-      Map.put(socket.assigns.execution_steps, payload.node_id, :completed)
-
-    # Update trace steps - find and update the matching step
-    trace_steps =
-      Enum.map(socket.assigns.trace_steps, fn trace_step ->
-        same_step? =
-          trace_step.node_id == payload.node_id &&
-            (is_nil(payload.attempt) || trace_step.attempt == payload.attempt)
-
-        if same_step? do
-          trace_step
-          |> Map.merge(payload)
-          |> Map.put(:step_name, get_node_name(socket.assigns.workflow, payload.node_id))
-        else
-          trace_step
-        end
-      end)
-
-    socket =
-      socket
-      |> assign(execution_steps: execution_steps)
-      |> assign(trace_steps: trace_steps)
-
-    {:noreply, socket}
-  end
-
-  def handle_info({:node_failed, payload}, socket) do
-    # Update execution_steps map
-    execution_steps =
-      Map.put(socket.assigns.execution_steps, payload.node_id, :failed)
-
-    # Update trace steps
-    trace_steps =
-      Enum.map(socket.assigns.trace_steps, fn trace_step ->
-        same_step? =
-          trace_step.node_id == payload.node_id &&
-            (is_nil(payload.attempt) || trace_step.attempt == payload.attempt)
-
-        if same_step? do
-          trace_step
-          |> Map.merge(payload)
-          |> Map.put(:step_name, get_node_name(socket.assigns.workflow, payload.node_id))
-        else
-          trace_step
-        end
-      end)
-
-    socket =
-      socket
-      |> assign(execution_steps: execution_steps)
-      |> assign(trace_steps: trace_steps)
-
-    {:noreply, socket}
-  end
-
-  # Catch-all for other messages
-  def handle_info(_msg, socket), do: {:noreply, socket}
-
-  defp get_node_name(workflow, node_id) do
-    case Enum.find(workflow.nodes, &(&1.id == node_id)) do
-      nil -> node_id
-      node -> node.name
-    end
-  end
-
-  # Private helpers
-
-  defp assign_run_form(socket, input) do
-    assign(socket,
-      run_input: input,
-      run_form: to_form(%{"input" => input}, as: :run)
-    )
-  end
-
-  defp parse_input(nil), do: nil
-
-  defp parse_input(input) when is_map(input), do: input
-
-  defp parse_input(input) do
-    trimmed = input |> to_string() |> String.trim()
-
-    cond do
-      trimmed == "" ->
-        nil
-
-      decoded = decode_json_input(trimmed) ->
-        decoded
-
-      match?({_int, ""}, Integer.parse(trimmed)) ->
-        {int, ""} = Integer.parse(trimmed)
-        int
-
-      match?({_float, ""}, Float.parse(trimmed)) ->
-        {float, ""} = Float.parse(trimmed)
-        float
-
-      true ->
-        trimmed
-    end
-  end
-
-  defp decode_json_input(input) do
-    case Jason.decode(input) do
-      {:ok, value} -> value
-      _ -> nil
-    end
-  end
 
   defp workflow_input_schema(workflow) do
     workflow.settings[:input_schema] || workflow.settings["input_schema"]
@@ -345,7 +96,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                 <h1 class="text-3xl font-semibold tracking-tight text-base-content">
                   {@workflow.name}
                 </h1>
-                <span class="badge badge-ghost badge-xs">v{@workflow.version}</span>
+                <span :if={@workflow.current_version_tag} class="badge badge-ghost badge-xs">v{@workflow.current_version_tag}</span>
                 <span class={["badge badge-sm", status_badge_class(@workflow.status)]}>
                   {status_label(@workflow.status)}
                 </span>
@@ -368,157 +119,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
       </:page_header>
 
       <div class="space-y-8">
-        <%!-- Main Content Grid: Graph + Trace Panel --%>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <%!-- Workflow Graph (2/3 width on large screens) --%>
-          <div class="lg:col-span-2">
-            <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
-              <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold text-base-content flex items-center gap-2">
-                  <.icon name="hero-share" class="size-5" /> Workflow Graph
-                </h2>
-                <%= if @running do %>
-                  <span class="inline-flex items-center gap-2 text-sm text-primary">
-                    <span class="size-2 rounded-full bg-primary animate-pulse"></span> Executing...
-                  </span>
-                <% end %>
-              </div>
-              <.live_component
-                module={WorkflowGraph}
-                id={"workflow-graph-#{@workflow.id}"}
-                workflow={@workflow}
-                execution_steps={@execution_steps}
-                trace_steps={@trace_steps}
-                current_execution={@current_execution}
-              />
-            </div>
-          </div>
-
-          <%!-- Trace Panel (1/3 width on large screens) --%>
-          <div class="lg:col-span-1">
-            <TracePanel.trace_panel
-              execution={@current_execution}
-              steps={@trace_steps}
-              running={@running}
-            />
-          </div>
-        </div>
-
-        <%!-- Run Workflow Section --%>
-        <section>
-          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
-            <h2 class="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
-              <.icon name="hero-play" class="size-5" /> Run Workflow
-            </h2>
-            <p class="text-sm text-base-content/70 mb-4">
-              Enter an input value to execute the workflow
-            </p>
-
-            <.form
-              for={@run_form}
-              id="run-workflow-form"
-              phx-change="update_input"
-              phx-submit="run_workflow"
-              phx-debounce="300"
-              class="space-y-4"
-            >
-              <div class="space-y-4">
-                <div class="flex gap-4 items-end">
-                  <div class="flex-1 space-y-2">
-                    <label class="text-sm font-medium text-base-content/80">Input Value</label>
-                    <input
-                      type="text"
-                      name="run[input]"
-                      value={Phoenix.HTML.Form.normalize_value("text", @run_form[:input].value)}
-                      placeholder="Enter a number or value..."
-                      inputmode="decimal"
-                      class="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-base shadow-inner transition focus:border-primary focus:ring-2 focus:ring-primary/25"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    id="run-workflow-submit"
-                    class="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-content shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none whitespace-nowrap"
-                    disabled={@running || @workflow.status != :active}
-                  >
-                    <%= if @running do %>
-                      <span class="flex h-4 w-4 items-center justify-center">
-                        <span class="h-4 w-4 animate-spin rounded-full border-2 border-primary-content/30 border-t-primary-content">
-                        </span>
-                      </span>
-                      <span>Running...</span>
-                    <% else %>
-                      <.icon name="hero-play" class="size-4" />
-                      <span>Run Workflow</span>
-                    <% end %>
-                  </button>
-                </div>
-                <p class="text-xs text-base-content/70 leading-relaxed">
-                  Numbers will be parsed automatically. Try: 5, 10, 15
-                </p>
-              </div>
-
-              <%!-- Current Execution Result --%>
-              <%= if @current_execution && @current_execution.status in [:completed, :failed] do %>
-                <div class={[
-                  "rounded-xl border p-4 shadow-sm mt-4",
-                  if(@current_execution.status == :completed,
-                    do: "border-success/30 bg-success/10",
-                    else: "border-error/30 bg-error/10"
-                  )
-                ]}>
-                  <div class="flex items-start gap-3">
-                    <%= if @current_execution.status == :completed do %>
-                      <.icon
-                        name="hero-check-circle"
-                        class="size-5 text-success flex-shrink-0 mt-0.5"
-                      />
-                    <% else %>
-                      <.icon name="hero-x-circle" class="size-5 text-error flex-shrink-0 mt-0.5" />
-                    <% end %>
-                    <div class="flex-1 min-w-0 space-y-2">
-                      <p class={[
-                        "font-medium text-sm",
-                        if(@current_execution.status == :completed,
-                          do: "text-success",
-                          else: "text-error"
-                        )
-                      ]}>
-                        {if @current_execution.status == :completed,
-                          do: "Execution Completed",
-                          else: "Execution Failed"}
-                      </p>
-
-                      <%= if @current_execution.output do %>
-                        <div>
-                          <span class="text-xs font-medium text-base-content/70">Output</span>
-                          <pre class="mt-1 text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto"><code>{format_output(@current_execution.output)}</code></pre>
-                        </div>
-                      <% end %>
-
-                      <%= if @current_execution.error do %>
-                        <div>
-                          <pre class="text-xs bg-base-200/70 p-3 rounded-lg overflow-x-auto text-error"><code>{inspect(@current_execution.error, pretty: true)}</code></pre>
-                        </div>
-                      <% end %>
-
-                      <div class="flex flex-wrap gap-4 text-xs text-base-content/70">
-                        <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
-                          <.icon name="hero-clock" class="size-4" />
-                          {format_duration(execution_duration_ms(@current_execution))}
-                        </span>
-                        <span class="inline-flex items-center gap-1 rounded-full bg-base-200/70 px-2 py-1">
-                          <.icon name="hero-hashtag" class="size-4" />
-                          Run {short_id(@current_execution.id)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              <% end %>
-            </.form>
-          </div>
-        </section>
 
         <%!-- Recent Executions Section --%>
         <section>
@@ -549,10 +149,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                   </thead>
                   <tbody>
                     <%= for execution <- @executions do %>
-                      <tr class={[
-                        "hover",
-                        @current_execution && @current_execution.id == execution.id && "bg-primary/5"
-                      ]}>
+                      <tr class="hover">
                         <td class="font-mono text-xs">{short_id(execution.id)}</td>
                         <td>
                           <span class={["badge badge-xs", execution_status_class(execution.status)]}>
@@ -618,7 +215,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                 <div>
                   <label class="text-sm font-medium text-base-content/70">Version</label>
                   <div class="mt-1">
-                    <span class="text-sm">v{@workflow.version}</span>
+                    <span class="text-sm">{@workflow.current_version_tag || "Unversioned"}</span>
                   </div>
                 </div>
               </div>
@@ -723,24 +320,10 @@ defmodule ImgdWeb.WorkflowLive.Show do
   defp format_execution_value(value) when is_map(value), do: inspect(value)
   defp format_execution_value(value), do: inspect(value)
 
-  defp format_output(nil), do: "No output"
-
-  defp format_output(%{"productions" => productions}) when is_list(productions) do
-    productions
-    |> Enum.map(&inspect/1)
-    |> Enum.join("\n")
-  end
-
-  defp format_output(output) when is_map(output) do
-    inspect(output, pretty: true, limit: 50)
-  end
-
-  defp format_output(output), do: inspect(output)
 
   defp format_duration(nil), do: "-"
   defp format_duration(ms) when is_number(ms) and ms < 1000, do: "#{ms}ms"
   defp format_duration(ms) when is_number(ms), do: "#{Float.round(ms / 1000, 2)}s"
-  defp format_duration(_), do: "-"
 
   # Copied from execution_show.ex to ensure consistent duration calculation
   defp execution_duration_ms(%{started_at: started, completed_at: completed})

@@ -168,9 +168,9 @@ defmodule Imgd.Workflows do
           version_tag: version_tag,
           workflow_id: workflow.id,
           source_hash: source_hash,
-          nodes: workflow.nodes || [],
-          connections: workflow.connections || [],
-          triggers: workflow.triggers || [],
+          nodes: Enum.map(workflow.nodes || [], &Map.from_struct/1),
+          connections: Enum.map(workflow.connections || [], &Map.from_struct/1),
+          triggers: Enum.map(workflow.triggers || [], &Map.from_struct/1),
           changelog: Map.get(attrs, :changelog) || Map.get(attrs, "changelog"),
           published_at: DateTime.utc_now() |> DateTime.truncate(:microsecond),
           published_by: scope.user.id
