@@ -13,6 +13,9 @@ defmodule Imgd.Sandbox.WasmRuntime do
   alias Wasmex.Module, as: WasmModule
   alias Wasmex.Wasi.WasiOptions
 
+  @engine_key {__MODULE__, :engine}
+  @module_key {__MODULE__, :compiled_module}
+
   defstruct [:engine, :compiled_module]
 
   @type t :: %__MODULE__{
@@ -39,7 +42,13 @@ defmodule Imgd.Sandbox.WasmRuntime do
   @spec new_instance(Config.t(), WasiOptions.t()) ::
           {:ok, instance_handles()} | {:error, term()}
   def new_instance(%Config{} = config, %WasiOptions{} = wasi_options) do
-    GenServer.call(__MODULE__, {:new_instance, config, wasi_options})
+    case runtime_resources() do
+      {:ok, engine, compiled_module} ->
+        create_instance(engine, compiled_module, config, wasi_options)
+
+      :error ->
+        GenServer.call(__MODULE__, {:new_instance, config, wasi_options})
+    end
   end
 
   # Server callbacks
@@ -65,6 +74,8 @@ defmodule Imgd.Sandbox.WasmRuntime do
          {:ok, store} <- Store.new(nil, engine),
          {:ok, bytes} <- File.read(wasm_path),
          {:ok, compiled_module} <- WasmModule.compile(store, bytes) do
+      :persistent_term.put(@engine_key, engine)
+      :persistent_term.put(@module_key, compiled_module)
       {:ok, %__MODULE__{engine: engine, compiled_module: compiled_module}}
     else
       {:error, reason} -> {:stop, {:wasm_init_failed, reason}}
@@ -79,6 +90,23 @@ defmodule Imgd.Sandbox.WasmRuntime do
         _from,
         %__MODULE__{} = state
       ) do
+    case create_instance(state.engine, state.compiled_module, config, wasi_options) do
+      {:ok, handles} -> {:reply, {:ok, handles}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp runtime_resources do
+    try do
+      engine = :persistent_term.get(@engine_key)
+      compiled_module = :persistent_term.get(@module_key)
+      {:ok, engine, compiled_module}
+    catch
+      :error, _ -> :error
+    end
+  end
+
+  defp create_instance(engine, compiled_module, %Config{} = config, %WasiOptions{} = wasi_options) do
     limits = %StoreLimits{
       memory_size: config.memory_mb * 1024 * 1024,
       instances: 1,
@@ -86,9 +114,9 @@ defmodule Imgd.Sandbox.WasmRuntime do
       memories: 1
     }
 
-    with {:ok, store} <- Store.new_wasi(wasi_options, limits, state.engine),
+    with {:ok, store} <- Store.new_wasi(wasi_options, limits, engine),
          :ok <- StoreOrCaller.set_fuel(store, config.fuel),
-         {:ok, pid} <- Wasmex.start_link(%{store: store, module: state.compiled_module}) do
+         {:ok, pid} <- Wasmex.start_link(%{store: store, module: compiled_module}) do
       handles = %{
         pid: pid,
         store: store,
@@ -96,9 +124,9 @@ defmodule Imgd.Sandbox.WasmRuntime do
         stderr: Map.get(wasi_options, :stderr)
       }
 
-      {:reply, {:ok, handles}, state}
+      {:ok, handles}
     else
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      {:error, reason} -> {:error, reason}
     end
   end
 end

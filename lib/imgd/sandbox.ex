@@ -38,6 +38,7 @@ defmodule Imgd.Sandbox do
   defp do_eval(code, config) do
     with :ok <- ensure_runtime_available(config),
          :ok <- ensure_pool_running(),
+         :ok <- Config.validate(config),
          :ok <- Validator.validate_code(code, config),
          :ok <- Validator.validate_args(config.args),
          {:ok, raw, metrics} <- execute_in_flame(code, config) do

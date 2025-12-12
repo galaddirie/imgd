@@ -116,6 +116,13 @@ defmodule Imgd.SandboxTest do
       assert msg =~ "Code size"
     end
 
+    test "rejects non-positive config values" do
+      assert {:error, %Error{type: :validation_error, message: msg}} =
+               Sandbox.eval("return 1;", fuel: 0)
+
+      assert msg =~ "fuel must be a positive integer"
+    end
+
     @tag :capture_log
     test "handles timeout" do
       Process.flag(:trap_exit, true)
@@ -124,9 +131,9 @@ defmodule Imgd.SandboxTest do
 
       # Short timeout, massive fuel
       assert {:error, %Error{type: :timeout, message: msg}} =
-               Sandbox.eval(code, timeout: 50, fuel: 100_000_000_000)
+               Sandbox.eval(code, timeout: 250, fuel: 100_000_000_000)
 
-      assert msg =~ "exceeded 50ms timeout"
+      assert msg =~ "exceeded 250ms timeout"
     end
   end
 

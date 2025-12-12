@@ -87,6 +87,14 @@ defmodule Imgd.Sandbox.Error do
     }
   end
 
+  def wrap({:flame_error, reason}) do
+    %__MODULE__{
+      type: :internal_error,
+      message: "FLAME execution failed: #{inspect(reason)}",
+      details: %{reason: reason}
+    }
+  end
+
   def wrap({:invalid_json, output}) do
     %__MODULE__{
       type: :internal_error,

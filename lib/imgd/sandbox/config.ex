@@ -34,4 +34,20 @@ defmodule Imgd.Sandbox.Config do
 
     struct!(__MODULE__, merged)
   end
+
+  @spec validate(t()) :: :ok | {:error, term()}
+  def validate(%__MODULE__{} = config) do
+    with :ok <- validate_pos_int(config.timeout, "timeout"),
+         :ok <- validate_pos_int(config.fuel, "fuel"),
+         :ok <- validate_pos_int(config.memory_mb, "memory_mb"),
+         :ok <- validate_pos_int(config.max_output_size, "max_output_size"),
+         :ok <- validate_pos_int(config.max_code_size, "max_code_size") do
+      :ok
+    end
+  end
+
+  defp validate_pos_int(value, name) when is_integer(value) and value > 0, do: :ok
+
+  defp validate_pos_int(_value, name),
+    do: {:error, {:validation_error, "#{name} must be a positive integer"}}
 end

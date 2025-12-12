@@ -132,10 +132,10 @@ defmodule Imgd.Sandbox.Executor do
     with {:ok, wasi_options} <- build_wasi_options(payload),
          {:ok, instance} <- WasmRuntime.new_instance(config, wasi_options) do
       try do
-      with {:ok, raw, logs} <- execute(instance, config) do
-        fuel_used = fuel_consumed(instance.store, config.fuel)
-        {:ok, raw, Map.merge(logs, %{fuel_consumed: fuel_used})}
-      end
+        with {:ok, raw, logs} <- execute(instance, config) do
+          fuel_used = fuel_consumed(instance.store, config.fuel)
+          {:ok, raw, Map.merge(logs, %{fuel_consumed: fuel_used})}
+        end
       after
         GenServer.stop(instance.pid)
       end
@@ -220,7 +220,12 @@ defmodule Imgd.Sandbox.Executor do
 
   defp read_pipe(pipe) do
     _ = Pipe.seek(pipe, 0)
-    Pipe.read(pipe)
+
+    case Pipe.read(pipe) do
+      {:ok, data} when is_binary(data) -> data
+      data when is_binary(data) -> data
+      _ -> ""
+    end
   end
 
   defp enforce_output_limit_bytes(data, max_output_size) when byte_size(data) > max_output_size do
