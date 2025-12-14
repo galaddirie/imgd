@@ -51,7 +51,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   alias Imgd.Repo
   alias Imgd.Executions.{Execution, Context}
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
-  alias Imgd.Runtime.{WorkflowBuilder, NodeExecutionError}
+  alias Imgd.Runtime.{ExecutionState, NodeExecutionError, WorkflowBuilder}
   alias Imgd.Observability.Instrumentation
 
   @default_timeout_ms 300_000
@@ -207,23 +207,32 @@ defmodule Imgd.Runtime.WorkflowRunner do
     trigger_data = Execution.trigger_data(execution)
     initial_input = extract_trigger_input(trigger_data)
 
+    ExecutionState.start(execution.id)
+
     task =
       Task.async(fn ->
         execute_workflow(execution, runic_workflow, initial_input, context)
       end)
 
-    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} ->
-        result
+    result =
+      case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+        {:ok, result} ->
+          result
 
-      nil ->
-        Logger.warning("Workflow execution timed out",
-          execution_id: execution.id,
-          timeout_ms: timeout_ms
-        )
+        {:exit, reason} ->
+          {:error, reason}
 
-        {:timeout, context}
-    end
+        nil ->
+          Logger.warning("Workflow execution timed out",
+            execution_id: execution.id,
+            timeout_ms: timeout_ms
+          )
+
+          {:timeout, context}
+      end
+
+    ExecutionState.cleanup(execution.id)
+    result
   end
 
   defp get_timeout_ms(%Execution{} = execution) do
@@ -265,8 +274,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
       reaction_log = extract_reaction_log(executed_workflow)
       output = determine_output(productions)
 
-      # Collect node outputs from process dictionary (populated by hooks)
-      node_outputs = Process.get(:imgd_node_outputs, %{})
+      node_outputs = ExecutionState.outputs(execution.id)
       final_context = %{context | node_outputs: Map.merge(context.node_outputs, node_outputs)}
 
       Logger.debug("Workflow execution completed",

@@ -33,7 +33,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   alias Imgd.Workflows.Embeds.Node
   alias Imgd.Executions.{Context, Execution, NodeExecution}
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
-  alias Imgd.Runtime.NodeExecutor
+  alias Imgd.Runtime.{ExecutionState, NodeExecutor}
   alias Imgd.Runtime.Expression.Evaluator
   alias Imgd.Repo
 
@@ -263,7 +263,10 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   end
 
   defp execute_node(%Node{} = node, input, %Context{} = context) do
-    ctx = Context.set_current_node(context, node.id, input)
+    ctx =
+      context
+      |> merge_runtime_outputs()
+      |> Context.set_current_node(node.id, input)
 
     case Evaluator.resolve_config(node.config, ctx) do
       {:ok, resolved_config} ->
@@ -281,9 +284,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     try do
       case NodeExecutor.execute(node.type_id, config, input, ctx) do
         {:ok, output} ->
-          # Store output in process dictionary for context building
-          node_outputs = Process.get(:imgd_node_outputs, %{})
-          Process.put(:imgd_node_outputs, Map.put(node_outputs, node.id, output))
+          ExecutionState.record_output(ctx.execution_id, node.id, output)
           output
 
         {:error, reason} ->
@@ -305,6 +306,11 @@ defmodule Imgd.Runtime.WorkflowBuilder do
           node_type_id: node.type_id,
           reason: {:execution_exception, Exception.message(e)}
     end
+  end
+
+  defp merge_runtime_outputs(%Context{} = context) do
+    outputs = ExecutionState.outputs(context.execution_id)
+    %{context | node_outputs: Map.merge(context.node_outputs, outputs)}
   end
 
   defp add_with_join(workflow, parent_steps, child_step) do
@@ -351,13 +357,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     node_type_id = node_info.type_id
     node_name = node_info.name
 
-    # Record start time in process dictionary for duration calculation
-    timings = Process.get(:imgd_node_timings, %{})
-
-    Process.put(
-      :imgd_node_timings,
-      Map.put(timings, node_id, System.monotonic_time(:millisecond))
-    )
+    ExecutionState.record_start_time(execution.id, node_id, System.monotonic_time(:millisecond))
 
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     input_data = wrap_for_db(fact.value)
@@ -376,6 +376,8 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
     case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
       {:ok, node_exec} ->
+        ExecutionState.put_node_execution(execution.id, node_id, node_exec)
+
         # Broadcast PubSub event for real-time UI updates
         ExecutionPubSub.broadcast_node_started(execution, node_exec)
 
@@ -411,25 +413,33 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     node_type_id = node_info.type_id
     node_name = node_info.name
 
-    # Calculate duration from stored start time
-    timings = Process.get(:imgd_node_timings, %{})
-    start_time = Map.get(timings, node_id)
-    duration_ms = if start_time, do: System.monotonic_time(:millisecond) - start_time, else: 0
+    duration_ms =
+      case ExecutionState.fetch_start_time(execution.id, node_id) do
+        {:ok, start_time} -> System.monotonic_time(:millisecond) - start_time
+        :error -> 0
+      end
 
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     output_data = wrap_for_db(fact.value)
 
-    # Find and update the running NodeExecution record
-    case find_running_node_execution(execution.id, node_id) do
+    node_exec =
+      case ExecutionState.fetch_node_execution(execution.id, node_id) do
+        {:ok, node_exec} -> node_exec
+        :error -> find_running_node_execution(execution.id, node_id)
+      end
+
+    case node_exec do
       %NodeExecution{} = node_exec ->
-        case Repo.update(
-               NodeExecution.changeset(node_exec, %{
-                 status: :completed,
-                 output_data: output_data,
-                 completed_at: now
-               })
-             ) do
+        node_exec
+        |> NodeExecution.changeset(%{
+          status: :completed,
+          output_data: output_data,
+          completed_at: now
+        })
+        |> Repo.update()
+        |> case do
           {:ok, updated} ->
+            ExecutionState.put_node_execution(execution.id, node_id, updated)
             ExecutionPubSub.broadcast_node_completed(execution, updated)
 
             Logger.info("Node completed: #{node_name}",
@@ -463,6 +473,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
         case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
           {:ok, node_exec} ->
+            ExecutionState.put_node_execution(execution.id, node_id, node_exec)
             ExecutionPubSub.broadcast_node_completed(execution, node_exec)
 
             Logger.info("Node completed: #{node_name}",
