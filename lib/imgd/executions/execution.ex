@@ -200,4 +200,12 @@ defmodule Imgd.Executions.Execution do
   def duration_ms(%__MODULE__{started_at: started, completed_at: completed}) do
     DateTime.diff(completed, started, :millisecond)
   end
+
+  @doc "Computes duration in microseconds, or nil if not yet complete."
+  def duration_us(%__MODULE__{started_at: nil}), do: nil
+  def duration_us(%__MODULE__{completed_at: nil}), do: nil
+
+  def duration_us(%__MODULE__{started_at: started, completed_at: completed}) do
+    DateTime.diff(completed, started, :microsecond)
+  end
 end

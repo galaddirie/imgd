@@ -170,7 +170,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                           {format_execution_value(execution.output)}
                         </td>
                         <td class="text-xs">
-                          {format_duration(execution_duration_ms(execution))}
+                          {format_duration(execution_duration_us(execution))}
                         </td>
                         <td class="text-xs text-base-content/60">
                           {format_relative_time(execution.started_at)}
@@ -333,15 +333,15 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
   defp format_duration(nil), do: "-"
   defp format_duration(ms) when is_number(ms) and ms < 1000, do: "#{ms}ms"
-  defp format_duration(ms) when is_number(ms), do: "#{Float.round(ms / 1000, 2)}s"
+  defp format_duration(us) when is_number(us), do: "#{Float.round(us / 1_000_000, 2)}s"
 
   # Copied from execution_show.ex to ensure consistent duration calculation
-  defp execution_duration_ms(%{started_at: started, completed_at: completed})
+  defp execution_duration_us(%{started_at: started, completed_at: completed})
        when not is_nil(started) and not is_nil(completed) do
-    DateTime.diff(completed, started, :millisecond)
+    DateTime.diff(completed, started, :microsecond)
   end
 
-  defp execution_duration_ms(_), do: nil
+  defp execution_duration_us(_), do: nil
 
   defp format_relative_time(nil), do: "-"
 

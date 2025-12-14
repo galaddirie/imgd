@@ -108,12 +108,28 @@ defmodule Imgd.Executions.NodeExecution do
     DateTime.diff(completed, started, :millisecond)
   end
 
+  @doc "Computes execution duration in microseconds."
+  def duration_us(%__MODULE__{started_at: nil}), do: nil
+  def duration_us(%__MODULE__{completed_at: nil}), do: nil
+
+  def duration_us(%__MODULE__{started_at: started, completed_at: completed}) do
+    DateTime.diff(completed, started, :microsecond)
+  end
+
   @doc "Computes queue wait time in milliseconds."
   def queue_time_ms(%__MODULE__{queued_at: nil}), do: nil
   def queue_time_ms(%__MODULE__{started_at: nil}), do: nil
 
   def queue_time_ms(%__MODULE__{queued_at: queued, started_at: started}) do
     DateTime.diff(started, queued, :millisecond)
+  end
+
+  @doc "Computes queue wait time in microseconds."
+  def queue_time_us(%__MODULE__{queued_at: nil}), do: nil
+  def queue_time_us(%__MODULE__{started_at: nil}), do: nil
+
+  def queue_time_us(%__MODULE__{queued_at: queued, started_at: started}) do
+    DateTime.diff(started, queued, :microsecond)
   end
 
   @doc "Returns true if this is a retry attempt."

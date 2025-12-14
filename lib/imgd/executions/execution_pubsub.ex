@@ -139,8 +139,8 @@ defmodule Imgd.Executions.PubSub do
       queued_at: ne.queued_at,
       started_at: ne.started_at,
       completed_at: ne.completed_at,
-      duration_ms: NodeExecution.duration_ms(ne),
-      queue_time_ms: NodeExecution.queue_time_ms(ne)
+      duration_us: NodeExecution.duration_us(ne),
+      queue_time_us: NodeExecution.queue_time_us(ne)
     }
   end
 

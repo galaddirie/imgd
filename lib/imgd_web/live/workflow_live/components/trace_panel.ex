@@ -41,7 +41,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
                     <span class="text-xs text-base-content/60 font-mono">{step.node_id}</span>
                   </div>
                   <div class="text-xs text-base-content/60 mt-1">
-                    {step.type_id} • {format_duration(step.duration_ms)}
+                    {step.type_id} • {format_duration(step.duration_us)}
                   </div>
                   <%= if step.error do %>
                     <div class="mt-2 p-2 bg-error/10 text-error text-xs rounded-lg">
@@ -71,6 +71,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
   defp step_status_icon(_), do: "?"
 
   defp format_duration(nil), do: "-"
-  defp format_duration(ms) when ms < 1000, do: "#{ms}ms"
-  defp format_duration(ms), do: "#{Float.round(ms / 1000, 2)}s"
+  defp format_duration(us) when us < 1000, do: "#{us}μs"
+  defp format_duration(us) when us < 1_000_000, do: "#{Float.round(us / 1000, 2)}ms"
+  defp format_duration(us), do: "#{Float.round(us / 1_000_000, 2)}s"
 end

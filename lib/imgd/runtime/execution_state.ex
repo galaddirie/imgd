@@ -27,9 +27,7 @@ defmodule Imgd.Runtime.ExecutionState do
     ensure_table!()
 
     :ets.select(@table, [
-      {{{:"$1", :output, :"$2"}, :"$3"},
-       [{:==, :"$1", execution_id}],
-       [{{:"$2", :"$3"}}]}
+      {{{:"$1", :output, :"$2"}, :"$3"}, [{:==, :"$1", execution_id}], [{{:"$2", :"$3"}}]}
     ])
     |> Map.new()
   end
@@ -89,6 +87,7 @@ defmodule Imgd.Runtime.ExecutionState do
             read_concurrency: true,
             write_concurrency: true
           ])
+
           :ok
         rescue
           ArgumentError ->

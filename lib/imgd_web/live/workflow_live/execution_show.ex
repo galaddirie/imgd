@@ -31,7 +31,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
         |> assign(:steps, steps)
         |> assign(:workflow_version_tag, derive_version_tag(execution))
         |> assign(:page_title, "Execution #{short_id(execution.id)}")
-        |> assign(:duration_ms, execution_duration_ms(execution))
+        |> assign(:duration_us, execution_duration_us(execution))
         |> assign(:steps_empty?, steps == [])
         # Decorate steps with node names for trace panel
         |> assign(:trace_steps, decorated_steps)
@@ -75,7 +75,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
       |> Map.put(:step_name, node_name)
       |> Map.put(:node_name, node_name)
       |> Map.put(:type_id, step.node_type_id)
-      |> Map.put(:duration_ms, NodeExecution.duration_ms(step))
+      |> Map.put(:duration_us, NodeExecution.duration_us(step))
     end)
   end
 
@@ -174,7 +174,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                   <.metric
                     title="Duration"
                     icon="hero-stopwatch"
-                    value={format_duration(@duration_ms)}
+                    value={format_duration(@duration_us)}
                     hint="Total runtime from start to completion"
                   />
                   <.metric
@@ -300,7 +300,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                   <.stat title="Retries" value={calculate_stat(@steps, :retries)} />
                   <.stat
                     title="Total Duration"
-                    value={format_duration(@duration_ms)}
+                    value={format_duration(@duration_us)}
                   />
                   <.stat title="Total Steps" value={length(@steps)} />
                 </div>
@@ -351,10 +351,10 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
                       <span class="inline-flex items-center gap-1">
                         <.icon name="hero-arrow-path" class="size-4" /> Attempt {step.attempt}
                       </span>
-                      <%= if step.duration_ms do %>
+                      <%= if step.duration_us do %>
                         <span class="inline-flex items-center gap-1">
                           <.icon name="hero-stopwatch" class="size-4" /> {format_duration(
-                            step.duration_ms
+                            step.duration_us
                           )}
                         </span>
                       <% end %>
@@ -484,12 +484,12 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   defp execution_status_badge(:timeout), do: "badge-error"
   defp execution_status_badge(_), do: "badge-ghost"
 
-  defp execution_duration_ms(%{started_at: started, completed_at: completed})
+  defp execution_duration_us(%{started_at: started, completed_at: completed})
        when not is_nil(started) and not is_nil(completed) do
-    DateTime.diff(completed, started, :millisecond)
+    DateTime.diff(completed, started, :microsecond)
   end
 
-  defp execution_duration_ms(_), do: nil
+  defp execution_duration_us(_), do: nil
 
   defp calculate_stat(steps, :completed) do
     Enum.count(steps, &(&1.status == :completed))
@@ -554,11 +554,14 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   end
 
   defp format_duration(nil), do: "-"
-  defp format_duration(ms) when is_integer(ms) and ms < 1000, do: "#{ms}ms"
+  defp format_duration(us) when is_integer(us) and us < 1000, do: "#{us}μs"
 
-  defp format_duration(ms) when is_integer(ms) and ms < 60_000,
-    do: "#{Float.round(ms / 1000, 2)}s"
+  defp format_duration(us) when is_integer(us) and us < 1_000_000,
+    do: "#{Float.round(us / 1000, 2)}ms"
 
-  defp format_duration(ms) when is_integer(ms), do: "#{Float.round(ms / 60_000, 1)}m"
+  defp format_duration(us) when is_integer(us) and us < 60_000_000,
+    do: "#{Float.round(us / 1_000_000, 2)}s"
+
+  defp format_duration(us) when is_integer(us), do: "#{Float.round(us / 60_000_000, 1)}m"
   defp format_duration(value), do: inspect(value)
 end

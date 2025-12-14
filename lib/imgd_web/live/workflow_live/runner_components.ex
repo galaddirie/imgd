@@ -469,21 +469,21 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       </text>
 
       <%!-- Duration display --%>
-      <%= if @state[:duration_ms] do %>
+      <%= if @state[:duration_us] do %>
         <g transform="translate(16, 62)">
           <rect
-            width={duration_bar_width(@state[:duration_ms])}
+            width={duration_bar_width(@state[:duration_us])}
             height="4"
             rx="2"
             class="fill-success/40"
           />
           <text
-            x={duration_bar_width(@state[:duration_ms]) + 8}
+            x={duration_bar_width(@state[:duration_us]) + 8}
             y="4"
             class="text-[10px] fill-current opacity-50"
             dominant-baseline="middle"
           >
-            {format_duration(@state[:duration_ms])}
+            {format_duration(@state[:duration_us])}
           </text>
         </g>
       <% else %>
@@ -564,8 +564,9 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   defp truncate_text(text, _), do: text
 
   defp format_duration(nil), do: ""
-  defp format_duration(ms) when ms < 1000, do: "#{ms}ms"
-  defp format_duration(ms), do: "#{Float.round(ms / 1000, 2)}s"
+  defp format_duration(us) when us < 1000, do: "#{us}μs"
+  defp format_duration(us) when us < 1_000_000, do: "#{Float.round(us / 1000, 2)}ms"
+  defp format_duration(us), do: "#{Float.round(us / 1_000_000, 2)}s"
 
   # ============================================================================
   # Component: Node Details Panel
@@ -620,12 +621,12 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             </div>
 
             <%!-- Timing Info --%>
-            <%= if state[:started_at] || state[:duration_ms] do %>
+            <%= if state[:started_at] || state[:duration_us] do %>
               <div class="flex items-center gap-4 py-2 px-3 bg-base-200/50 rounded-lg">
-                <%= if state[:duration_ms] do %>
+                <%= if state[:duration_us] do %>
                   <div class="flex items-center gap-2">
                     <.icon name="hero-clock" class="size-4 text-base-content/60" />
-                    <span class="text-sm font-medium">{format_duration(state[:duration_ms])}</span>
+                    <span class="text-sm font-medium">{format_duration(state[:duration_us])}</span>
                   </div>
                 <% end %>
                 <%= if state[:started_at] do %>
@@ -892,7 +893,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           </div>
           <div>
             <p class="text-xs text-base-content/60 mb-1">Duration</p>
-            <p class="text-sm font-medium">{format_duration(Execution.duration_ms(@execution))}</p>
+            <p class="text-sm font-medium">{format_duration(Execution.duration_us(@execution))}</p>
           </div>
         </div>
 

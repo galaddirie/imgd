@@ -214,7 +214,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       |> assign(:execution, execution)
       |> assign(:running?, false)
       |> append_trace_log(:success, "Execution completed", %{
-        duration_ms: Execution.duration_ms(execution),
+        duration_us: Execution.duration_us(execution),
         status: execution.status
       })
 
@@ -245,7 +245,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         input_data: payload.input_data,
         output_data: nil,
         error: nil,
-        duration_ms: nil
+        duration_us: nil
       })
 
     socket =
@@ -265,15 +265,15 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     node_name = get_node_name(socket.assigns.node_map, node_id)
     existing = Map.get(socket.assigns.node_states, node_id, %{})
 
-    # payload is a map from build_node_payload, duration_ms is already computed
-    duration_ms = payload.duration_ms
+    # payload is a map from build_node_payload, duration_us is already computed
+    duration_us = payload.duration_us
 
     node_states =
       Map.put(socket.assigns.node_states, node_id, %{
         status: :completed,
         started_at: existing[:started_at] || payload.started_at,
         completed_at: payload.completed_at,
-        duration_ms: duration_ms,
+        duration_us: duration_us,
         input_data: existing[:input_data] || payload.input_data,
         output_data: payload.output_data,
         error: nil
@@ -283,7 +283,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       socket
       |> assign(:node_states, node_states)
       |> append_trace_log(:success, "Node completed: #{node_name}", %{
-        duration_ms: duration_ms,
+        duration_us: duration_us,
         node_id: short_id(node_id)
       })
 
@@ -296,8 +296,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     node_name = get_node_name(socket.assigns.node_map, node_id)
     existing = Map.get(socket.assigns.node_states, node_id, %{})
 
-    # payload is a map from build_node_payload, duration_ms is already computed
-    duration_ms = payload.duration_ms
+    # payload is a map from build_node_payload, duration_us is already computed
+    duration_us = payload.duration_us
 
     node_states =
       Map.put(socket.assigns.node_states, node_id, %{
@@ -307,7 +307,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         input_data: existing[:input_data] || payload.input_data,
         output_data: nil,
         error: payload.error,
-        duration_ms: duration_ms
+        duration_us: duration_us
       })
 
     socket =
@@ -577,7 +577,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
          status: ne.status,
          started_at: ne.started_at,
          completed_at: ne.completed_at,
-         duration_ms: NodeExecution.duration_ms(ne),
+         duration_us: NodeExecution.duration_us(ne),
          input_data: ne.input_data,
          output_data: ne.output_data,
          error: ne.error
@@ -631,7 +631,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
                   level: :success,
                   message: "Node completed: #{ne.node_id}",
                   timestamp: ne.completed_at,
-                  data: %{duration_ms: NodeExecution.duration_ms(ne)}
+                  data: %{duration_us: NodeExecution.duration_us(ne)}
                 }
               ]
 
@@ -663,7 +663,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             level: level,
             message: "Execution #{execution.status}",
             timestamp: execution.completed_at,
-            data: %{duration_ms: Execution.duration_ms(execution)}
+            data: %{duration_us: Execution.duration_us(execution)}
           }
         ]
       else
