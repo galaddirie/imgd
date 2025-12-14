@@ -51,10 +51,12 @@ defmodule WorkflowSeeder do
         IO.puts("  → Creating new workflow: #{name}")
 
         {:ok, workflow} = Workflows.create_workflow(scope, workflow_attrs)
-        {:ok, _} = Workflows.publish_workflow(scope, workflow, %{
-          version_tag: "1.0.0",
-          changelog: "Initial seeded workflow"
-        })
+
+        {:ok, _} =
+          Workflows.publish_workflow(scope, workflow, %{
+            version_tag: "1.0.0",
+            changelog: "Initial seeded workflow"
+          })
 
         workflow
 
@@ -75,14 +77,18 @@ defmodule WorkflowSeeder do
           IO.puts("  → Updating existing workflow: #{name}")
 
           # Update the workflow content
-          update_attrs = Map.take(workflow_attrs, [:description, :nodes, :connections, :triggers, :settings])
-          {:ok, updated_workflow} = Workflows.update_workflow(scope, existing_workflow, update_attrs)
+          update_attrs =
+            Map.take(workflow_attrs, [:description, :nodes, :connections, :triggers, :settings])
+
+          {:ok, updated_workflow} =
+            Workflows.update_workflow(scope, existing_workflow, update_attrs)
 
           # Publish new version
-          {:ok, _} = Workflows.publish_workflow(scope, updated_workflow, %{
-            version_tag: next_version_tag(existing_workflow.current_version_tag),
-            changelog: "Updated seeded workflow"
-          })
+          {:ok, _} =
+            Workflows.publish_workflow(scope, updated_workflow, %{
+              version_tag: next_version_tag(existing_workflow.current_version_tag),
+              changelog: "Updated seeded workflow"
+            })
 
           updated_workflow
         else
@@ -93,12 +99,14 @@ defmodule WorkflowSeeder do
   end
 
   defp next_version_tag(nil), do: "1.0.0"
+
   defp next_version_tag(current_tag) do
     case Version.parse(current_tag) do
       {:ok, version} ->
         # Increment patch version for updates
         next_version = %{version | patch: version.patch + 1}
         Version.to_string(next_version)
+
       :error ->
         "1.0.0"
     end
@@ -117,52 +125,53 @@ linear_add = SeedHelpers.node_id("math_add")
 linear_mult = SeedHelpers.node_id("math_mult")
 linear_debug = SeedHelpers.node_id("debug_out")
 
-_wf_linear = WorkflowSeeder.seed_workflow(scope, %{
-  name: "1. Linear Math",
-  description: "Simple sequence: (x + 10) * 2",
-  nodes: [
-    %{
-      id: linear_input,
-      type_id: "debug",
-      name: "Start",
-      config: %{"label" => "Input", "level" => "info"},
-      position: %{"x" => 100, "y" => 100}
-    },
-    %{
-      id: linear_add,
-      type_id: "math",
-      name: "Add 10",
-      config: %{"operation" => "add", "operand" => 10, "field" => "value"},
-      position: %{"x" => 100, "y" => 250}
-    },
-    %{
-      id: linear_mult,
-      type_id: "math",
-      name: "Multiply by 2",
-      config: %{"operation" => "multiply", "operand" => 2},
-      position: %{"x" => 100, "y" => 400}
-    },
-    %{
-      id: linear_debug,
-      type_id: "debug",
-      name: "Result",
-      config: %{"label" => "Final Value", "level" => "info"},
-      position: %{"x" => 100, "y" => 550}
+_wf_linear =
+  WorkflowSeeder.seed_workflow(scope, %{
+    name: "1. Linear Math",
+    description: "Simple sequence: (x + 10) * 2",
+    nodes: [
+      %{
+        id: linear_input,
+        type_id: "debug",
+        name: "Start",
+        config: %{"label" => "Input", "level" => "info"},
+        position: %{"x" => 100, "y" => 100}
+      },
+      %{
+        id: linear_add,
+        type_id: "math",
+        name: "Add 10",
+        config: %{"operation" => "add", "operand" => 10, "field" => "value"},
+        position: %{"x" => 100, "y" => 250}
+      },
+      %{
+        id: linear_mult,
+        type_id: "math",
+        name: "Multiply by 2",
+        config: %{"operation" => "multiply", "operand" => 2},
+        position: %{"x" => 100, "y" => 400}
+      },
+      %{
+        id: linear_debug,
+        type_id: "debug",
+        name: "Result",
+        config: %{"label" => "Final Value", "level" => "info"},
+        position: %{"x" => 100, "y" => 550}
+      }
+    ],
+    connections: [
+      %{id: SeedHelpers.conn_id(), source_node_id: linear_input, target_node_id: linear_add},
+      %{id: SeedHelpers.conn_id(), source_node_id: linear_add, target_node_id: linear_mult},
+      %{id: SeedHelpers.conn_id(), source_node_id: linear_mult, target_node_id: linear_debug}
+    ],
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{label: "Value 5", description: "(5 + 10) * 2 = 30", data: %{"value" => 5}},
+        %{label: "Value 20", description: "(20 + 10) * 2 = 60", data: %{"value" => 20}}
+      ]
     }
-  ],
-  connections: [
-    %{id: SeedHelpers.conn_id(), source_node_id: linear_input, target_node_id: linear_add},
-    %{id: SeedHelpers.conn_id(), source_node_id: linear_add, target_node_id: linear_mult},
-    %{id: SeedHelpers.conn_id(), source_node_id: linear_mult, target_node_id: linear_debug}
-  ],
-  triggers: [%{type: :manual, config: %{}}],
-  settings: %{
-    demo_inputs: [
-      %{label: "Value 5", description: "(5 + 10) * 2 = 30", data: %{"value" => 5}},
-      %{label: "Value 20", description: "(20 + 10) * 2 = 60", data: %{"value" => 20}}
-    ]
-  }
-})
+  })
 
 # =============================================================================
 # 2. Branching Math Workflow
@@ -176,76 +185,77 @@ branch_path_b = SeedHelpers.node_id("path_b")
 branch_debug_a = SeedHelpers.node_id("debug_a")
 branch_debug_b = SeedHelpers.node_id("debug_b")
 
-_wf_branch = WorkflowSeeder.seed_workflow(scope, %{
-  name: "2. Branching Math",
-  description: "Splits execution into two parallel math operations",
-  nodes: [
-    %{
-      id: branch_start,
-      type_id: "debug",
-      name: "Input",
-      config: %{"label" => "Start", "level" => "info"},
-      position: %{"x" => 300, "y" => 50}
-    },
-    %{
-      id: branch_split,
-      type_id: "math",
-      name: "Divide by 2",
-      config: %{"operation" => "divide", "operand" => 2, "field" => "number"},
-      position: %{"x" => 300, "y" => 200}
-    },
-    %{
-      id: branch_path_a,
-      type_id: "math",
-      name: "Round Up (Ceil)",
-      config: %{"operation" => "ceil"},
-      position: %{"x" => 150, "y" => 350}
-    },
-    %{
-      id: branch_path_b,
-      type_id: "math",
-      name: "Round Down (Floor)",
-      config: %{"operation" => "floor"},
-      position: %{"x" => 450, "y" => 350}
-    },
-    %{
-      id: branch_debug_a,
-      type_id: "debug",
-      name: "Ceil Result",
-      config: %{"label" => "Ceiled", "level" => "info"},
-      position: %{"x" => 150, "y" => 500}
-    },
-    %{
-      id: branch_debug_b,
-      type_id: "debug",
-      name: "Floor Result",
-      config: %{"label" => "Floored", "level" => "info"},
-      position: %{"x" => 450, "y" => 500}
-    }
-  ],
-  connections: [
-    %{id: SeedHelpers.conn_id(), source_node_id: branch_start, target_node_id: branch_split},
-    %{id: SeedHelpers.conn_id(), source_node_id: branch_split, target_node_id: branch_path_a},
-    %{id: SeedHelpers.conn_id(), source_node_id: branch_split, target_node_id: branch_path_b},
-    %{id: SeedHelpers.conn_id(), source_node_id: branch_path_a, target_node_id: branch_debug_a},
-    %{id: SeedHelpers.conn_id(), source_node_id: branch_path_b, target_node_id: branch_debug_b}
-  ],
-  triggers: [%{type: :manual, config: %{}}],
-  settings: %{
-    demo_inputs: [
+_wf_branch =
+  WorkflowSeeder.seed_workflow(scope, %{
+    name: "2. Branching Math",
+    description: "Splits execution into two parallel math operations",
+    nodes: [
       %{
-        label: "Number 5.5",
-        description: "5.5 / 2 = 2.75 -> Ceil: 3, Floor: 2",
-        data: %{"number" => 5.5}
+        id: branch_start,
+        type_id: "debug",
+        name: "Input",
+        config: %{"label" => "Start", "level" => "info"},
+        position: %{"x" => 300, "y" => 50}
       },
       %{
-        label: "Number 9",
-        description: "9 / 2 = 4.5 -> Ceil: 5, Floor: 4",
-        data: %{"number" => 9}
+        id: branch_split,
+        type_id: "math",
+        name: "Divide by 2",
+        config: %{"operation" => "divide", "operand" => 2, "field" => "number"},
+        position: %{"x" => 300, "y" => 200}
+      },
+      %{
+        id: branch_path_a,
+        type_id: "math",
+        name: "Round Up (Ceil)",
+        config: %{"operation" => "ceil"},
+        position: %{"x" => 150, "y" => 350}
+      },
+      %{
+        id: branch_path_b,
+        type_id: "math",
+        name: "Round Down (Floor)",
+        config: %{"operation" => "floor"},
+        position: %{"x" => 450, "y" => 350}
+      },
+      %{
+        id: branch_debug_a,
+        type_id: "debug",
+        name: "Ceil Result",
+        config: %{"label" => "Ceiled", "level" => "info"},
+        position: %{"x" => 150, "y" => 500}
+      },
+      %{
+        id: branch_debug_b,
+        type_id: "debug",
+        name: "Floor Result",
+        config: %{"label" => "Floored", "level" => "info"},
+        position: %{"x" => 450, "y" => 500}
       }
-    ]
-  }
-})
+    ],
+    connections: [
+      %{id: SeedHelpers.conn_id(), source_node_id: branch_start, target_node_id: branch_split},
+      %{id: SeedHelpers.conn_id(), source_node_id: branch_split, target_node_id: branch_path_a},
+      %{id: SeedHelpers.conn_id(), source_node_id: branch_split, target_node_id: branch_path_b},
+      %{id: SeedHelpers.conn_id(), source_node_id: branch_path_a, target_node_id: branch_debug_a},
+      %{id: SeedHelpers.conn_id(), source_node_id: branch_path_b, target_node_id: branch_debug_b}
+    ],
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "Number 5.5",
+          description: "5.5 / 2 = 2.75 -> Ceil: 3, Floor: 2",
+          data: %{"number" => 5.5}
+        },
+        %{
+          label: "Number 9",
+          description: "9 / 2 = 4.5 -> Ceil: 5, Floor: 4",
+          data: %{"number" => 9}
+        }
+      ]
+    }
+  })
 
 # =============================================================================
 # 3. Complex Math Workflow
@@ -259,80 +269,81 @@ comp_abs = SeedHelpers.node_id("abs")
 comp_merge = SeedHelpers.node_id("merge_point")
 comp_final = SeedHelpers.node_id("final")
 
-_wf_complex = WorkflowSeeder.seed_workflow(scope, %{
-  name: "3. Complex Math",
-  description: "Diamond pattern: (x+1)^2 AND abs(x+1) -> Both feed into Modulo",
-  nodes: [
-    %{
-      id: comp_start,
-      type_id: "debug",
-      name: "Input",
-      config: %{"label" => "Start", "level" => "info"},
-      position: %{"x" => 300, "y" => 50}
-    },
-    %{
-      id: comp_add,
-      type_id: "math",
-      name: "Add 1",
-      config: %{"operation" => "add", "operand" => 1, "field" => "x"},
-      position: %{"x" => 300, "y" => 200}
-    },
-    %{
-      id: comp_sq,
-      type_id: "math",
-      name: "Square (Power 2)",
-      config: %{"operation" => "power", "operand" => 2},
-      position: %{"x" => 150, "y" => 350}
-    },
-    %{
-      id: comp_abs,
-      type_id: "math",
-      name: "Absolute Value",
-      config: %{"operation" => "abs"},
-      position: %{"x" => 450, "y" => 350}
-    },
-    %{
-      id: comp_merge,
-      type_id: "math",
-      name: "Modulo 5",
-      config: %{"operation" => "modulo", "operand" => 5},
-      position: %{"x" => 300, "y" => 500},
-      notes: "Receives input from both branches independently"
-    },
-    %{
-      id: comp_final,
-      type_id: "debug",
-      name: "Result",
-      config: %{"label" => "Final", "level" => "info"},
-      position: %{"x" => 300, "y" => 650}
-    }
-  ],
-  connections: [
-    %{id: SeedHelpers.conn_id(), source_node_id: comp_start, target_node_id: comp_add},
-    %{id: SeedHelpers.conn_id(), source_node_id: comp_add, target_node_id: comp_sq},
-    %{id: SeedHelpers.conn_id(), source_node_id: comp_add, target_node_id: comp_abs},
-    %{id: SeedHelpers.conn_id(), source_node_id: comp_sq, target_node_id: comp_merge},
-    %{id: SeedHelpers.conn_id(), source_node_id: comp_abs, target_node_id: comp_merge},
-    %{id: SeedHelpers.conn_id(), source_node_id: comp_merge, target_node_id: comp_final}
-  ],
-  triggers: [%{type: :manual, config: %{}}],
-  settings: %{
-    demo_inputs: [
+_wf_complex =
+  WorkflowSeeder.seed_workflow(scope, %{
+    name: "3. Complex Math",
+    description: "Diamond pattern: (x+1)^2 AND abs(x+1) -> Both feed into Modulo",
+    nodes: [
       %{
-        label: "x = 3",
-        description:
-          "Add 1 = 4. Branch 1: 4^2=16. Branch 2: abs(4)=4. Merge(Mod 5): 16%5=1, 4%5=4.",
-        data: %{"x" => 3}
+        id: comp_start,
+        type_id: "debug",
+        name: "Input",
+        config: %{"label" => "Start", "level" => "info"},
+        position: %{"x" => 300, "y" => 50}
       },
       %{
-        label: "x = -6",
-        description:
-          "Add 1 = -5. Branch 1: (-5)^2=25. Branch 2: abs(-5)=5. Merge(Mod 5): 25%5=0, 5%5=0.",
-        data: %{"x" => -6}
+        id: comp_add,
+        type_id: "math",
+        name: "Add 1",
+        config: %{"operation" => "add", "operand" => 1, "field" => "x"},
+        position: %{"x" => 300, "y" => 200}
+      },
+      %{
+        id: comp_sq,
+        type_id: "math",
+        name: "Square (Power 2)",
+        config: %{"operation" => "power", "operand" => 2},
+        position: %{"x" => 150, "y" => 350}
+      },
+      %{
+        id: comp_abs,
+        type_id: "math",
+        name: "Absolute Value",
+        config: %{"operation" => "abs"},
+        position: %{"x" => 450, "y" => 350}
+      },
+      %{
+        id: comp_merge,
+        type_id: "math",
+        name: "Modulo 5",
+        config: %{"operation" => "modulo", "operand" => 5},
+        position: %{"x" => 300, "y" => 500},
+        notes: "Receives input from both branches independently"
+      },
+      %{
+        id: comp_final,
+        type_id: "debug",
+        name: "Result",
+        config: %{"label" => "Final", "level" => "info"},
+        position: %{"x" => 300, "y" => 650}
       }
-    ]
-  }
-})
+    ],
+    connections: [
+      %{id: SeedHelpers.conn_id(), source_node_id: comp_start, target_node_id: comp_add},
+      %{id: SeedHelpers.conn_id(), source_node_id: comp_add, target_node_id: comp_sq},
+      %{id: SeedHelpers.conn_id(), source_node_id: comp_add, target_node_id: comp_abs},
+      %{id: SeedHelpers.conn_id(), source_node_id: comp_sq, target_node_id: comp_merge},
+      %{id: SeedHelpers.conn_id(), source_node_id: comp_abs, target_node_id: comp_merge},
+      %{id: SeedHelpers.conn_id(), source_node_id: comp_merge, target_node_id: comp_final}
+    ],
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "x = 3",
+          description:
+            "Add 1 = 4. Branch 1: 4^2=16. Branch 2: abs(4)=4. Merge(Mod 5): 16%5=1, 4%5=4.",
+          data: %{"x" => 3}
+        },
+        %{
+          label: "x = -6",
+          description:
+            "Add 1 = -5. Branch 1: (-5)^2=25. Branch 2: abs(-5)=5. Merge(Mod 5): 25%5=0, 5%5=0.",
+          data: %{"x" => -6}
+        }
+      ]
+    }
+  })
 
 # =============================================================================
 # 4. Wait Workflow
@@ -344,52 +355,53 @@ wait_add = SeedHelpers.node_id("wait_add")
 wait_pause = SeedHelpers.node_id("wait_pause")
 wait_result = SeedHelpers.node_id("wait_result")
 
-_wf_wait = WorkflowSeeder.seed_workflow(scope, %{
-  name: "4. Wait Workflow",
-  description: "Start -> Add 10 -> Wait 5 seconds -> Debug result",
-  nodes: [
-    %{
-      id: wait_start,
-      type_id: "debug",
-      name: "Start",
-      config: %{"label" => "Input", "level" => "info"},
-      position: %{"x" => 100, "y" => 100}
-    },
-    %{
-      id: wait_add,
-      type_id: "math",
-      name: "Add 10",
-      config: %{"operation" => "add", "operand" => 10, "field" => "value"},
-      position: %{"x" => 100, "y" => 250}
-    },
-    %{
-      id: wait_pause,
-      type_id: "wait",
-      name: "Wait 5s",
-      config: %{"seconds" => 5},
-      position: %{"x" => 100, "y" => 400}
-    },
-    %{
-      id: wait_result,
-      type_id: "debug",
-      name: "Result",
-      config: %{"label" => "Final Result", "level" => "info"},
-      position: %{"x" => 100, "y" => 550}
+_wf_wait =
+  WorkflowSeeder.seed_workflow(scope, %{
+    name: "4. Wait Workflow",
+    description: "Start -> Add 10 -> Wait 5 seconds -> Debug result",
+    nodes: [
+      %{
+        id: wait_start,
+        type_id: "debug",
+        name: "Start",
+        config: %{"label" => "Input", "level" => "info"},
+        position: %{"x" => 100, "y" => 100}
+      },
+      %{
+        id: wait_add,
+        type_id: "math",
+        name: "Add 10",
+        config: %{"operation" => "add", "operand" => 10, "field" => "value"},
+        position: %{"x" => 100, "y" => 250}
+      },
+      %{
+        id: wait_pause,
+        type_id: "wait",
+        name: "Wait 5s",
+        config: %{"seconds" => 5},
+        position: %{"x" => 100, "y" => 400}
+      },
+      %{
+        id: wait_result,
+        type_id: "debug",
+        name: "Result",
+        config: %{"label" => "Final Result", "level" => "info"},
+        position: %{"x" => 100, "y" => 550}
+      }
+    ],
+    connections: [
+      %{id: SeedHelpers.conn_id(), source_node_id: wait_start, target_node_id: wait_add},
+      %{id: SeedHelpers.conn_id(), source_node_id: wait_add, target_node_id: wait_pause},
+      %{id: SeedHelpers.conn_id(), source_node_id: wait_pause, target_node_id: wait_result}
+    ],
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{label: "Value 5", description: "5 + 10 = 15 (after 5s wait)", data: %{"value" => 5}},
+        %{label: "Value 0", description: "0 + 10 = 10 (after 5s wait)", data: %{"value" => 0}}
+      ]
     }
-  ],
-  connections: [
-    %{id: SeedHelpers.conn_id(), source_node_id: wait_start, target_node_id: wait_add},
-    %{id: SeedHelpers.conn_id(), source_node_id: wait_add, target_node_id: wait_pause},
-    %{id: SeedHelpers.conn_id(), source_node_id: wait_pause, target_node_id: wait_result}
-  ],
-  triggers: [%{type: :manual, config: %{}}],
-  settings: %{
-    demo_inputs: [
-      %{label: "Value 5", description: "5 + 10 = 15 (after 5s wait)", data: %{"value" => 5}},
-      %{label: "Value 0", description: "0 + 10 = 10 (after 5s wait)", data: %{"value" => 0}}
-    ]
-  }
-})
+  })
 
 # =============================================================================
 # Summary
