@@ -31,7 +31,8 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   alias Runic.Workflow.{Components, Step}
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Workflows.Embeds.Node
-  alias Imgd.Executions.{Context, Execution, NodeExecution}
+  alias Ecto.Changeset
+  alias Imgd.Executions.{Context, Execution, NodeExecution, NodeExecutionBuffer}
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
   alias Imgd.Runtime.{ExecutionState, NodeExecutor}
   alias Imgd.Runtime.Expression.Evaluator
@@ -374,9 +375,12 @@ defmodule Imgd.Runtime.WorkflowBuilder do
       attempt: 1
     }
 
-    case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
+    attrs = Map.put_new(attrs, :id, Ecto.UUID.generate())
+
+    case Changeset.apply_action(NodeExecution.changeset(%NodeExecution{}, attrs), :insert) do
       {:ok, node_exec} ->
         ExecutionState.put_node_execution(execution.id, node_id, node_exec)
+        NodeExecutionBuffer.record(node_exec)
 
         # Broadcast PubSub event for real-time UI updates
         ExecutionPubSub.broadcast_node_started(execution, node_exec)
@@ -387,7 +391,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         )
 
       {:error, changeset} ->
-        Logger.warning("Failed to persist node execution start",
+        Logger.warning("Failed to validate node execution start",
           execution_id: execution.id,
           node_id: node_id,
           errors: inspect(changeset.errors)
@@ -430,16 +434,17 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
     case node_exec do
       %NodeExecution{} = node_exec ->
-        node_exec
-        |> NodeExecution.changeset(%{
-          status: :completed,
-          output_data: output_data,
-          completed_at: now
-        })
-        |> Repo.update()
-        |> case do
+        case Changeset.apply_action(
+               NodeExecution.changeset(node_exec, %{
+                 status: :completed,
+                 output_data: output_data,
+                 completed_at: now
+               }),
+               :update
+             ) do
           {:ok, updated} ->
             ExecutionState.put_node_execution(execution.id, node_id, updated)
+            NodeExecutionBuffer.record(updated)
             ExecutionPubSub.broadcast_node_completed(execution, updated)
 
             Logger.info("Node completed: #{node_name}",
@@ -448,7 +453,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
             )
 
           {:error, changeset} ->
-            Logger.warning("Failed to update node execution",
+            Logger.warning("Failed to validate node execution completion",
               execution_id: execution.id,
               node_id: node_id,
               errors: inspect(changeset.errors)
@@ -460,6 +465,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         started_at = DateTime.add(now, -duration_ms, :millisecond)
 
         attrs = %{
+          id: Ecto.UUID.generate(),
           execution_id: execution.id,
           node_id: node_id,
           node_type_id: node_type_id,
@@ -471,9 +477,10 @@ defmodule Imgd.Runtime.WorkflowBuilder do
           attempt: 1
         }
 
-        case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
+        case Changeset.apply_action(NodeExecution.changeset(%NodeExecution{}, attrs), :insert) do
           {:ok, node_exec} ->
             ExecutionState.put_node_execution(execution.id, node_id, node_exec)
+            NodeExecutionBuffer.record(node_exec)
             ExecutionPubSub.broadcast_node_completed(execution, node_exec)
 
             Logger.info("Node completed: #{node_name}",
@@ -481,7 +488,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
               node_id: node_id
             )
 
-          {:error, _} ->
+          {:error, _changeset} ->
             :ok
         end
     end
