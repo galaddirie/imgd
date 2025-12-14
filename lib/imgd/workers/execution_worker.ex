@@ -2,12 +2,33 @@ defmodule Imgd.Workers.ExecutionWorker do
   @moduledoc """
   Oban worker for executing workflows.
 
-  This worker is the entry point for all workflow executions. It:
+  ## Role in Architecture
 
-  1. Extracts OpenTelemetry trace context from job args
-  2. Loads the execution with preloaded workflow version
-  3. Delegates to WorkflowRunner.run/1
-  4. Returns appropriate Oban result
+  This is the **job queue entry point** — a thin wrapper that handles async/background job concerns:
+
+  - Receives Oban jobs from the queue
+  - Extracts and restores OpenTelemetry trace context for distributed tracing
+  - Loads the Execution record with preloaded associations
+  - Guards against re-running terminal executions (completed/failed/cancelled/timeout)
+  - Delegates actual workflow execution to `WorkflowRunner.run/1`
+  - Returns Oban-compatible results (:ok, {:error, ...}, {:cancel, ...})
+
+  ## Separation of Concerns
+
+  Unlike `WorkflowRunner` which is the core execution engine, this worker focuses on:
+
+  | Concern | ExecutionWorker | WorkflowRunner |
+  |---------|-----------------|----------------|
+  | Job queuing/retries | ✓ | |
+  | Trace context propagation | ✓ | |
+  | Loading records from DB | ✓ | |
+  | Execution state machine | | ✓ |
+  | Timeout handling | | ✓ |
+  | PubSub broadcasts | | ✓ |
+  | Runic integration | | ✓ |
+
+  This separation allows `WorkflowRunner.run/1` to be called directly for synchronous execution
+  (like in tests or preview mode) while this worker provides the production async execution path.
 
   ## Job Arguments
 

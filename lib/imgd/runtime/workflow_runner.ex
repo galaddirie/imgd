@@ -2,6 +2,44 @@ defmodule Imgd.Runtime.WorkflowRunner do
   @moduledoc """
   Orchestrates workflow execution using Runic with real-time event broadcasting.
 
+  ## Role in Architecture
+
+  This is the **core execution engine** that actually runs workflows:
+
+  - Manages execution lifecycle (pending → running → completed/failed/timeout)
+  - Builds a Runic workflow from the WorkflowVersion via WorkflowBuilder
+  - Executes with timeout handling using Task.yield/Task.shutdown
+  - Updates execution records in the database
+  - Broadcasts PubSub events for real-time UI updates
+  - Handles error formatting and context accumulation
+
+  ## Separation of Concerns
+
+  Unlike `ExecutionWorker` which handles job queuing, this module focuses on the execution logic itself.
+  This separation allows `WorkflowRunner.run/1` to be called directly for synchronous execution
+  (like in tests or preview mode) without needing Oban, while `ExecutionWorker` provides the production
+  async execution path.
+
+  | Concern | ExecutionWorker | WorkflowRunner |
+  |---------|-----------------|----------------|
+  | Job queuing/retries | ✓ | |
+  | Trace context propagation | ✓ | |
+  | Loading records from DB | ✓ | |
+  | Execution state machine | | ✓ |
+  | Timeout handling | | ✓ |
+  | PubSub broadcasts | | ✓ |
+  | Runic integration | | ✓ |
+
+  ## Execution Flow
+
+  ```
+  User clicks "Run" → Executions.start_and_enqueue_execution/3 → Creates Execution + Oban job
+  ↓
+  Oban picks up job → ExecutionWorker.perform/1 (loads data, handles Oban lifecycle)
+  ↓
+  WorkflowRunner.run/1 (actual execution engine) → WorkflowBuilder.build/3 → Runic execution
+  ```
+
   This module:
   - Manages execution lifecycle (pending → running → completed/failed)
   - Delegates node-level tracking to Runic hooks installed by WorkflowBuilder
