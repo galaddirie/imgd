@@ -10,8 +10,7 @@ defmodule Imgd.Executions.Execution do
              :__meta__,
              :workflow,
              :workflow_version,
-             :triggered_by_user,
-             :node_executions
+             :triggered_by_user
            ]}
   use Imgd.Schema
   import Imgd.ChangesetHelpers

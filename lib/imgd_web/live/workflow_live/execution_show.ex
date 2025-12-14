@@ -8,6 +8,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   use ImgdWeb, :live_view
 
   alias Imgd.Executions
+  alias Imgd.Executions.NodeExecution
   alias ImgdWeb.WorkflowLive.Components.TracePanel
   import ImgdWeb.Formatters, except: [trigger_label: 1]
 
@@ -53,7 +54,7 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
 
   defp fetch_execution(scope, workflow_id, execution_id) do
     execution =
-      Executions.get_execution!(scope, execution_id, preload: [:workflow, :workflow_version])
+      Executions.get_execution!(scope, execution_id, preload: [:workflow, :workflow_version, :node_executions])
 
     if execution.workflow_id == workflow_id do
       {:ok, execution}
@@ -66,7 +67,13 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
 
   defp decorate_steps(steps, workflow) do
     Enum.map(steps, fn step ->
-      Map.put(step, :step_name, get_node_name(workflow, step.node_id))
+      node_name = get_node_name(workflow, step.node_id)
+
+      step
+      |> Map.put(:step_name, node_name)
+      |> Map.put(:node_name, node_name)
+      |> Map.put(:type_id, step.node_type_id)
+      |> Map.put(:duration_ms, NodeExecution.duration_ms(step))
     end)
   end
 
