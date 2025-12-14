@@ -202,7 +202,8 @@ defmodule Imgd.Nodes.Registry do
       Imgd.Nodes.Executors.Transform,
       Imgd.Nodes.Executors.Format,
       Imgd.Nodes.Executors.Debug,
-      Imgd.Nodes.Executors.Math
+      Imgd.Nodes.Executors.Math,
+      Imgd.Nodes.Executors.Wait
     ]
   end
 

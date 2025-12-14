@@ -73,6 +73,21 @@ defmodule Imgd.Workflows do
   end
 
   @doc """
+  Fetches a workflow by name belonging to the given scope or returns nil.
+  If multiple workflows exist with the same name, returns the most recently inserted one.
+  """
+  def get_workflow_by_name(%Scope{} = scope, name, opts \\ []) do
+    user_id = scope_user_id!(scope)
+
+    Workflow
+    |> where([w], w.user_id == ^user_id and w.name == ^name)
+    |> order_by([w], desc: w.inserted_at)
+    |> limit(1)
+    |> maybe_preload(opts)
+    |> Repo.one()
+  end
+
+  @doc """
   Returns a changeset for tracking workflow changes.
   """
   def change_workflow(%Workflow{} = workflow, attrs \\ %{}) do
@@ -145,6 +160,18 @@ defmodule Imgd.Workflows do
 
       create_workflow(scope, clone_attrs)
     end
+  end
+
+  @doc """
+  Checks if a workflow's content has changed compared to its published version.
+
+  Returns true if the workflow needs to be updated and republished.
+  """
+  def workflow_content_changed?(%Workflow{} = workflow) do
+    current_hash = compute_source_hash(workflow)
+    published_hash = get_published_source_hash(workflow)
+
+    current_hash != published_hash
   end
 
   @doc """
@@ -352,7 +379,7 @@ defmodule Imgd.Workflows do
     end
   end
 
-  defp compute_source_hash(%Workflow{} = workflow) do
+  def compute_source_hash(%Workflow{} = workflow) do
     payload = %{
       nodes: normalize_embeds(workflow.nodes),
       connections: normalize_embeds(workflow.connections),
@@ -381,4 +408,15 @@ defmodule Imgd.Workflows do
   end
 
   defp normalize_embed(other), do: other
+
+  def get_published_source_hash(%Workflow{} = workflow) do
+    if workflow.published_version_id do
+      case Repo.get(WorkflowVersion, workflow.published_version_id) do
+        nil -> nil
+        version -> version.source_hash
+      end
+    else
+      nil
+    end
+  end
 end
