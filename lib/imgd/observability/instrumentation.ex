@@ -2,8 +2,8 @@ defmodule Imgd.Observability.Instrumentation do
   @moduledoc """
   Unified instrumentation API for the workflow engine.
 
-  Combines OpenTelemetry tracing, Telemetry events (for PromEx metrics),
-  and structured logging into a single coherent interface.
+  Combines OpenTelemetry tracing and Telemetry events (for PromEx metrics)
+  into a single coherent interface.
 
   ## Usage in Runtime
 
@@ -14,12 +14,11 @@ defmodule Imgd.Observability.Instrumentation do
         end)
       end
 
-      def execute_node(execution, node, input) do
-        Instrumentation.trace_node(execution, node, fn ->
-          # Node execution logic
-          {:ok, output}
-        end)
-      end
+  ## Node Tracing
+
+  Node-level tracing is handled via Runic hooks installed by WorkflowBuilder.
+  This ensures all node lifecycle events (start/complete/fail) are tracked
+  consistently with proper timing, PubSub broadcasts, and telemetry.
 
   ## Context Propagation
 
@@ -62,8 +61,8 @@ defmodule Imgd.Observability.Instrumentation do
       ctx = build_trace_context(execution)
       attach_logger_metadata(ctx)
 
+      # Only emit telemetry events here - PubSub and logging happens in WorkflowRunner
       emit_execution_start(execution)
-      log_execution_event(:started, execution)
 
       try do
         result = fun.(ctx)
@@ -72,13 +71,11 @@ defmodule Imgd.Observability.Instrumentation do
         case result do
           {:ok, _} = success ->
             emit_execution_stop(execution, :completed, duration_ms)
-            log_execution_event(:completed, execution, duration_ms: duration_ms)
             success
 
           {:error, reason} = error ->
             record_span_error(reason)
             emit_execution_stop(execution, :failed, duration_ms)
-            log_execution_event(:failed, execution, duration_ms: duration_ms, error: reason)
             error
         end
       rescue
@@ -86,7 +83,6 @@ defmodule Imgd.Observability.Instrumentation do
           duration_ms = monotonic_duration_ms(start_time)
           record_span_exception(e, __STACKTRACE__)
           emit_execution_exception(execution, e, duration_ms)
-          log_execution_event(:exception, execution, duration_ms: duration_ms, error: e)
           reraise e, __STACKTRACE__
       end
     end
@@ -101,66 +97,6 @@ defmodule Imgd.Observability.Instrumentation do
     ctx = build_trace_context(execution)
     attach_logger_metadata(ctx)
     fun.(ctx)
-  end
-
-  # ============================================================================
-  # Node Tracing
-  # ============================================================================
-
-  @doc """
-  Traces a single node execution within a workflow.
-
-  Creates a child span under the current execution span.
-  Automatically records queuing time if `queued_at` is provided in opts.
-
-  ## Options
-    * `:queued_at` - DateTime when the node was queued (for queue time metrics)
-    * `:attempt` - Current retry attempt number (default: 1)
-    * `:input` - Input data for the node (included in span attributes)
-  """
-  def trace_node(%Execution{} = execution, node_info, opts \\ [], fun) do
-    span_name = "node.execute.#{node_info.type_id}"
-    start_time = System.monotonic_time()
-    attempt = Keyword.get(opts, :attempt, 1)
-
-    attrs = node_span_attributes(execution, node_info, opts)
-
-    Tracer.with_span span_name, %{attributes: attrs} do
-      emit_node_start(execution, node_info, opts)
-      log_node_event(:started, execution, node_info, attempt: attempt)
-
-      try do
-        result = fun.()
-        duration_ms = monotonic_duration_ms(start_time)
-
-        case result do
-          {:ok, output} = success ->
-            Tracer.set_attribute(:output_keys, output |> Map.keys() |> inspect())
-            emit_node_stop(execution, node_info, :completed, duration_ms, opts)
-            log_node_event(:completed, execution, node_info, duration_ms: duration_ms)
-            success
-
-          {:error, reason} = error ->
-            record_span_error(reason)
-            emit_node_stop(execution, node_info, :failed, duration_ms, opts)
-            log_node_event(:failed, execution, node_info, duration_ms: duration_ms, error: reason)
-            error
-
-          {:skip, reason} ->
-            Tracer.set_attribute(:skip_reason, inspect(reason))
-            emit_node_stop(execution, node_info, :skipped, duration_ms, opts)
-            log_node_event(:skipped, execution, node_info, reason: reason)
-            {:skip, reason}
-        end
-      rescue
-        e ->
-          duration_ms = monotonic_duration_ms(start_time)
-          record_span_exception(e, __STACKTRACE__)
-          emit_node_exception(execution, node_info, e, duration_ms, opts)
-          log_node_event(:exception, execution, node_info, duration_ms: duration_ms, error: e)
-          reraise e, __STACKTRACE__
-      end
-    end
   end
 
   @doc """
@@ -301,84 +237,6 @@ defmodule Imgd.Observability.Instrumentation do
     )
   end
 
-  defp emit_node_start(%Execution{} = execution, node_info, opts) do
-    queue_time_ms = calculate_queue_time(opts)
-
-    :telemetry.execute(
-      [:imgd, :engine, :node, :start],
-      %{system_time: System.system_time(), queue_time_ms: queue_time_ms},
-      node_metadata(execution, node_info, opts)
-    )
-  end
-
-  defp emit_node_stop(%Execution{} = execution, node_info, status, duration_ms, opts) do
-    :telemetry.execute(
-      [:imgd, :engine, :node, :stop],
-      %{duration_ms: duration_ms},
-      node_metadata(execution, node_info, opts) |> Map.put(:status, status)
-    )
-  end
-
-  defp emit_node_exception(%Execution{} = execution, node_info, exception, duration_ms, opts) do
-    :telemetry.execute(
-      [:imgd, :engine, :node, :exception],
-      %{duration_ms: duration_ms},
-      node_metadata(execution, node_info, opts) |> Map.put(:exception, exception)
-    )
-  end
-
-  # ============================================================================
-  # Structured Logging
-  # ============================================================================
-
-  defp log_execution_event(event, %Execution{} = execution, extra \\ []) do
-    level = log_level_for_event(event)
-    message = execution_event_message(event)
-
-    metadata =
-      [
-        event: "execution.#{event}",
-        execution_id: execution.id,
-        workflow_id: execution.workflow_id,
-        workflow_version_id: execution.workflow_version_id,
-        trigger_type: Execution.trigger_type(execution)
-      ] ++ extra
-
-    Logger.log(level, message, metadata)
-  end
-
-  defp log_node_event(event, %Execution{} = execution, node_info, extra) do
-    level = log_level_for_event(event)
-    message = node_event_message(event, node_info)
-
-    metadata =
-      [
-        event: "node.#{event}",
-        execution_id: execution.id,
-        workflow_id: execution.workflow_id,
-        node_id: node_info.id,
-        node_type_id: node_info.type_id,
-        node_name: Map.get(node_info, :name, node_info.id)
-      ] ++ extra
-
-    Logger.log(level, message, metadata)
-  end
-
-  defp log_level_for_event(:exception), do: :error
-  defp log_level_for_event(:failed), do: :warning
-  defp log_level_for_event(_), do: :info
-
-  defp execution_event_message(:started), do: "Workflow execution started"
-  defp execution_event_message(:completed), do: "Workflow execution completed"
-  defp execution_event_message(:failed), do: "Workflow execution failed"
-  defp execution_event_message(:exception), do: "Workflow execution raised exception"
-
-  defp node_event_message(:started, node), do: "Node #{node.id} started"
-  defp node_event_message(:completed, node), do: "Node #{node.id} completed"
-  defp node_event_message(:failed, node), do: "Node #{node.id} failed"
-  defp node_event_message(:skipped, node), do: "Node #{node.id} skipped"
-  defp node_event_message(:exception, node), do: "Node #{node.id} raised exception"
-
   # ============================================================================
   # Private Helpers
   # ============================================================================
@@ -417,22 +275,6 @@ defmodule Imgd.Observability.Instrumentation do
     }
   end
 
-  defp node_span_attributes(%Execution{} = execution, node_info, opts) do
-    base = %{
-      "workflow.id": execution.workflow_id,
-      "execution.id": execution.id,
-      "node.id": node_info.id,
-      "node.type_id": node_info.type_id,
-      "node.name": Map.get(node_info, :name, node_info.id),
-      "node.attempt": Keyword.get(opts, :attempt, 1)
-    }
-
-    case Keyword.get(opts, :input) do
-      nil -> base
-      input -> Map.put(base, "node.input_keys", input |> Map.keys() |> inspect())
-    end
-  end
-
   defp execution_metadata(%Execution{} = execution) do
     %{
       execution_id: execution.id,
@@ -443,29 +285,8 @@ defmodule Imgd.Observability.Instrumentation do
     }
   end
 
-  defp node_metadata(%Execution{} = execution, node_info, opts) do
-    %{
-      execution_id: execution.id,
-      workflow_id: execution.workflow_id,
-      workflow_version_id: execution.workflow_version_id,
-      node_id: node_info.id,
-      node_type_id: node_info.type_id,
-      attempt: Keyword.get(opts, :attempt, 1)
-    }
-  end
-
   defp get_version_tag(%Execution{workflow_version: %{version_tag: tag}}), do: tag
   defp get_version_tag(_), do: nil
-
-  defp calculate_queue_time(opts) do
-    case Keyword.get(opts, :queued_at) do
-      %DateTime{} = queued_at ->
-        DateTime.diff(DateTime.utc_now(), queued_at, :millisecond)
-
-      _ ->
-        nil
-    end
-  end
 
   defp monotonic_duration_ms(start_time) do
     (System.monotonic_time() - start_time)

@@ -8,26 +8,34 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   - Creating Runic steps that wrap NodeExecutor.execute/3 calls
   - Wiring up data flow via Runic's parent/child dependencies
   - Handling fan-out/fan-in for parallel branches
-  - Installing observability hooks
+  - Installing observability hooks for real-time node tracking
 
-  ## Usage
+  ## Hooks and Real-Time Events
 
-      {:ok, runic_workflow} = WorkflowBuilder.build(workflow_version, context)
+  Following the Runic hook pattern, we install before/after hooks on each step
+  to track node execution lifecycle. These hooks:
 
-  The resulting Runic workflow can then be executed via:
+  1. Create/update NodeExecution records in the database
+  2. Broadcast PubSub events for real-time UI updates
+  3. Emit telemetry events for metrics/monitoring
+  4. Store timing information for duration calculations
 
-      workflow = Runic.Workflow.react_until_satisfied(runic_workflow, trigger_input)
+  The execution context is captured in a closure at build time so hooks
+  have access to the execution record for database/PubSub operations.
   """
 
   require Runic
+  require Logger
+
   alias Runic.Workflow
   alias Runic.Workflow.{Components, Step}
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Workflows.Embeds.Node
-  alias Imgd.Executions.Context
+  alias Imgd.Executions.{Context, Execution, NodeExecution}
+  alias Imgd.Executions.PubSub, as: ExecutionPubSub
   alias Imgd.Runtime.NodeExecutor
   alias Imgd.Runtime.Expression.Evaluator
-  # Instrumentation is used via telemetry events
+  alias Imgd.Repo
 
   @type build_result :: {:ok, Workflow.t()} | {:error, term()}
 
@@ -38,17 +46,28 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
   - `version` - The WorkflowVersion containing nodes and connections
   - `context` - The execution context for resolving expressions and variables
+  - `execution` - The Execution record (for hooks to broadcast events)
 
   ## Returns
 
   - `{:ok, workflow}` - Successfully built Runic workflow
   - `{:error, reason}` - Failed to build workflow
   """
+  @spec build(WorkflowVersion.t(), Context.t(), Execution.t()) :: build_result()
+  def build(%WorkflowVersion{} = version, %Context{} = context, %Execution{} = execution) do
+    with {:ok, graph} <- build_dag(version.nodes, version.connections),
+         {:ok, sorted_nodes} <- topological_sort(graph, version.nodes),
+         {:ok, workflow} <- build_runic_workflow(sorted_nodes, graph, context, version, execution) do
+      {:ok, workflow}
+    end
+  end
+
+  # Legacy 2-arity version for backwards compatibility (no hooks)
   @spec build(WorkflowVersion.t(), Context.t()) :: build_result()
   def build(%WorkflowVersion{} = version, %Context{} = context) do
     with {:ok, graph} <- build_dag(version.nodes, version.connections),
          {:ok, sorted_nodes} <- topological_sort(graph, version.nodes),
-         {:ok, workflow} <- build_runic_workflow(sorted_nodes, graph, context, version) do
+         {:ok, workflow} <- build_runic_workflow_simple(sorted_nodes, graph, context, version) do
       {:ok, workflow}
     end
   end
@@ -70,11 +89,8 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
   @doc false
   def build_dag(nodes, connections) do
-    # Build adjacency list: %{source_node_id => [target_node_ids]}
-    # And reverse adjacency: %{target_node_id => [source_node_ids]}
     node_ids = MapSet.new(nodes, & &1.id)
 
-    # Validate all connections reference existing nodes
     invalid_connections =
       Enum.filter(connections, fn conn ->
         not MapSet.member?(node_ids, conn.source_node_id) or
@@ -94,9 +110,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
           Map.update(acc, conn.target_node_id, [conn.source_node_id], &[conn.source_node_id | &1])
         end)
 
-      # Index connections by source for output routing
-      connections_by_source =
-        Enum.group_by(connections, & &1.source_node_id)
+      connections_by_source = Enum.group_by(connections, & &1.source_node_id)
 
       {:ok,
        %{
@@ -113,14 +127,12 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   def topological_sort(graph, nodes) do
     node_map = Map.new(nodes, &{&1.id, &1})
 
-    # Calculate in-degrees
     in_degrees =
       Enum.reduce(nodes, %{}, fn node, acc ->
         parents = Map.get(graph.reverse_adjacency, node.id, [])
         Map.put(acc, node.id, length(parents))
       end)
 
-    # Find nodes with no incoming edges (roots/triggers)
     queue =
       in_degrees
       |> Enum.filter(fn {_id, degree} -> degree == 0 end)
@@ -130,7 +142,6 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   end
 
   defp do_topological_sort([], in_degrees, _adjacency, _node_map, sorted) do
-    # Check for cycles - if any nodes still have in_degree > 0, there's a cycle
     remaining = Enum.filter(in_degrees, fn {_id, degree} -> degree > 0 end)
 
     if remaining == [] do
@@ -144,7 +155,6 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     node = Map.fetch!(node_map, node_id)
     children = Map.get(adjacency, node_id, [])
 
-    # Decrement in-degree for all children
     {new_in_degrees, new_queue_additions} =
       Enum.reduce(children, {in_degrees, []}, fn child_id, {degrees, additions} ->
         new_degree = Map.get(degrees, child_id, 0) - 1
@@ -157,7 +167,6 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         end
       end)
 
-    # Remove processed node from in_degrees
     new_in_degrees = Map.delete(new_in_degrees, node_id)
 
     do_topological_sort(
@@ -170,18 +179,15 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   end
 
   # ============================================================================
-  # Runic Workflow Construction
+  # Runic Workflow Construction (with hooks)
   # ============================================================================
 
-  defp build_runic_workflow(sorted_nodes, graph, context, version) do
-    # Create base workflow with name
+  defp build_runic_workflow(sorted_nodes, graph, context, version, execution) do
     base_workflow =
       Runic.workflow(name: "workflow_#{version.workflow_id}_v#{version.version_tag}")
 
-    # Build a map of node_id -> node_type_id for telemetry
-    node_type_map = Map.new(sorted_nodes, &{&1.id, &1.type_id})
+    node_info_map = Map.new(sorted_nodes, &{&1.id, %{type_id: &1.type_id, name: &1.name}})
 
-    # Build a map of node_id -> Runic step for wiring dependencies
     {workflow, step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
         step = create_runic_step(node, context)
@@ -190,16 +196,13 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         wf =
           case parents do
             [] ->
-              # Root node - add directly to workflow
               Workflow.add_step(wf, step)
 
             [single_parent] ->
-              # Single parent - add as child
               parent_step = Map.fetch!(steps, single_parent)
               Workflow.add_step(wf, parent_step, step)
 
             multiple_parents ->
-              # Multiple parents - need a Join
               parent_steps = Enum.map(multiple_parents, &Map.fetch!(steps, &1))
               add_with_join(wf, parent_steps, step)
           end
@@ -207,8 +210,41 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         {wf, Map.put(steps, node.id, step)}
       end)
 
-    # Install observability hooks with node type information
-    workflow = install_hooks(workflow, step_map, node_type_map, context)
+    # Install hooks that handle all node-level observability
+    workflow = install_tracking_hooks(workflow, step_map, node_info_map, execution)
+
+    {:ok, workflow}
+  rescue
+    e ->
+      {:error, {:build_failed, Exception.message(e)}}
+  end
+
+  # Simple version without hooks (for testing/preview)
+  defp build_runic_workflow_simple(sorted_nodes, graph, context, version) do
+    base_workflow =
+      Runic.workflow(name: "workflow_#{version.workflow_id}_v#{version.version_tag}")
+
+    {workflow, _step_map} =
+      Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
+        step = create_runic_step(node, context)
+        parents = Map.get(graph.reverse_adjacency, node.id, [])
+
+        wf =
+          case parents do
+            [] ->
+              Workflow.add_step(wf, step)
+
+            [single_parent] ->
+              parent_step = Map.fetch!(steps, single_parent)
+              Workflow.add_step(wf, parent_step, step)
+
+            multiple_parents ->
+              parent_steps = Enum.map(multiple_parents, &Map.fetch!(steps, &1))
+              add_with_join(wf, parent_steps, step)
+          end
+
+        {wf, Map.put(steps, node.id, step)}
+      end)
 
     {:ok, workflow}
   rescue
@@ -217,11 +253,6 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   end
 
   defp create_runic_step(%Node{} = node, %Context{} = context) do
-    # Create a step that wraps the NodeExecutor
-    # We must provide a stable, per-node hash because Runic uses the step hash
-    # as the graph vertex identifier. Relying on the macro-generated hash would
-    # produce identical hashes for every node (all share the same anonymous
-    # function AST), collapsing the graph into a single vertex.
     work = fn input -> execute_node(node, input, context) end
 
     Step.new(
@@ -232,10 +263,8 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   end
 
   defp execute_node(%Node{} = node, input, %Context{} = context) do
-    # Update context with current node info
     ctx = Context.set_current_node(context, node.id, input)
 
-    # Resolve expressions in config
     case Evaluator.resolve_config(node.config, ctx) do
       {:ok, resolved_config} ->
         execute_with_config(node, resolved_config, input, ctx)
@@ -249,30 +278,28 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   end
 
   defp execute_with_config(%Node{} = node, config, input, ctx) do
-    # Execute via NodeExecutor behaviour with error handling
     try do
       case NodeExecutor.execute(node.type_id, config, input, ctx) do
         {:ok, output} ->
+          # Store output in process dictionary for context building
+          node_outputs = Process.get(:imgd_node_outputs, %{})
+          Process.put(:imgd_node_outputs, Map.put(node_outputs, node.id, output))
           output
 
         {:error, reason} ->
-          # Wrap error to propagate through Runic
           raise Imgd.Runtime.NodeExecutionError,
             node_id: node.id,
             node_type_id: node.type_id,
             reason: reason
 
         {:skip, reason} ->
-          # Return a skip marker that the runner can detect
           {:__skipped__, node.id, reason}
       end
     rescue
       e in Imgd.Runtime.NodeExecutionError ->
-        # Re-raise NodeExecutionError as-is
         reraise e, __STACKTRACE__
 
       e ->
-        # Wrap any other exception
         raise Imgd.Runtime.NodeExecutionError,
           node_id: node.id,
           node_type_id: node.type_id,
@@ -281,43 +308,94 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   end
 
   defp add_with_join(workflow, parent_steps, child_step) do
-    # Runic handles joins implicitly when a step has multiple parents
-    # We add the step with all parents listed
     Enum.reduce(parent_steps, workflow, fn parent, wf ->
       Workflow.add_step(wf, parent, child_step)
     end)
   end
 
   # ============================================================================
-  # Observability Hooks
+  # Real-Time Tracking Hooks
+  #
+  # Following the Runic guide, we install before/after hooks for each step.
+  # The execution is captured in the closure so hooks can access it.
   # ============================================================================
 
-  defp install_hooks(workflow, step_map, node_type_map, context) do
-    # Install before/after hooks for each step to emit telemetry
+  defp install_tracking_hooks(workflow, step_map, node_info_map, execution) do
     Enum.reduce(step_map, workflow, fn {node_id, _step}, wf ->
       step_name = String.to_atom(node_id)
-      node_type_id = Map.get(node_type_map, node_id, "unknown")
+      node_info = Map.get(node_info_map, node_id, %{type_id: "unknown", name: node_id})
 
       wf
-      |> Workflow.attach_before_hook(step_name, fn _step, workflow, _fact ->
-        emit_node_started(context, node_id, node_type_id)
-        workflow
-      end)
-      |> Workflow.attach_after_hook(step_name, fn _step, workflow, _fact ->
-        emit_node_completed(context, node_id, node_type_id)
-        workflow
-      end)
+      |> Workflow.attach_before_hook(step_name, create_before_hook(execution, node_id, node_info))
+      |> Workflow.attach_after_hook(step_name, create_after_hook(execution, node_id, node_info))
     end)
   end
 
-  defp emit_node_started(context, node_id, node_type_id) do
+  # Create a before hook closure that captures the execution
+  defp create_before_hook(execution, node_id, node_info) do
+    fn _step, workflow, fact ->
+      handle_node_started(execution, node_id, node_info, fact)
+      workflow
+    end
+  end
+
+  # Create an after hook closure that captures the execution
+  defp create_after_hook(execution, node_id, node_info) do
+    fn _step, workflow, fact ->
+      handle_node_completed(execution, node_id, node_info, fact)
+      workflow
+    end
+  end
+
+  defp handle_node_started(execution, node_id, node_info, fact) do
+    node_type_id = node_info.type_id
+    node_name = node_info.name
+
+    # Record start time in process dictionary for duration calculation
+    timings = Process.get(:imgd_node_timings, %{})
+    Process.put(:imgd_node_timings, Map.put(timings, node_id, System.monotonic_time(:millisecond)))
+
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    input_data = wrap_for_db(fact.value)
+
+    # Create NodeExecution record in database
+    attrs = %{
+      execution_id: execution.id,
+      node_id: node_id,
+      node_type_id: node_type_id,
+      status: :running,
+      input_data: input_data,
+      started_at: now,
+      queued_at: now,
+      attempt: 1
+    }
+
+    case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
+      {:ok, node_exec} ->
+        # Broadcast PubSub event for real-time UI updates
+        ExecutionPubSub.broadcast_node_started(execution, node_exec)
+
+        Logger.info("Node started: #{node_name}",
+          node_type: node_type_id,
+          node_id: node_id
+        )
+
+      {:error, changeset} ->
+        Logger.warning("Failed to persist node execution start",
+          execution_id: execution.id,
+          node_id: node_id,
+          errors: inspect(changeset.errors)
+        )
+    end
+
+    # Emit telemetry for metrics
     :telemetry.execute(
       [:imgd, :engine, :node, :start],
       %{system_time: System.system_time(), queue_time_ms: nil},
       %{
-        execution_id: context.execution_id,
-        workflow_id: context.workflow_id,
-        workflow_version_id: context.workflow_version_id,
+        execution_id: execution.id,
+        workflow_id: execution.workflow_id,
+        workflow_version_id: execution.workflow_version_id,
         node_id: node_id,
         node_type_id: node_type_id,
         attempt: 1
@@ -325,14 +403,82 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     )
   end
 
-  defp emit_node_completed(context, node_id, node_type_id) do
+  defp handle_node_completed(execution, node_id, node_info, fact) do
+    node_type_id = node_info.type_id
+    node_name = node_info.name
+
+    # Calculate duration from stored start time
+    timings = Process.get(:imgd_node_timings, %{})
+    start_time = Map.get(timings, node_id)
+    duration_ms = if start_time, do: System.monotonic_time(:millisecond) - start_time, else: 0
+
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    output_data = wrap_for_db(fact.value)
+
+    # Find and update the running NodeExecution record
+    case find_running_node_execution(execution.id, node_id) do
+      %NodeExecution{} = node_exec ->
+        case Repo.update(
+               NodeExecution.changeset(node_exec, %{
+                 status: :completed,
+                 output_data: output_data,
+                 completed_at: now
+               })
+             ) do
+          {:ok, updated} ->
+            ExecutionPubSub.broadcast_node_completed(execution, updated)
+
+            Logger.info("Node completed: #{node_name}",
+              duration_ms: duration_ms,
+              node_id: node_id
+            )
+
+          {:error, changeset} ->
+            Logger.warning("Failed to update node execution",
+              execution_id: execution.id,
+              node_id: node_id,
+              errors: inspect(changeset.errors)
+            )
+        end
+
+      nil ->
+        # Node execution wasn't created in before hook (shouldn't happen, but handle gracefully)
+        started_at = DateTime.add(now, -duration_ms, :millisecond)
+
+        attrs = %{
+          execution_id: execution.id,
+          node_id: node_id,
+          node_type_id: node_type_id,
+          status: :completed,
+          output_data: output_data,
+          started_at: started_at,
+          completed_at: now,
+          queued_at: started_at,
+          attempt: 1
+        }
+
+        case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
+          {:ok, node_exec} ->
+            ExecutionPubSub.broadcast_node_completed(execution, node_exec)
+
+            Logger.info("Node completed: #{node_name}",
+              duration_ms: duration_ms,
+              node_id: node_id
+            )
+
+          {:error, _} ->
+            :ok
+        end
+    end
+
+    # Emit telemetry for metrics
     :telemetry.execute(
       [:imgd, :engine, :node, :stop],
-      %{duration_ms: 0},
+      %{duration_ms: duration_ms},
       %{
-        execution_id: context.execution_id,
-        workflow_id: context.workflow_id,
-        workflow_version_id: context.workflow_version_id,
+        execution_id: execution.id,
+        workflow_id: execution.workflow_id,
+        workflow_version_id: execution.workflow_version_id,
         node_id: node_id,
         node_type_id: node_type_id,
         attempt: 1,
@@ -340,6 +486,69 @@ defmodule Imgd.Runtime.WorkflowBuilder do
       }
     )
   end
+
+  defp find_running_node_execution(execution_id, node_id) do
+    import Ecto.Query
+
+    NodeExecution
+    |> where([n], n.execution_id == ^execution_id and n.node_id == ^node_id and n.status == :running)
+    |> order_by([n], desc: n.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  # ============================================================================
+  # Data Serialization Helpers
+  # ============================================================================
+
+  # Wraps node data in a map structure for database storage.
+  # NodeExecution schema requires input_data and output_data to be maps.
+  # If the value is already a map, use it directly; otherwise wrap in %{"value" => ...}
+  defp wrap_for_db(value) when is_map(value) and not is_struct(value) do
+    sanitize_map_for_json(value)
+  end
+
+  defp wrap_for_db(value) when is_struct(value) do
+    value |> Map.from_struct() |> wrap_for_db()
+  end
+
+  defp wrap_for_db(nil), do: nil
+
+  defp wrap_for_db(value) do
+    %{"value" => sanitize_value_for_json(value)}
+  end
+
+  # Recursively sanitize a map for JSON storage
+  defp sanitize_map_for_json(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {sanitize_key(k), sanitize_value_for_json(v)} end)
+  end
+
+  # Sanitize a value for JSON storage (handles nested structures)
+  defp sanitize_value_for_json(value) when is_struct(value),
+    do: value |> Map.from_struct() |> sanitize_map_for_json()
+
+  defp sanitize_value_for_json(value) when is_map(value),
+    do: sanitize_map_for_json(value)
+
+  defp sanitize_value_for_json(value) when is_list(value),
+    do: Enum.map(value, &sanitize_value_for_json/1)
+
+  defp sanitize_value_for_json(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> sanitize_value_for_json()
+
+  defp sanitize_value_for_json(value) when is_pid(value) or is_port(value) or is_reference(value),
+    do: inspect(value)
+
+  defp sanitize_value_for_json(value) when is_function(value), do: inspect(value)
+
+  defp sanitize_value_for_json(value) when is_atom(value) and not is_boolean(value) and not is_nil(value),
+    do: to_string(value)
+
+  defp sanitize_value_for_json(value), do: value
+
+  defp sanitize_key(key) when is_atom(key), do: to_string(key)
+  defp sanitize_key(key) when is_binary(key), do: key
+  defp sanitize_key(key), do: inspect(key)
 end
 
 defmodule Imgd.Runtime.NodeExecutionError do
