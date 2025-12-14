@@ -117,8 +117,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
                trigger: %{type: :manual, data: parsed.trigger_data},
                metadata: build_manual_metadata(parsed.demo_label)
              }) do
-        PubSub.subscribe_execution(execution.id)
-
         run_form = build_run_form(input_string)
 
         socket =
