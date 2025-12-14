@@ -101,12 +101,16 @@ defmodule Imgd.Runtime.WorkflowRunner do
   defp mark_completed(%Execution{} = execution, output, context) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
+    # Sanitize output and context to ensure JSON-encodable values
+    sanitized_output = sanitize_for_json(output)
+    sanitized_context = sanitize_for_json(context.node_outputs)
+
     case Repo.update(
            Execution.changeset(execution, %{
              status: :completed,
              completed_at: now,
-             output: output,
-             context: context.node_outputs
+             output: sanitized_output,
+             context: sanitized_context
            })
          ) do
       {:ok, execution} ->
@@ -432,9 +436,46 @@ defmodule Imgd.Runtime.WorkflowRunner do
     |> Map.new(fn {k, v} -> {to_string(k), serialize_value(v)} end)
   end
 
+  # Recursively serialize values to be JSON-encodable
   defp serialize_value(value) when is_atom(value), do: to_string(value)
-  defp serialize_value(value) when is_struct(value), do: Map.from_struct(value)
+
+  defp serialize_value(value) when is_struct(value) do
+    value
+    |> Map.from_struct()
+    |> serialize_value()
+  end
+
+  defp serialize_value(value) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> serialize_value()
+  end
+
+  defp serialize_value(value) when is_map(value) do
+    Map.new(value, fn {k, v} -> {serialize_key(k), serialize_value(v)} end)
+  end
+
+  defp serialize_value(value) when is_list(value) do
+    Enum.map(value, &serialize_value/1)
+  end
+
+  defp serialize_value(value) when is_pid(value) or is_port(value) or is_reference(value) do
+    inspect(value)
+  end
+
+  defp serialize_value(value) when is_function(value) do
+    inspect(value)
+  end
+
   defp serialize_value(value), do: value
+
+  # Ensure map keys are strings for JSON encoding
+  defp serialize_key(key) when is_atom(key), do: to_string(key)
+  defp serialize_key(key) when is_binary(key), do: key
+  defp serialize_key(key), do: inspect(key)
+
+  # Sanitize any value for JSON encoding (public alias for serialize_value)
+  defp sanitize_for_json(value), do: serialize_value(value)
 
   defp determine_output(productions) when is_list(productions) do
     case productions do

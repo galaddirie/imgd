@@ -1367,46 +1367,34 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       </div>
 
       <div class="p-4">
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
-              Execution ID
-            </p>
-            <p class="text-sm font-mono mt-1">
-              <.link navigate={~p"/workflows/#{@workflow.id}/executions/#{@execution.id}"} class="link link-primary">
-                {short_id(@execution.id)}
-              </.link>
-            </p>
-          </div>
-
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
-              Status
-            </p>
-            <p class="mt-1">
-              <span class={["badge badge-sm", execution_badge_class(@execution.status)]}>
-                {@execution.status}
-              </span>
-            </p>
-          </div>
-
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
-              Started
-            </p>
-            <p class="text-sm mt-1">
-              {formatted_timestamp(@execution.started_at)}
-            </p>
-          </div>
-
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
-              Duration
-            </p>
-            <p class="text-sm mt-1">
-              {format_duration(Execution.duration_ms(@execution))}
-            </p>
-          </div>
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <tbody>
+              <tr class="hover">
+                <td class="font-mono text-xs">{short_id(@execution.id)}</td>
+                <td>
+                  <span class={["badge badge-xs", execution_badge_class(@execution.status)]}>
+                    {@execution.status}
+                  </span>
+                </td>
+                <td class="text-xs text-base-content/60">
+                  {formatted_timestamp(@execution.started_at)}
+                </td>
+                <td class="text-xs">
+                  {format_duration(Execution.duration_ms(@execution))}
+                </td>
+                <td>
+                  <.link
+                    navigate={~p"/workflows/#{@execution.workflow_id}/executions/#{@execution.id}"}
+                    class="btn btn-ghost btn-xs"
+                    title="Inspect execution"
+                  >
+                    <.icon name="hero-eye" class="size-4" />
+                  </.link>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <%= if @execution.error do %>
