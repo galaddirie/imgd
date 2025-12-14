@@ -153,7 +153,9 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   @impl true
   def handle_event("select_demo_input", %{"id" => id}, socket) do
     case Enum.find(socket.assigns.demo_inputs, &(&1.id == id)) do
-      nil -> {:noreply, socket}
+      nil ->
+        {:noreply, socket}
+
       demo ->
         {:noreply,
          socket
@@ -313,7 +315,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     socket =
       socket
       |> assign(:node_states, node_states)
-      |> append_trace_log(:error, "Node failed: #{node_name}", format_error_for_log(payload.error))
+      |> append_trace_log(
+        :error,
+        "Node failed: #{node_name}",
+        format_error_for_log(payload.error)
+      )
 
     {:noreply, socket}
   end
@@ -337,14 +343,18 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   defp short_id(_), do: "-"
 
   defp format_error_for_log(nil), do: %{}
+
   defp format_error_for_log(error) when is_map(error) do
     error
     |> Map.take(["type", "message", "reason", :type, :message, :reason])
     |> Map.new(fn {k, v} -> {to_string(k), truncate_value(v)} end)
   end
+
   defp format_error_for_log(error), do: %{reason: truncate_value(inspect(error))}
 
-  defp truncate_value(v) when is_binary(v) and byte_size(v) > 100, do: String.slice(v, 0, 100) <> "..."
+  defp truncate_value(v) when is_binary(v) and byte_size(v) > 100,
+    do: String.slice(v, 0, 100) <> "..."
+
   defp truncate_value(v), do: v
 
   defp parse_input_payload(input_string, demo_inputs, raw_key) do
@@ -383,12 +393,16 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   end
 
   defp build_manual_metadata(nil), do: %{extras: %{"runner" => "manual_live"}}
-  defp build_manual_metadata(label), do: %{extras: %{"runner" => "manual_live", "demo_input" => label}}
+
+  defp build_manual_metadata(label),
+    do: %{extras: %{"runner" => "manual_live", "demo_input" => label}}
 
   defp build_run_form(payload, opts \\ [])
+
   defp build_run_form(payload, opts) when is_binary(payload) do
     to_form(%{"data" => payload}, Keyword.merge([as: :run], opts))
   end
+
   defp build_run_form(payload, opts), do: payload |> encode_payload() |> build_run_form(opts)
 
   defp workflow_demo_inputs(workflow) do
@@ -420,10 +434,12 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   defp normalize_demo_inputs(list) when is_list(list) do
     list |> Enum.map(&normalize_demo_input/1) |> Enum.filter(& &1)
   end
+
   defp normalize_demo_inputs(map) when is_map(map), do: [normalize_demo_input(map)]
   defp normalize_demo_inputs(_), do: []
 
   defp normalize_demo_input(nil), do: nil
+
   defp normalize_demo_input(map) when is_map(map) do
     label = Map.get(map, :label) || Map.get(map, "label") || "Preset"
     data = (Map.get(map, :data) || Map.get(map, "data") || %{}) |> normalize_demo_value()
@@ -451,11 +467,14 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   defp maybe_add_math_demo(acc, type_ids) do
     if Enum.any?(type_ids, &(&1 == "math")) do
-      [normalize_demo_input(%{
-        label: "Sample number input",
-        description: "Demonstrates scalar inputs for math workflows",
-        data: 21
-      }) | acc]
+      [
+        normalize_demo_input(%{
+          label: "Sample number input",
+          description: "Demonstrates scalar inputs for math workflows",
+          data: 21
+        })
+        | acc
+      ]
     else
       acc
     end
@@ -463,15 +482,18 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   defp maybe_add_template_demo(acc, type_ids) do
     if Enum.any?(type_ids, &(&1 == "format")) do
-      [normalize_demo_input(%{
-        label: "Profile payload",
-        description: "Ideal for format/transform demos",
-        data: %{
-          "name" => "Ada Lovelace",
-          "email" => "ada@example.com",
-          "company" => %{"name" => "Analytical Engines"}
-        }
-      }) | acc]
+      [
+        normalize_demo_input(%{
+          label: "Profile payload",
+          description: "Ideal for format/transform demos",
+          data: %{
+            "name" => "Ada Lovelace",
+            "email" => "ada@example.com",
+            "company" => %{"name" => "Analytical Engines"}
+          }
+        })
+        | acc
+      ]
     else
       acc
     end
@@ -479,15 +501,19 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   defp maybe_add_webhook_demo(acc, workflow) do
     if has_trigger_type?(workflow, :webhook) do
-      [normalize_demo_input(%{
-        label: "Webhook event",
-        description: "Mimics a webhook payload",
-        data: %{
-          "event" => "user.created",
-          "timestamp" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
-          "data" => %{"id" => "evt_123", "email" => "user@example.com"}
-        }
-      }) | acc]
+      [
+        normalize_demo_input(%{
+          label: "Webhook event",
+          description: "Mimics a webhook payload",
+          data: %{
+            "event" => "user.created",
+            "timestamp" =>
+              DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+            "data" => %{"id" => "evt_123", "email" => "user@example.com"}
+          }
+        })
+        | acc
+      ]
     else
       acc
     end
@@ -518,9 +544,12 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   defp maybe_reset_selected_demo(socket, data_string) do
     case socket.assigns.selected_demo do
-      nil -> socket
+      nil ->
+        socket
+
       demo ->
         encoded_demo = encode_payload(demo.data)
+
         if String.trim(encoded_demo) == String.trim(data_string) do
           socket
         else
@@ -534,6 +563,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     |> Enum.map(fn {k, v} -> {normalize_demo_key(k), normalize_demo_value(v)} end)
     |> Map.new()
   end
+
   defp normalize_demo_value(list) when is_list(list), do: Enum.map(list, &normalize_demo_value/1)
   defp normalize_demo_value(other), do: other
 
@@ -581,13 +611,15 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       |> Enum.flat_map(fn ne ->
         started =
           if ne.started_at do
-            [%{
-              id: "node-start-#{ne.id}",
-              level: :info,
-              message: "Node started: #{ne.node_id}",
-              timestamp: ne.started_at,
-              data: %{node_type: ne.node_type_id}
-            }]
+            [
+              %{
+                id: "node-start-#{ne.id}",
+                level: :info,
+                message: "Node started: #{ne.node_id}",
+                timestamp: ne.started_at,
+                data: %{node_type: ne.node_type_id}
+              }
+            ]
           else
             []
           end
@@ -595,21 +627,27 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         completed =
           case ne.status do
             :completed ->
-              [%{
-                id: "node-complete-#{ne.id}",
-                level: :success,
-                message: "Node completed: #{ne.node_id}",
-                timestamp: ne.completed_at,
-                data: %{duration_ms: NodeExecution.duration_ms(ne)}
-              }]
+              [
+                %{
+                  id: "node-complete-#{ne.id}",
+                  level: :success,
+                  message: "Node completed: #{ne.node_id}",
+                  timestamp: ne.completed_at,
+                  data: %{duration_ms: NodeExecution.duration_ms(ne)}
+                }
+              ]
+
             :failed ->
-              [%{
-                id: "node-fail-#{ne.id}",
-                level: :error,
-                message: "Node failed: #{ne.node_id}",
-                timestamp: ne.completed_at,
-                data: ne.error
-              }]
+              [
+                %{
+                  id: "node-fail-#{ne.id}",
+                  level: :error,
+                  message: "Node failed: #{ne.node_id}",
+                  timestamp: ne.completed_at,
+                  data: ne.error
+                }
+              ]
+
             _ ->
               []
           end
@@ -620,13 +658,16 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     end_log =
       if Execution.terminal?(execution) do
         level = if execution.status == :completed, do: :success, else: :error
-        [%{
-          id: "exec-end-#{execution.id}",
-          level: level,
-          message: "Execution #{execution.status}",
-          timestamp: execution.completed_at,
-          data: %{duration_ms: Execution.duration_ms(execution)}
-        }]
+
+        [
+          %{
+            id: "exec-end-#{execution.id}",
+            level: level,
+            message: "Execution #{execution.status}",
+            timestamp: execution.completed_at,
+            data: %{duration_ms: Execution.duration_ms(execution)}
+          }
+        ]
       else
         []
       end

@@ -193,7 +193,10 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <.icon name="hero-squares-2x2" class="size-4 opacity-70" /> Workflow Graph
         </h2>
         <div class="flex items-center gap-3">
-          <.execution_progress_indicator node_states={@node_states} node_count={length(@workflow.nodes || [])} />
+          <.execution_progress_indicator
+            node_states={@node_states}
+            node_count={length(@workflow.nodes || [])}
+          />
           <span class="text-xs text-base-content/60">
             {length(@workflow.nodes || [])} nodes
           </span>
@@ -216,19 +219,54 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             <%!-- Gradient definitions for edges --%>
             <defs>
               <%!-- Arrow markers for each status --%>
-              <marker id="arrowhead-default" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <marker
+                id="arrowhead-default"
+                markerWidth="10"
+                markerHeight="7"
+                refX="9"
+                refY="3.5"
+                orient="auto"
+              >
                 <polygon points="0 0, 10 3.5, 0 7" class="fill-base-300" />
               </marker>
-              <marker id="arrowhead-pending" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <marker
+                id="arrowhead-pending"
+                markerWidth="10"
+                markerHeight="7"
+                refX="9"
+                refY="3.5"
+                orient="auto"
+              >
                 <polygon points="0 0, 10 3.5, 0 7" class="fill-warning" />
               </marker>
-              <marker id="arrowhead-running" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <marker
+                id="arrowhead-running"
+                markerWidth="10"
+                markerHeight="7"
+                refX="9"
+                refY="3.5"
+                orient="auto"
+              >
                 <polygon points="0 0, 10 3.5, 0 7" class="fill-info" />
               </marker>
-              <marker id="arrowhead-completed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <marker
+                id="arrowhead-completed"
+                markerWidth="10"
+                markerHeight="7"
+                refX="9"
+                refY="3.5"
+                orient="auto"
+              >
                 <polygon points="0 0, 10 3.5, 0 7" class="fill-success" />
               </marker>
-              <marker id="arrowhead-failed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <marker
+                id="arrowhead-failed"
+                markerWidth="10"
+                markerHeight="7"
+                refX="9"
+                refY="3.5"
+                orient="auto"
+              >
                 <polygon points="0 0, 10 3.5, 0 7" class="fill-error" />
               </marker>
 
@@ -433,8 +471,18 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       <%!-- Duration display --%>
       <%= if @state[:duration_ms] do %>
         <g transform="translate(16, 62)">
-          <rect width={duration_bar_width(@state[:duration_ms])} height="4" rx="2" class="fill-success/40" />
-          <text x={duration_bar_width(@state[:duration_ms]) + 8} y="4" class="text-[10px] fill-current opacity-50" dominant-baseline="middle">
+          <rect
+            width={duration_bar_width(@state[:duration_ms])}
+            height="4"
+            rx="2"
+            class="fill-success/40"
+          />
+          <text
+            x={duration_bar_width(@state[:duration_ms]) + 8}
+            y="4"
+            class="text-[10px] fill-current opacity-50"
+            dominant-baseline="middle"
+          >
             {format_duration(@state[:duration_ms])}
           </text>
         </g>
@@ -460,7 +508,13 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       <%= if @state[:status] == :completed do %>
         <g transform="translate(172, 4)">
           <circle cx="12" cy="12" r="12" class="fill-success" />
-          <path d="M8 12 L11 15 L16 9" stroke="currentColor" stroke-width="2" fill="none" class="text-success-content" />
+          <path
+            d="M8 12 L11 15 L16 9"
+            stroke="currentColor"
+            stroke-width="2"
+            fill="none"
+            class="text-success-content"
+          />
         </g>
       <% end %>
     </g>
@@ -583,17 +637,24 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             <% end %>
 
             <%!-- Input Data --%>
-            <.data_section title="Input Data" data={state[:input_data]} empty_message="No input data captured" />
+            <.data_section
+              title="Input Data"
+              data={state[:input_data]}
+              empty_message="No input data captured"
+            />
 
             <%!-- Output Data --%>
-            <.data_section title="Output Data" data={state[:output_data]} empty_message="No output data yet" />
+            <.data_section
+              title="Output Data"
+              data={state[:output_data]}
+              empty_message="No output data yet"
+            />
 
             <%!-- Error --%>
             <%= if state[:error] do %>
               <div>
                 <p class="text-xs font-semibold uppercase tracking-wide text-error mb-2 flex items-center gap-1">
-                  <.icon name="hero-exclamation-triangle" class="size-3" />
-                  Error
+                  <.icon name="hero-exclamation-triangle" class="size-3" /> Error
                 </p>
                 <pre class="text-xs bg-error/10 text-error p-3 rounded-lg overflow-auto max-h-40 border border-error/20"><%=
                   format_json_preview(state[:error])
@@ -774,18 +835,26 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   defp trace_log_level_class(_), do: "text-info"
 
   defp format_log_timestamp(nil), do: "--:--:--"
-  defp format_log_timestamp(dt), do: Calendar.strftime(dt, "%H:%M:%S.") <> String.pad_leading("#{dt.microsecond |> elem(0) |> div(1000)}", 3, "0")
+
+  defp format_log_timestamp(dt),
+    do:
+      Calendar.strftime(dt, "%H:%M:%S.") <>
+        String.pad_leading("#{dt.microsecond |> elem(0) |> div(1000)}", 3, "0")
 
   defp format_log_data(data) when is_map(data) and map_size(data) == 0, do: ""
+
   defp format_log_data(data) when is_map(data) do
     data
     |> Enum.take(3)
     |> Enum.map(fn {k, v} -> "#{k}=#{format_log_value(v)}" end)
     |> Enum.join(" ")
   end
+
   defp format_log_data(_), do: ""
 
-  defp format_log_value(v) when is_binary(v) and byte_size(v) > 30, do: String.slice(v, 0, 30) <> "..."
+  defp format_log_value(v) when is_binary(v) and byte_size(v) > 30,
+    do: String.slice(v, 0, 30) <> "..."
+
   defp format_log_value(v) when is_map(v), do: "{...}"
   defp format_log_value(v) when is_list(v), do: "[#{length(v)} items]"
   defp format_log_value(v), do: inspect(v, limit: 3)
@@ -832,16 +901,14 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             navigate={~p"/workflows/#{@execution.workflow_id}/executions/#{@execution.id}"}
             class="btn btn-ghost btn-sm gap-2"
           >
-            <.icon name="hero-eye" class="size-4" />
-            View Full Details
+            <.icon name="hero-eye" class="size-4" /> View Full Details
           </.link>
         </div>
 
         <%= if @execution.error do %>
           <div class="mt-4 pt-4 border-t border-base-200">
             <p class="text-xs font-semibold uppercase tracking-wide text-error mb-2 flex items-center gap-1">
-              <.icon name="hero-exclamation-triangle" class="size-3" />
-              Error Details
+              <.icon name="hero-exclamation-triangle" class="size-3" /> Error Details
             </p>
             <pre class="text-xs bg-error/10 text-error p-3 rounded-lg overflow-auto max-h-40 border border-error/20"><%=
               format_json_preview(@execution.error)
@@ -852,8 +919,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         <%= if @execution.output && @execution.output != %{} do %>
           <div class="mt-4 pt-4 border-t border-base-200">
             <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60 mb-2 flex items-center gap-1">
-              <.icon name="hero-document-check" class="size-3" />
-              Final Output
+              <.icon name="hero-document-check" class="size-3" /> Final Output
             </p>
             <pre class="text-xs bg-base-200/60 p-3 rounded-lg overflow-auto max-h-40 border border-base-200"><%=
               format_json_preview(@execution.output)

@@ -37,16 +37,26 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp build_workflow_safe(execution, context) do
     case WorkflowBuilder.build(execution.workflow_version, context) do
-      {:ok, workflow} -> {:ok, workflow}
+      {:ok, workflow} ->
+        {:ok, workflow}
+
       {:error, reason} ->
-        Logger.error("Failed to build workflow", execution_id: execution.id, reason: inspect(reason))
+        Logger.error("Failed to build workflow",
+          execution_id: execution.id,
+          reason: inspect(reason)
+        )
+
         {:error, {:workflow_build_failed, reason}}
     end
   end
 
-  defp handle_execution_result(execution, {:ok, result}), do: handle_result(execution, {:ok, result})
+  defp handle_execution_result(execution, {:ok, result}),
+    do: handle_result(execution, {:ok, result})
+
   defp handle_execution_result(execution, {:error, reason}), do: mark_failed(execution, reason)
-  defp handle_execution_result(execution, {:timeout, context}), do: handle_result(execution, {:timeout, context})
+
+  defp handle_execution_result(execution, {:timeout, context}),
+    do: handle_result(execution, {:timeout, context})
 
   # ============================================================================
   # Execution Lifecycle
@@ -59,6 +69,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
       {:ok, execution} ->
         ExecutionPubSub.broadcast_execution_started(execution)
         {:ok, execution}
+
       {:error, changeset} ->
         {:error, {:update_failed, changeset}}
     end
@@ -69,15 +80,18 @@ defmodule Imgd.Runtime.WorkflowRunner do
     sanitized_output = sanitize_for_json(output)
     sanitized_context = sanitize_for_json(context.node_outputs)
 
-    case Repo.update(Execution.changeset(execution, %{
-      status: :completed,
-      completed_at: now,
-      output: sanitized_output,
-      context: sanitized_context
-    })) do
+    case Repo.update(
+           Execution.changeset(execution, %{
+             status: :completed,
+             completed_at: now,
+             output: sanitized_output,
+             context: sanitized_context
+           })
+         ) do
       {:ok, execution} ->
         ExecutionPubSub.broadcast_execution_completed(execution)
         {:ok, execution}
+
       {:error, changeset} ->
         {:error, {:update_failed, changeset}}
     end
@@ -87,26 +101,45 @@ defmodule Imgd.Runtime.WorkflowRunner do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     error = format_error(reason)
 
-    case Repo.update(Execution.changeset(execution, %{status: :failed, completed_at: now, error: error})) do
+    case Repo.update(
+           Execution.changeset(execution, %{status: :failed, completed_at: now, error: error})
+         ) do
       {:ok, execution} ->
         ExecutionPubSub.broadcast_execution_failed(execution, error)
         {:error, reason}
+
       {:error, changeset} ->
-        Logger.error("Failed to mark execution as failed", execution_id: execution.id, changeset_errors: inspect(changeset.errors))
+        Logger.error("Failed to mark execution as failed",
+          execution_id: execution.id,
+          changeset_errors: inspect(changeset.errors)
+        )
+
         {:error, reason}
     end
   end
 
   defp mark_timeout(%Execution{} = execution) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    error = %{"type" => "timeout", "message" => "Workflow execution timed out", "timeout_ms" => get_timeout_ms(execution)}
 
-    case Repo.update(Execution.changeset(execution, %{status: :timeout, completed_at: now, error: error})) do
+    error = %{
+      "type" => "timeout",
+      "message" => "Workflow execution timed out",
+      "timeout_ms" => get_timeout_ms(execution)
+    }
+
+    case Repo.update(
+           Execution.changeset(execution, %{status: :timeout, completed_at: now, error: error})
+         ) do
       {:ok, execution} ->
         ExecutionPubSub.broadcast_execution_failed(execution, error)
         {:ok, execution}
+
       {:error, changeset} ->
-        Logger.error("Failed to mark execution as timeout", execution_id: execution.id, changeset_errors: inspect(changeset.errors))
+        Logger.error("Failed to mark execution as timeout",
+          execution_id: execution.id,
+          changeset_errors: inspect(changeset.errors)
+        )
+
         {:ok, %{execution | status: :timeout}}
     end
   end
@@ -131,14 +164,21 @@ defmodule Imgd.Runtime.WorkflowRunner do
     trigger_data = Execution.trigger_data(execution)
     initial_input = extract_trigger_input(trigger_data)
 
-    task = Task.async(fn ->
-      execute_workflow_with_events(execution, runic_workflow, initial_input, context)
-    end)
+    task =
+      Task.async(fn ->
+        execute_workflow_with_events(execution, runic_workflow, initial_input, context)
+      end)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} -> result
+      {:ok, result} ->
+        result
+
       nil ->
-        Logger.warning("Workflow execution timed out", execution_id: execution.id, timeout_ms: timeout_ms)
+        Logger.warning("Workflow execution timed out",
+          execution_id: execution.id,
+          timeout_ms: timeout_ms
+        )
+
         {:timeout, context}
     end
   end
@@ -147,7 +187,9 @@ defmodule Imgd.Runtime.WorkflowRunner do
     case execution.workflow_version do
       %{workflow: %{settings: settings}} when is_map(settings) ->
         Map.get(settings, "timeout_ms") || Map.get(settings, :timeout_ms) || @default_timeout_ms
-      _ -> @default_timeout_ms
+
+      _ ->
+        @default_timeout_ms
     end
   end
 
@@ -179,7 +221,10 @@ defmodule Imgd.Runtime.WorkflowRunner do
       reaction_log = extract_reaction_log(executed_workflow)
       output = determine_output(productions)
 
-      Logger.debug("Workflow execution completed", execution_id: execution.id, productions_count: length(productions))
+      Logger.debug("Workflow execution completed",
+        execution_id: execution.id,
+        productions_count: length(productions)
+      )
 
       store_runic_logs(execution, build_log, reaction_log)
 
@@ -187,20 +232,32 @@ defmodule Imgd.Runtime.WorkflowRunner do
     rescue
       e in NodeExecutionError ->
         Logger.error("Node execution failed",
-          execution_id: execution.id, node_id: e.node_id,
-          node_type_id: e.node_type_id, reason: inspect(e.reason))
+          execution_id: execution.id,
+          node_id: e.node_id,
+          node_type_id: e.node_type_id,
+          reason: inspect(e.reason)
+        )
+
         handle_node_failure(execution, e, context)
         {:error, {:node_failed, e.node_id, e.reason}}
+
       e ->
         Logger.error("Unexpected error during workflow execution",
-          execution_id: execution.id, error: Exception.message(e),
-          stacktrace: Exception.format_stacktrace(__STACKTRACE__))
+          execution_id: execution.id,
+          error: Exception.message(e),
+          stacktrace: Exception.format_stacktrace(__STACKTRACE__)
+        )
+
         {:error, {:unexpected_error, Exception.message(e)}}
     catch
       kind, reason ->
         Logger.error("Caught error during workflow execution",
-          execution_id: execution.id, kind: kind, reason: inspect(reason),
-          stacktrace: Exception.format_stacktrace(__STACKTRACE__))
+          execution_id: execution.id,
+          kind: kind,
+          reason: inspect(reason),
+          stacktrace: Exception.format_stacktrace(__STACKTRACE__)
+        )
+
         {:error, {:caught_error, kind, reason}}
     end
   end
@@ -217,7 +274,15 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
     # Execute with tracking
     {final_workflow, final_context, _tracker} =
-      do_tracked_execution(workflow, execution, context, node_map, node_tracker, max_iterations, 0)
+      do_tracked_execution(
+        workflow,
+        execution,
+        context,
+        node_map,
+        node_tracker,
+        max_iterations,
+        0
+      )
 
     {final_workflow, final_context}
   end
@@ -243,12 +308,13 @@ defmodule Imgd.Runtime.WorkflowRunner do
             node = Map.get(node_map, node_id)
 
             # Broadcast node started (if not already started)
-            trk = if node && not MapSet.member?(trk.started, node_id) do
-              broadcast_node_started(execution, node, fact.value)
-              %{trk | started: MapSet.put(trk.started, node_id)}
-            else
-              trk
-            end
+            trk =
+              if node && not MapSet.member?(trk.started, node_id) do
+                broadcast_node_started(execution, node, fact.value)
+                %{trk | started: MapSet.put(trk.started, node_id)}
+              else
+                trk
+              end
 
             # Invoke the step
             start_time = System.monotonic_time(:millisecond)
@@ -259,29 +325,40 @@ defmodule Imgd.Runtime.WorkflowRunner do
             result = get_step_result(new_wf, step)
 
             # Update context and broadcast completion
-            {new_ctx, new_trk} = if node && not MapSet.member?(trk.completed, node_id) do
-              case result do
-                {:ok, output} ->
-                  updated_ctx = Context.put_output(ctx, node_id, output)
-                  broadcast_node_completed(execution, node, fact.value, output, duration_ms)
-                  {updated_ctx, %{trk | completed: MapSet.put(trk.completed, node_id)}}
-                {:error, error} ->
-                  broadcast_node_failed_event(execution, node, fact.value, error, duration_ms)
-                  {ctx, %{trk | completed: MapSet.put(trk.completed, node_id)}}
-                _ ->
-                  # Node might have produced output directly
-                  updated_ctx = Context.put_output(ctx, node_id, result)
-                  broadcast_node_completed(execution, node, fact.value, result, duration_ms)
-                  {updated_ctx, %{trk | completed: MapSet.put(trk.completed, node_id)}}
+            {new_ctx, new_trk} =
+              if node && not MapSet.member?(trk.completed, node_id) do
+                case result do
+                  {:ok, output} ->
+                    updated_ctx = Context.put_output(ctx, node_id, output)
+                    broadcast_node_completed(execution, node, fact.value, output, duration_ms)
+                    {updated_ctx, %{trk | completed: MapSet.put(trk.completed, node_id)}}
+
+                  {:error, error} ->
+                    broadcast_node_failed_event(execution, node, fact.value, error, duration_ms)
+                    {ctx, %{trk | completed: MapSet.put(trk.completed, node_id)}}
+
+                  _ ->
+                    # Node might have produced output directly
+                    updated_ctx = Context.put_output(ctx, node_id, result)
+                    broadcast_node_completed(execution, node, fact.value, result, duration_ms)
+                    {updated_ctx, %{trk | completed: MapSet.put(trk.completed, node_id)}}
+                end
+              else
+                {ctx, trk}
               end
-            else
-              {ctx, trk}
-            end
 
             {new_wf, new_ctx, new_trk}
           end)
 
-        do_tracked_execution(new_workflow, execution, new_context, node_map, new_tracker, max_iters, current + 1)
+        do_tracked_execution(
+          new_workflow,
+          execution,
+          new_context,
+          node_map,
+          new_tracker,
+          max_iters,
+          current + 1
+        )
       end
     else
       {workflow, context, tracker}
@@ -332,9 +409,13 @@ defmodule Imgd.Runtime.WorkflowRunner do
     case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
       {:ok, node_exec} ->
         ExecutionPubSub.broadcast_node_started(execution, node_exec)
+
       {:error, changeset} ->
         Logger.warning("Failed to persist node execution start",
-          execution_id: execution.id, node_id: node.id, errors: inspect(changeset.errors))
+          execution_id: execution.id,
+          node_id: node.id,
+          errors: inspect(changeset.errors)
+        )
     end
   end
 
@@ -346,14 +427,17 @@ defmodule Imgd.Runtime.WorkflowRunner do
     case find_running_node_execution(execution.id, node.id) do
       %NodeExecution{} = node_exec ->
         # Update existing record
-        case Repo.update(NodeExecution.changeset(node_exec, %{
-          status: :completed,
-          output_data: sanitize_for_json(output_data),
-          completed_at: now
-        })) do
+        case Repo.update(
+               NodeExecution.changeset(node_exec, %{
+                 status: :completed,
+                 output_data: sanitize_for_json(output_data),
+                 completed_at: now
+               })
+             ) do
           {:ok, updated} -> ExecutionPubSub.broadcast_node_completed(execution, updated)
           {:error, _} -> :ok
         end
+
       nil ->
         # Create completed record
         attrs = %{
@@ -368,6 +452,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
           queued_at: started_at,
           attempt: 1
         }
+
         case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
           {:ok, node_exec} -> ExecutionPubSub.broadcast_node_completed(execution, node_exec)
           {:error, _} -> :ok
@@ -381,14 +466,17 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
     case find_running_node_execution(execution.id, node.id) do
       %NodeExecution{} = node_exec ->
-        case Repo.update(NodeExecution.changeset(node_exec, %{
-          status: :failed,
-          error: %{"reason" => inspect(error)},
-          completed_at: now
-        })) do
+        case Repo.update(
+               NodeExecution.changeset(node_exec, %{
+                 status: :failed,
+                 error: %{"reason" => inspect(error)},
+                 completed_at: now
+               })
+             ) do
           {:ok, updated} -> ExecutionPubSub.broadcast_node_failed(execution, updated, error)
           {:error, _} -> :ok
         end
+
       nil ->
         attrs = %{
           execution_id: execution.id,
@@ -402,6 +490,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
           queued_at: started_at,
           attempt: 1
         }
+
         case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
           {:ok, node_exec} -> ExecutionPubSub.broadcast_node_failed(execution, node_exec, error)
           {:error, _} -> :ok
@@ -413,7 +502,10 @@ defmodule Imgd.Runtime.WorkflowRunner do
     import Ecto.Query
 
     NodeExecution
-    |> where([n], n.execution_id == ^execution_id and n.node_id == ^node_id and n.status == :running)
+    |> where(
+      [n],
+      n.execution_id == ^execution_id and n.node_id == ^node_id and n.status == :running
+    )
     |> order_by([n], desc: n.inserted_at)
     |> limit(1)
     |> Repo.one()
@@ -437,9 +529,13 @@ defmodule Imgd.Runtime.WorkflowRunner do
     case Repo.insert(NodeExecution.changeset(%NodeExecution{}, attrs)) do
       {:ok, node_exec} ->
         ExecutionPubSub.broadcast_node_failed(execution, node_exec, error.reason)
+
       {:error, changeset} ->
         Logger.warning("Failed to persist failed node execution",
-          execution_id: execution.id, node_id: error.node_id, errors: inspect(changeset.errors))
+          execution_id: execution.id,
+          node_id: error.node_id,
+          errors: inspect(changeset.errors)
+        )
     end
   end
 
@@ -470,11 +566,21 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   defp serialize_value(value) when is_atom(value), do: to_string(value)
-  defp serialize_value(value) when is_struct(value), do: value |> Map.from_struct() |> serialize_value()
-  defp serialize_value(value) when is_tuple(value), do: value |> Tuple.to_list() |> serialize_value()
-  defp serialize_value(value) when is_map(value), do: Map.new(value, fn {k, v} -> {serialize_key(k), serialize_value(v)} end)
+
+  defp serialize_value(value) when is_struct(value),
+    do: value |> Map.from_struct() |> serialize_value()
+
+  defp serialize_value(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> serialize_value()
+
+  defp serialize_value(value) when is_map(value),
+    do: Map.new(value, fn {k, v} -> {serialize_key(k), serialize_value(v)} end)
+
   defp serialize_value(value) when is_list(value), do: Enum.map(value, &serialize_value/1)
-  defp serialize_value(value) when is_pid(value) or is_port(value) or is_reference(value), do: inspect(value)
+
+  defp serialize_value(value) when is_pid(value) or is_port(value) or is_reference(value),
+    do: inspect(value)
+
   defp serialize_value(value) when is_function(value), do: inspect(value)
   defp serialize_value(value), do: value
 
@@ -493,30 +599,48 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   defp store_runic_logs(execution, build_log, reaction_log) do
-    Repo.update(Execution.changeset(execution, %{runic_build_log: build_log, runic_reaction_log: reaction_log}))
+    Repo.update(
+      Execution.changeset(execution, %{
+        runic_build_log: build_log,
+        runic_reaction_log: reaction_log
+      })
+    )
   end
 
-  defp handle_result(execution, {:ok, {output, context}}), do: mark_completed(execution, output, context)
+  defp handle_result(execution, {:ok, {output, context}}),
+    do: mark_completed(execution, output, context)
+
   defp handle_result(execution, {:timeout, _context}), do: mark_timeout(execution)
 
   defp format_error(reason) do
     case reason do
       {:node_failed, node_id, node_reason} ->
         %{"type" => "node_failure", "node_id" => node_id, "reason" => inspect(node_reason)}
+
       {:workflow_build_failed, build_reason} ->
         %{"type" => "workflow_build_failed", "reason" => inspect(build_reason)}
+
       {:build_failed, message} ->
         %{"type" => "build_failure", "message" => message}
+
       {:cycle_detected, node_ids} ->
         %{"type" => "cycle_detected", "node_ids" => node_ids}
+
       {:invalid_connections, connections} ->
-        %{"type" => "invalid_connections", "connections" => Enum.map(connections, &Map.from_struct/1)}
+        %{
+          "type" => "invalid_connections",
+          "connections" => Enum.map(connections, &Map.from_struct/1)
+        }
+
       {:update_failed, changeset} ->
         %{"type" => "update_failed", "errors" => inspect(changeset.errors)}
+
       {:unexpected_error, message} ->
         %{"type" => "unexpected_error", "message" => message}
+
       {:caught_error, kind, caught_reason} ->
         %{"type" => "caught_error", "kind" => inspect(kind), "reason" => inspect(caught_reason)}
+
       other ->
         %{"type" => "unknown", "reason" => inspect(other)}
     end
