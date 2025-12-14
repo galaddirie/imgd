@@ -353,7 +353,11 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
     # Record start time in process dictionary for duration calculation
     timings = Process.get(:imgd_node_timings, %{})
-    Process.put(:imgd_node_timings, Map.put(timings, node_id, System.monotonic_time(:millisecond)))
+
+    Process.put(
+      :imgd_node_timings,
+      Map.put(timings, node_id, System.monotonic_time(:millisecond))
+    )
 
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     input_data = wrap_for_db(fact.value)
@@ -491,7 +495,10 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     import Ecto.Query
 
     NodeExecution
-    |> where([n], n.execution_id == ^execution_id and n.node_id == ^node_id and n.status == :running)
+    |> where(
+      [n],
+      n.execution_id == ^execution_id and n.node_id == ^node_id and n.status == :running
+    )
     |> order_by([n], desc: n.inserted_at)
     |> limit(1)
     |> Repo.one()
@@ -541,8 +548,9 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
   defp sanitize_value_for_json(value) when is_function(value), do: inspect(value)
 
-  defp sanitize_value_for_json(value) when is_atom(value) and not is_boolean(value) and not is_nil(value),
-    do: to_string(value)
+  defp sanitize_value_for_json(value)
+       when is_atom(value) and not is_boolean(value) and not is_nil(value),
+       do: to_string(value)
 
   defp sanitize_value_for_json(value), do: value
 
