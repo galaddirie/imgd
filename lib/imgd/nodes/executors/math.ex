@@ -2,12 +2,12 @@ defmodule Imgd.Nodes.Executors.Math do
   @moduledoc """
   Executor for Math nodes.
 
-  Performs basic arithmetic operations on the input.
+  Performs arithmetic and mathematical operations on the input.
 
   ## Configuration
 
-  - `operation` (required) - One of: add, subtract, multiply, divide
-  - `operand` (required) - The number to operate with (right-hand side)
+  - `operation` (required) - One of: add, subtract, multiply, divide, modulo, power, square_root, abs, round, ceil, floor
+  - `operand` (required for binary operations: add, subtract, multiply, divide, modulo, power) - The number to operate with (right-hand side)
   - `field` (optional) - If input is a map, the field to use as the left-hand value.
                          If not provided, the entire input is treated as the number.
   """
@@ -22,18 +22,31 @@ defmodule Imgd.Nodes.Executors.Math do
 
   @config_schema %{
     "type" => "object",
-    "required" => ["operation", "operand"],
+    "required" => ["operation"],
     "properties" => %{
       "operation" => %{
         "type" => "string",
         "title" => "Operation",
-        "enum" => ["add", "subtract", "multiply", "divide"],
-        "description" => "The arithmetic operation to perform"
+        "enum" => [
+          "add",
+          "subtract",
+          "multiply",
+          "divide",
+          "modulo",
+          "power",
+          "square_root",
+          "abs",
+          "round",
+          "ceil",
+          "floor"
+        ],
+        "description" => "The mathematical operation to perform"
       },
       "operand" => %{
         "type" => "number",
         "title" => "Operand",
-        "description" => "The right-hand value for the operation"
+        "description" =>
+          "The right-hand value for binary operations (not needed for unary operations like square_root, abs, etc.)"
       },
       "field" => %{
         "type" => "string",
@@ -54,7 +67,7 @@ defmodule Imgd.Nodes.Executors.Math do
 
   @behaviour Imgd.Runtime.NodeExecutor
 
-  @supported_operations ~w(add subtract multiply divide)
+  @supported_operations ~w(add subtract multiply divide modulo power square_root abs round ceil floor)
 
   @impl true
   def execute(config, input, _context) do
@@ -69,12 +82,25 @@ defmodule Imgd.Nodes.Executors.Math do
         input
       end
 
-    with {:ok, number} <- validate_number(value),
-         {:ok, operand_num} <- validate_number(operand),
-         {:ok, result} <- calculate(operation, number, operand_num) do
-      {:ok, result}
+    unary_operations = ~w(square_root abs round ceil floor)
+
+    if operation in unary_operations do
+      # Unary operations only need the input value
+      with {:ok, number} <- validate_number(value),
+           {:ok, result} <- calculate(operation, number) do
+        {:ok, result}
+      else
+        {:error, reason} -> {:error, reason}
+      end
     else
-      {:error, reason} -> {:error, reason}
+      # Binary operations need both input value and operand
+      with {:ok, number} <- validate_number(value),
+           {:ok, operand_num} <- validate_number(operand),
+           {:ok, result} <- calculate(operation, number, operand_num) do
+        {:ok, result}
+      else
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -89,22 +115,31 @@ defmodule Imgd.Nodes.Executors.Math do
         _ -> [{:operation, "must be one of: #{Enum.join(@supported_operations, ", ")}"} | errors]
       end
 
+    operation = Map.get(config, "operation")
+    unary_operations = ~w(square_root abs round ceil floor)
+
     errors =
-      case Map.get(config, "operand") do
-        nil ->
-          [{:operand, "is required"} | errors]
+      if operation in unary_operations do
+        # For unary operations, operand is not required
+        errors
+      else
+        # For binary operations, operand is required
+        case Map.get(config, "operand") do
+          nil ->
+            [{:operand, "is required for binary operations"} | errors]
 
-        val when is_number(val) ->
-          errors
+          val when is_number(val) ->
+            errors
 
-        val when is_binary(val) ->
-          case Float.parse(val) do
-            {_, ""} -> errors
-            _ -> [{:operand, "must be a number"} | errors]
-          end
+          val when is_binary(val) ->
+            case Float.parse(val) do
+              {_, ""} -> errors
+              _ -> [{:operand, "must be a number"} | errors]
+            end
 
-        _ ->
-          [{:operand, "must be a number"} | errors]
+          _ ->
+            [{:operand, "must be a number"} | errors]
+        end
       end
 
     if errors == [] do
@@ -114,11 +149,23 @@ defmodule Imgd.Nodes.Executors.Math do
     end
   end
 
+  # Binary operations
   defp calculate("add", a, b), do: {:ok, a + b}
   defp calculate("subtract", a, b), do: {:ok, a - b}
   defp calculate("multiply", a, b), do: {:ok, a * b}
   defp calculate("divide", _a, 0), do: {:error, "division by zero"}
   defp calculate("divide", a, b), do: {:ok, a / b}
+  defp calculate("modulo", _a, b) when b == 0, do: {:error, "modulo by zero"}
+  defp calculate("modulo", a, b), do: {:ok, rem(trunc(a), trunc(b))}
+  defp calculate("power", a, b), do: {:ok, :math.pow(a, b)}
+
+  # Unary operations
+  defp calculate("square_root", a) when a < 0, do: {:error, "square root of negative number"}
+  defp calculate("square_root", a), do: {:ok, :math.sqrt(a)}
+  defp calculate("abs", a), do: {:ok, abs(a)}
+  defp calculate("round", a), do: {:ok, round(a)}
+  defp calculate("ceil", a), do: {:ok, Float.ceil(a)}
+  defp calculate("floor", a), do: {:ok, Float.floor(a)}
 
   defp validate_number(n) when is_number(n), do: {:ok, n}
 
