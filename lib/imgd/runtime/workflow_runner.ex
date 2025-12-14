@@ -400,7 +400,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
       node_id: node.id,
       node_type_id: node.type_id,
       status: :running,
-      input_data: sanitize_for_json(input_data),
+      input_data: normalize_node_data(input_data),
       started_at: now,
       queued_at: now,
       attempt: 1
@@ -430,7 +430,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
         case Repo.update(
                NodeExecution.changeset(node_exec, %{
                  status: :completed,
-                 output_data: sanitize_for_json(output_data),
+                 output_data: normalize_node_data(output_data),
                  completed_at: now
                })
              ) do
@@ -445,8 +445,8 @@ defmodule Imgd.Runtime.WorkflowRunner do
           node_id: node.id,
           node_type_id: node.type_id,
           status: :completed,
-          input_data: sanitize_for_json(input_data),
-          output_data: sanitize_for_json(output_data),
+          input_data: normalize_node_data(input_data),
+          output_data: normalize_node_data(output_data),
           started_at: started_at,
           completed_at: now,
           queued_at: started_at,
@@ -483,7 +483,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
           node_id: node.id,
           node_type_id: node.type_id,
           status: :failed,
-          input_data: sanitize_for_json(input_data),
+          input_data: normalize_node_data(input_data),
           error: %{"reason" => inspect(error)},
           started_at: started_at,
           completed_at: now,
@@ -519,7 +519,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
       node_id: error.node_id,
       node_type_id: error.node_type_id,
       status: :failed,
-      input_data: context.current_input,
+      input_data: normalize_node_data(context.current_input),
       error: %{"reason" => inspect(error.reason)},
       started_at: now,
       completed_at: now,
@@ -589,6 +589,18 @@ defmodule Imgd.Runtime.WorkflowRunner do
   defp serialize_key(key), do: inspect(key)
 
   defp sanitize_for_json(value), do: serialize_value(value)
+
+  defp normalize_node_data(nil), do: nil
+  defp normalize_node_data(%{} = map), do: sanitize_for_json(map)
+
+  defp normalize_node_data(value) do
+    value
+    |> sanitize_for_json()
+    |> case do
+      %{} = map -> map
+      other -> %{"value" => other}
+    end
+  end
 
   defp determine_output(productions) when is_list(productions) do
     case productions do
