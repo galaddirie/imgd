@@ -17,6 +17,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   import ImgdWeb.Formatters
 
   @trace_log_limit 500
+  @raw_input_key "__imgd_raw_input__"
 
   @impl true
   def mount(%{"id" => workflow_id}, _session, socket) do
@@ -39,6 +40,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         # Build node map for quick lookup
         node_map = Map.new(workflow.nodes || [], &{&1.id, &1})
 
+        demo_inputs = workflow_demo_inputs(workflow)
+        initial_demo = List.first(demo_inputs)
+        initial_payload = if(initial_demo, do: initial_demo.data, else: %{})
+        run_form = build_run_form(initial_payload)
+
         socket =
           socket
           |> assign(:page_title, "Run: #{workflow.name}")
@@ -53,6 +59,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:running?, false)
           |> assign(:can_run?, workflow.published_version_id != nil)
           |> assign(:trace_log_count, 0)
+          |> assign(:demo_inputs, demo_inputs)
+          |> assign(:selected_demo, initial_demo)
+          |> assign(:run_form, run_form)
+          |> assign(:run_form_error, nil)
           |> stream(:trace_log, [], dom_id: &"trace-#{&1.id}")
 
         {:ok, socket}
@@ -94,29 +104,45 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   # ============================================================================
 
   @impl true
-  def handle_event("run_workflow", _params, socket) do
+  def handle_event("run_workflow", params, socket) do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
+    run_params = Map.get(params, "run", %{})
+    input_string = Map.get(run_params, "data", "")
 
     if socket.assigns.can_run? do
-      case Executions.start_and_enqueue_execution(scope, workflow, %{
-             trigger: %{type: :manual, data: %{}}
-           }) do
-        {:ok, %{execution: execution}} ->
-          # Subscribe to execution updates
-          PubSub.subscribe_execution(execution.id)
+      with {:ok, parsed} <-
+             parse_input_payload(input_string, socket.assigns.demo_inputs, @raw_input_key),
+           {:ok, %{execution: execution}} <-
+             Executions.start_and_enqueue_execution(scope, workflow, %{
+               trigger: %{type: :manual, data: parsed.trigger_data},
+               metadata: build_manual_metadata(parsed.demo_label)
+             }) do
+        # Subscribe to execution updates
+        PubSub.subscribe_execution(execution.id)
 
-          socket =
-            socket
-            |> assign(:execution, execution)
-            |> assign(:running?, true)
-            |> assign(:node_states, %{})
-            |> assign(:trace_log_count, 0)
-            |> stream(:trace_log, [], reset: true)
-            |> append_trace_log(:info, "Execution started", %{execution_id: execution.id})
-            |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
+        run_form = build_run_form(input_string)
 
-          {:noreply, socket}
+        socket =
+          socket
+          |> assign(:execution, execution)
+          |> assign(:running?, true)
+          |> assign(:node_states, %{})
+          |> assign(:trace_log_count, 0)
+          |> assign(:selected_demo, parsed.demo)
+          |> assign(:run_form, run_form)
+          |> assign(:run_form_error, nil)
+          |> stream(:trace_log, [], reset: true)
+          |> append_trace_log(:info, "Execution started", %{execution_id: execution.id})
+          |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
+
+        {:noreply, socket}
+      else
+        {:error, :invalid_payload, message} ->
+          {:noreply,
+           socket
+           |> assign(:run_form, build_run_form(input_string, errors: [data: {message, []}]))
+           |> assign(:run_form_error, message)}
 
         {:error, reason} ->
           {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
@@ -124,6 +150,34 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     else
       {:noreply, put_flash(socket, :error, "Workflow must be published before running")}
     end
+  end
+
+  @impl true
+  def handle_event("select_demo_input", %{"id" => id}, socket) do
+    case Enum.find(socket.assigns.demo_inputs, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      demo ->
+        {:noreply,
+         socket
+         |> assign(:selected_demo, demo)
+         |> assign(:run_form, build_run_form(demo.data))
+         |> assign(:run_form_error, nil)}
+    end
+  end
+
+  @impl true
+  def handle_event("update_payload", %{"run" => %{"data" => data}}, socket) do
+    data = data || ""
+
+    socket =
+      socket
+      |> assign(:run_form, build_run_form(data))
+      |> maybe_reset_selected_demo(data)
+      |> assign(:run_form_error, nil)
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -252,6 +306,258 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   # ============================================================================
   # Private Helpers
   # ============================================================================
+
+  defp parse_input_payload(input_string, demo_inputs, raw_key) do
+    trimmed = String.trim(input_string || "")
+
+    decoded =
+      case trimmed do
+        "" -> {:ok, %{}}
+        _ -> Jason.decode(trimmed)
+      end
+
+    case decoded do
+      {:ok, value} ->
+        trigger_data =
+          case value do
+            %{} = map -> map
+            other -> %{raw_key => other}
+          end
+
+        demo = match_demo_input(value, demo_inputs)
+
+        {:ok,
+         %{
+           trigger_data: trigger_data,
+           decoded: value,
+           demo: demo,
+           demo_label: demo && demo.label
+         }}
+
+      {:error, %Jason.DecodeError{} = error} ->
+        {:error, :invalid_payload, "Invalid JSON: #{Exception.message(error)}"}
+
+      _ ->
+        {:error, :invalid_payload, "Unable to parse trigger input"}
+    end
+  end
+
+  defp build_manual_metadata(nil) do
+    %{extras: %{"runner" => "manual_live"}}
+  end
+
+  defp build_manual_metadata(label) do
+    %{extras: %{"runner" => "manual_live", "demo_input" => label}}
+  end
+
+  defp build_run_form(payload, opts \\ [])
+
+  defp build_run_form(payload, opts) when is_binary(payload) do
+    to_form(%{"data" => payload}, Keyword.merge([as: :run], opts))
+  end
+
+  defp build_run_form(payload, opts) do
+    payload
+    |> encode_payload()
+    |> build_run_form(opts)
+  end
+
+  defp workflow_demo_inputs(workflow) do
+    settings = workflow.settings || %{}
+
+    from_settings =
+      settings
+      |> fetch_setting(:demo_inputs)
+      |> normalize_demo_inputs()
+
+    generated = generate_demo_inputs(workflow)
+
+    inputs =
+      (from_settings ++ generated)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq_by(& &1.id)
+
+    if inputs == [] do
+      [default_empty_demo()]
+    else
+      inputs
+    end
+  end
+
+  defp default_empty_demo do
+    normalize_demo_input(%{
+      label: "Empty payload",
+      description: "Use when the workflow does not require input data",
+      data: %{}
+    })
+  end
+
+  defp normalize_demo_inputs(list) when is_list(list) do
+    list
+    |> Enum.map(&normalize_demo_input/1)
+    |> Enum.filter(& &1)
+  end
+
+  defp normalize_demo_inputs(map) when is_map(map), do: [normalize_demo_input(map)]
+  defp normalize_demo_inputs(_), do: []
+
+  defp normalize_demo_input(nil), do: nil
+
+  defp normalize_demo_input(map) when is_map(map) do
+    label = Map.get(map, :label) || Map.get(map, "label") || "Preset"
+
+    data =
+      map
+      |> Map.get(:data)
+      |> case do
+        nil -> Map.get(map, "data")
+        value -> value
+      end
+      |> case do
+        nil -> %{}
+        value -> value
+      end
+      |> normalize_demo_value()
+
+    description = Map.get(map, :description) || Map.get(map, "description")
+
+    %{
+      id: demo_id(label, data),
+      label: label,
+      description: description,
+      data: data
+    }
+  end
+
+  defp demo_id(label, data) do
+    slug =
+      label
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "-")
+      |> String.trim("-")
+
+    base = if slug == "", do: "demo", else: slug
+    hash = :erlang.phash2(data)
+
+    "#{base}-#{hash}"
+  end
+
+  defp generate_demo_inputs(workflow) do
+    nodes = workflow.nodes || []
+    type_ids = Enum.map(nodes, & &1.type_id)
+
+    []
+    |> maybe_add_math_demo(type_ids)
+    |> maybe_add_template_demo(type_ids)
+    |> maybe_add_webhook_demo(workflow)
+    |> Enum.reverse()
+  end
+
+  defp maybe_add_math_demo(acc, type_ids) do
+    if Enum.any?(type_ids, &(&1 == "math")) do
+      [
+        normalize_demo_input(%{
+          label: "Sample number input",
+          description: "Demonstrates scalar inputs for math workflows",
+          data: 21
+        })
+        | acc
+      ]
+    else
+      acc
+    end
+  end
+
+  defp maybe_add_template_demo(acc, type_ids) do
+    if Enum.any?(type_ids, &(&1 == "format")) do
+      [
+        normalize_demo_input(%{
+          label: "Profile payload",
+          description: "Ideal for format/transform demos",
+          data: %{
+            "name" => "Ada Lovelace",
+            "email" => "ada@example.com",
+            "company" => %{"name" => "Analytical Engines"}
+          }
+        })
+        | acc
+      ]
+    else
+      acc
+    end
+  end
+
+  defp maybe_add_webhook_demo(acc, workflow) do
+    if has_trigger_type?(workflow, :webhook) do
+      [
+        normalize_demo_input(%{
+          label: "Webhook event",
+          description: "Mimics a webhook payload",
+          data: %{
+            "event" => "user.created",
+            "timestamp" =>
+              DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+            "data" => %{"id" => "evt_123", "email" => "user@example.com"}
+          }
+        })
+        | acc
+      ]
+    else
+      acc
+    end
+  end
+
+  defp has_trigger_type?(workflow, type) do
+    Enum.any?(workflow.triggers || [], fn trigger ->
+      trigger.type == type || Map.get(trigger, :type) == type ||
+        Map.get(trigger, "type") == to_string(type)
+    end)
+  end
+
+  defp match_demo_input(value, demo_inputs) do
+    normalized_value = normalize_demo_value(value)
+
+    Enum.find(demo_inputs, fn demo -> demo.data == normalized_value end)
+  end
+
+  defp encode_payload(payload) do
+    case Jason.encode(payload, pretty: true) do
+      {:ok, json} -> json
+      _ -> inspect(payload, pretty: true, limit: :infinity)
+    end
+  end
+
+  defp fetch_setting(settings, key) do
+    Map.get(settings, key) || Map.get(settings, Atom.to_string(key))
+  end
+
+  defp maybe_reset_selected_demo(socket, data_string) do
+    case socket.assigns.selected_demo do
+      nil ->
+        socket
+
+      demo ->
+        encoded_demo = encode_payload(demo.data)
+
+        if String.trim(encoded_demo) == String.trim(data_string) do
+          socket
+        else
+          assign(socket, :selected_demo, nil)
+        end
+    end
+  end
+
+  defp normalize_demo_value(%{} = map) do
+    map
+    |> Enum.map(fn {k, v} -> {normalize_demo_key(k), normalize_demo_value(v)} end)
+    |> Map.new()
+  end
+
+  defp normalize_demo_value(list) when is_list(list), do: Enum.map(list, &normalize_demo_value/1)
+  defp normalize_demo_value(other), do: other
+
+  defp normalize_demo_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp normalize_demo_key(key), do: to_string(key)
 
   defp build_node_states_from_execution(%Execution{} = execution) do
     node_executions = execution.node_executions || []
@@ -408,21 +714,33 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             <div class="flex items-center gap-3">
               <.execution_status_badge execution={@execution} running?={@running?} />
               <button
-                type="button"
-                phx-click="run_workflow"
+                type="submit"
+                form="run-config-form"
                 disabled={@running? or not @can_run?}
                 class={[
                   "btn btn-primary gap-2",
                   (@running? or not @can_run?) && "btn-disabled"
                 ]}
               >
-                <.icon name={if @running?, do: "hero-arrow-path", else: "hero-play"} class={"size-4#{if @running?, do: " animate-spin", else: ""}"} />
+                <.icon
+                  name={if @running?, do: "hero-arrow-path", else: "hero-play"}
+                  class={"size-4#{if @running?, do: " animate-spin", else: ""}"}
+                />
                 <span>{if @running?, do: "Running...", else: "Run Workflow"}</span>
               </button>
             </div>
           </div>
         </div>
       </:page_header>
+
+      <.run_panel
+        run_form={@run_form}
+        demo_inputs={@demo_inputs}
+        selected_demo={@selected_demo}
+        running?={@running?}
+        can_run?={@can_run?}
+        run_form_error={@run_form_error}
+      />
 
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <%!-- DAG Visualization --%>
@@ -486,6 +804,138 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   defp execution_badge_class(_), do: "badge-ghost"
 
   # ============================================================================
+  # Component: Run Panel
+  # ============================================================================
+
+  attr :run_form, :map, required: true
+  attr :demo_inputs, :list, default: []
+  attr :selected_demo, :map, default: nil
+  attr :running?, :boolean, default: false
+  attr :can_run?, :boolean, default: true
+  attr :run_form_error, :string, default: nil
+
+  defp run_panel(assigns) do
+    ~H"""
+    <.form
+      for={@run_form}
+      id="run-config-form"
+      phx-change="update_payload"
+      phx-submit="run_workflow"
+      class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 mb-6"
+    >
+      <div class="border-b border-base-200 px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary">
+            <.icon name="hero-rocket-launch" class="size-5" />
+          </div>
+          <div class="space-y-0.5">
+            <p class="text-sm font-semibold text-base-content">Manual Run Input</p>
+            <p class="text-xs text-base-content/60">
+              Provide JSON for your trigger payload or load one of the demo presets.
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="badge badge-ghost badge-sm">Trigger: Manual</span>
+          <span class={["badge badge-sm", @running? && "badge-info", @running? || "badge-ghost"]}>
+            {(@running? && "Running") || "Ready"}
+          </span>
+        </div>
+      </div>
+
+      <div class="p-4 space-y-4">
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <div class="xl:col-span-2 space-y-2">
+            <.input
+              field={@run_form[:data]}
+              type="textarea"
+              label="Initial data (JSON)"
+              rows="8"
+              spellcheck="false"
+              class="textarea w-full font-mono text-sm leading-relaxed"
+              placeholder='{"user_id": 1}'
+            />
+            <div class="flex items-center justify-between text-xs text-base-content/60">
+              <span>Blank value sends an empty map. Scalars are supported (e.g. 42, "hello").</span>
+              <span :if={@run_form_error} class="text-error font-medium">
+                {@run_form_error}
+              </span>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <div class="flex items-center gap-2 text-sm font-semibold text-base-content">
+              <.icon name="hero-sparkles" class="size-4 opacity-70" />
+              <span>Demo payloads</span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                :for={demo <- @demo_inputs}
+                type="button"
+                class={[
+                  "btn btn-outline btn-xs",
+                  @selected_demo && @selected_demo.id == demo.id && "btn-primary"
+                ]}
+                phx-click="select_demo_input"
+                phx-value-id={demo.id}
+                title={demo.description || "Load preset input"}
+              >
+                {demo.label}
+              </button>
+            </div>
+
+            <div class="rounded-xl bg-base-200/60 border border-base-200 p-3 space-y-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                Selected preset
+              </p>
+              <%= if @selected_demo do %>
+                <p class="text-sm text-base-content">{@selected_demo.label}</p>
+                <p :if={@selected_demo.description} class="text-xs text-base-content/60">
+                  {@selected_demo.description}
+                </p>
+                <pre class="mt-2 max-h-32 overflow-auto rounded-lg bg-base-300/50 p-2 text-[11px] font-mono"><%=
+                  format_json_preview(@selected_demo.data)
+                %></pre>
+              <% else %>
+                <p class="text-xs text-base-content/60">Start typing or pick a preset.</p>
+              <% end %>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div class="flex items-center gap-2 text-xs text-base-content/70">
+            <.icon name="hero-light-bulb" class="size-4" />
+            <span>
+              Payload is passed to the first node as trigger input. Use numbers, strings, objects, or arrays.
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              type="submit"
+              class={[
+                "btn btn-primary btn-sm gap-2",
+                (@running? or not @can_run?) && "btn-disabled"
+              ]}
+              disabled={@running? or not @can_run?}
+            >
+              <.icon
+                name={if @running?, do: "hero-arrow-path", else: "hero-play"}
+                class={"size-4#{if @running?, do: " animate-spin", else: ""}"}
+              />
+              <span>{if @running?, do: "Running...", else: "Run workflow"}</span>
+            </button>
+            <span :if={not @can_run?} class="text-xs text-warning">
+              Publish the workflow to enable runs.
+            </span>
+          </div>
+        </div>
+      </div>
+    </.form>
+    """
+  end
+
+  # ============================================================================
   # Component: DAG Panel
   # ============================================================================
 
@@ -494,8 +944,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 overflow-hidden">
       <div class="border-b border-base-200 px-4 py-3 flex items-center justify-between">
         <h2 class="text-sm font-semibold text-base-content flex items-center gap-2">
-          <.icon name="hero-squares-2x2" class="size-4 opacity-70" />
-          Workflow Graph
+          <.icon name="hero-squares-2x2" class="size-4 opacity-70" /> Workflow Graph
         </h2>
         <span class="text-xs text-base-content/60">
           {length(@workflow.nodes || [])} nodes
@@ -626,7 +1075,9 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       <%= if @state[:status] == :failed do %>
         <g transform="translate(176, 8)">
           <circle cx="8" cy="8" r="8" class="fill-error" />
-          <text x="8" y="12" text-anchor="middle" class="text-xs fill-error-content font-bold">!</text>
+          <text x="8" y="12" text-anchor="middle" class="text-xs fill-error-content font-bold">
+            !
+          </text>
         </g>
       <% end %>
     </g>
@@ -679,8 +1130,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100">
       <div class="border-b border-base-200 px-4 py-3 flex items-center justify-between">
         <h2 class="text-sm font-semibold text-base-content flex items-center gap-2">
-          <.icon name="hero-cube" class="size-4 opacity-70" />
-          Node Details
+          <.icon name="hero-cube" class="size-4 opacity-70" /> Node Details
         </h2>
         <%= if @selected_node_id do %>
           <button
@@ -805,8 +1255,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100">
       <div class="border-b border-base-200 px-4 py-3">
         <h2 class="text-sm font-semibold text-base-content flex items-center gap-2">
-          <.icon name="hero-document-text" class="size-4 opacity-70" />
-          Trace Log
+          <.icon name="hero-document-text" class="size-4 opacity-70" /> Trace Log
         </h2>
       </div>
 
@@ -913,8 +1362,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 mt-6">
       <div class="border-b border-base-200 px-4 py-3">
         <h2 class="text-sm font-semibold text-base-content flex items-center gap-2">
-          <.icon name="hero-information-circle" class="size-4 opacity-70" />
-          Execution Details
+          <.icon name="hero-information-circle" class="size-4 opacity-70" /> Execution Details
         </h2>
       </div>
 
@@ -924,7 +1372,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
               Execution ID
             </p>
-            <p class="text-sm font-mono mt-1">{short_id(@execution.id)}</p>
+            <p class="text-sm font-mono mt-1">
+              <.link navigate={~p"/workflows/#{@workflow.id}/executions/#{@execution.id}"} class="link link-primary">
+                {short_id(@execution.id)}
+              </.link>
+            </p>
           </div>
 
           <div>

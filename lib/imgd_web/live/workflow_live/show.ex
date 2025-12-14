@@ -8,6 +8,8 @@ defmodule ImgdWeb.WorkflowLive.Show do
   alias Imgd.Executions
   import ImgdWeb.Formatters, except: [trigger_label: 1]
 
+  @raw_input_key "__imgd_raw_input__"
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     scope = socket.assigns.current_scope
@@ -15,7 +17,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
     try do
       workflow = Workflows.get_workflow!(scope, id)
       executions = Executions.list_executions(scope, workflow: workflow, limit: 10)
-
 
       socket =
         socket
@@ -34,10 +35,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
         {:ok, socket}
     end
   end
-
-
-
-
 
   defp workflow_input_schema(workflow) do
     workflow.settings[:input_schema] || workflow.settings["input_schema"]
@@ -96,7 +93,9 @@ defmodule ImgdWeb.WorkflowLive.Show do
                 <h1 class="text-3xl font-semibold tracking-tight text-base-content">
                   {@workflow.name}
                 </h1>
-                <span :if={@workflow.current_version_tag} class="badge badge-ghost badge-xs">v{@workflow.current_version_tag}</span>
+                <span :if={@workflow.current_version_tag} class="badge badge-ghost badge-xs">
+                  v{@workflow.current_version_tag}
+                </span>
                 <span class={["badge badge-sm", status_badge_class(@workflow.status)]}>
                   {status_label(@workflow.status)}
                 </span>
@@ -128,7 +127,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
       </:page_header>
 
       <div class="space-y-8">
-
         <%!-- Recent Executions Section --%>
         <section>
           <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
@@ -324,11 +322,14 @@ defmodule ImgdWeb.WorkflowLive.Show do
   defp execution_status_class(_), do: "badge-ghost"
 
   defp format_execution_value(nil), do: "-"
+
+  defp format_execution_value(%{@raw_input_key => raw} = value) when map_size(value) == 1,
+    do: format_execution_value(raw)
+
   defp format_execution_value(%{"value" => value}), do: inspect(value)
   defp format_execution_value(%{"productions" => prods}) when is_list(prods), do: inspect(prods)
   defp format_execution_value(value) when is_map(value), do: inspect(value)
   defp format_execution_value(value), do: inspect(value)
-
 
   defp format_duration(nil), do: "-"
   defp format_duration(ms) when is_number(ms) and ms < 1000, do: "#{ms}ms"

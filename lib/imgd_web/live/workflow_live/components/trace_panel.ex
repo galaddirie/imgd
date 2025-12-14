@@ -13,8 +13,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
     <div>
       <div class="border-b border-base-200 px-4 py-3 flex items-center justify-between">
         <h2 class="text-sm font-semibold text-base-content flex items-center gap-2">
-          <.icon name="hero-document-text" class="size-4 opacity-70" />
-          Execution Trace
+          <.icon name="hero-document-text" class="size-4 opacity-70" /> Execution Trace
         </h2>
         <%= if @running do %>
           <span class="badge badge-info badge-sm animate-pulse">Running</span>
@@ -34,7 +33,7 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
                   "flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium",
                   step_status_class(step.status)
                 ]}>
-                  <%= step_status_icon(step.status) %>
+                  {step_status_icon(step.status)}
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">

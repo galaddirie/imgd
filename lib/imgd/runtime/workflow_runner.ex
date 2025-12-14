@@ -21,6 +21,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   alias Imgd.Observability.Instrumentation
 
   @default_timeout_ms 300_000
+  @raw_input_key "__imgd_raw_input__"
 
   @type run_result :: {:ok, Execution.t()} | {:error, term()}
 
@@ -177,12 +178,13 @@ defmodule Imgd.Runtime.WorkflowRunner do
   # ============================================================================
 
   defp build_context(%Execution{} = execution) do
-    trigger_input = Execution.trigger_data(execution)
+    trigger_data = Execution.trigger_data(execution)
+    initial_input = extract_trigger_input(trigger_data)
 
     context =
       Context.new(execution,
         current_node_id: nil,
-        current_input: trigger_input
+        current_input: initial_input
       )
 
     {:ok, context}
@@ -194,11 +196,12 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp execute_with_timeout(%Execution{} = execution, runic_workflow, context) do
     timeout_ms = get_timeout_ms(execution)
-    trigger_input = Execution.trigger_data(execution)
+    trigger_data = Execution.trigger_data(execution)
+    initial_input = extract_trigger_input(trigger_data)
 
     task =
       Task.async(fn ->
-        execute_workflow_with_events(execution, runic_workflow, trigger_input, context)
+        execute_workflow_with_events(execution, runic_workflow, initial_input, context)
       end)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
@@ -227,11 +230,16 @@ defmodule Imgd.Runtime.WorkflowRunner do
     end
   end
 
+  defp extract_trigger_input(%{@raw_input_key => raw}), do: raw
+  defp extract_trigger_input(%{_imgd_raw_input__: raw}), do: raw
+  defp extract_trigger_input(%{} = data), do: data
+  defp extract_trigger_input(other), do: other
+
   # ============================================================================
   # Workflow Execution with Per-Node Events
   # ============================================================================
 
-  defp execute_workflow_with_events(execution, runic_workflow, trigger_input, context) do
+  defp execute_workflow_with_events(execution, runic_workflow, initial_input, context) do
     try do
       # Get nodes for tracking
       nodes = execution.workflow_version.nodes || []
@@ -240,12 +248,12 @@ defmodule Imgd.Runtime.WorkflowRunner do
       Logger.debug("Starting workflow execution",
         execution_id: execution.id,
         node_count: map_size(node_map),
-        trigger_input: inspect(trigger_input)
+        trigger_input: inspect(initial_input)
       )
 
       # Execute with node tracking
       {executed_workflow, final_context} =
-        execute_nodes_sequentially(execution, runic_workflow, trigger_input, context, node_map)
+        execute_nodes_sequentially(execution, runic_workflow, initial_input, context, node_map)
 
       # Extract results
       productions = Workflow.raw_productions(executed_workflow)
@@ -297,12 +305,12 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   # Execute nodes with per-node event broadcasting
-  defp execute_nodes_sequentially(execution, runic_workflow, trigger_input, context, node_map) do
+  defp execute_nodes_sequentially(execution, runic_workflow, initial_input, context, node_map) do
     # Execute the workflow with a maximum iteration guard to prevent infinite loops
     max_iterations = map_size(node_map) * 2 + 10
 
     executed_workflow =
-      execute_workflow_bounded(runic_workflow, trigger_input, max_iterations)
+      execute_workflow_bounded(runic_workflow, initial_input, max_iterations)
 
     # Extract facts and map to nodes
     facts = Workflow.facts(executed_workflow)

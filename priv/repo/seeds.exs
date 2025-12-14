@@ -88,7 +88,22 @@ api_fetch_debug = SeedHelpers.node_id("debug")
       }
     ],
     triggers: [%{type: :manual, config: %{}}],
-    settings: %{timeout_ms: 60_000, max_retries: 3}
+    settings: %{
+      timeout_ms: 60_000,
+      max_retries: 3,
+      demo_inputs: [
+        %{
+          label: "Default request",
+          description: "Hit JSONPlaceholder with no payload",
+          data: %{}
+        },
+        %{
+          label: "Custom post id",
+          description: "Attach a post id to the run for downstream nodes",
+          data: %{"post_id" => 42}
+        }
+      ]
+    }
   })
 
 # =============================================================================
@@ -163,7 +178,22 @@ transform_debug = SeedHelpers.node_id("debug")
       }
     ],
     triggers: [%{type: :manual, config: %{}}],
-    settings: %{timeout_ms: 120_000, max_retries: 2}
+    settings: %{
+      timeout_ms: 120_000,
+      max_retries: 2,
+      demo_inputs: [
+        %{
+          label: "User 1",
+          description: "Default user data fetched from jsonplaceholder",
+          data: %{"user_id" => 1}
+        },
+        %{
+          label: "User 5",
+          description: "Fetch and greet a different user id",
+          data: %{"user_id" => 5}
+        }
+      ]
+    }
   })
 
 # Publish this workflow
@@ -223,7 +253,13 @@ math_debug_out = SeedHelpers.node_id("debug_out")
       %{id: SeedHelpers.conn_id(), source_node_id: math_add, target_node_id: math_multiply},
       %{id: SeedHelpers.conn_id(), source_node_id: math_multiply, target_node_id: math_debug_out}
     ],
-    triggers: [%{type: :manual, config: %{}}]
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{label: "Start at 12", description: "Expect (12 + 10) * 2 = 44", data: 12},
+        %{label: "Start at 100", description: "Expect (100 + 10) * 2 = 220", data: 100}
+      ]
+    }
   })
 
 {:ok, _} =
@@ -326,7 +362,22 @@ agg_debug = SeedHelpers.node_id("debug")
       %{id: SeedHelpers.conn_id(), source_node_id: agg_merge, target_node_id: agg_debug}
     ],
     triggers: [%{type: :manual, config: %{}}],
-    settings: %{timeout_ms: 180_000, max_retries: 1}
+    settings: %{
+      timeout_ms: 180_000,
+      max_retries: 1,
+      demo_inputs: [
+        %{
+          label: "Default fetch",
+          description: "Run with no payload and gather sample posts/users",
+          data: %{}
+        },
+        %{
+          label: "Limit to 3",
+          description: "Use a smaller limit hint for downstream processing",
+          data: %{"limit" => 3}
+        }
+      ]
+    }
   })
 
 # =============================================================================
@@ -399,7 +450,20 @@ webhook_http = SeedHelpers.node_id("http")
     ],
     triggers: [
       %{type: :webhook, config: %{"path" => "/hooks/incoming", "method" => "POST"}}
-    ]
+    ],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "User created",
+          description: "Webhook-style payload for testing without an external caller",
+          data: %{
+            "event" => "user.created",
+            "timestamp" => "2024-01-01T12:00:00Z",
+            "data" => %{"id" => "usr_123", "email" => "demo@example.com"}
+          }
+        }
+      ]
+    }
   })
 
 {:ok, _} =
@@ -443,7 +507,16 @@ legacy_debug = SeedHelpers.node_id("debug")
     connections: [
       %{id: SeedHelpers.conn_id(), source_node_id: legacy_http, target_node_id: legacy_debug}
     ],
-    triggers: [%{type: :manual, config: %{}}]
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "Legacy ping",
+          description: "Run without payload for quick regression checks",
+          data: %{}
+        }
+      ]
+    }
   })
 
 # Publish then archive
@@ -519,7 +592,16 @@ report_debug = SeedHelpers.node_id("debug")
     ],
     triggers: [
       %{type: :schedule, config: %{"cron" => "0 9 * * *", "timezone" => "UTC"}}
-    ]
+    ],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "Daily run context",
+          description: "Simulate a scheduled run date",
+          data: %{"date" => "2024-01-01"}
+        }
+      ]
+    }
   })
 
 {:ok, _} =
@@ -540,7 +622,12 @@ IO.puts("  → Empty Workflow (draft)")
     status: :draft,
     nodes: [],
     connections: [],
-    triggers: [%{type: :manual, config: %{}}]
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{label: "Empty payload", description: "Useful for wiring up new nodes", data: %{}}
+      ]
+    }
   })
 
 # =============================================================================
@@ -615,7 +702,22 @@ demo_debug = SeedHelpers.node_id("debug")
       %{id: SeedHelpers.conn_id(), source_node_id: demo_set, target_node_id: demo_rename},
       %{id: SeedHelpers.conn_id(), source_node_id: demo_rename, target_node_id: demo_debug}
     ],
-    triggers: [%{type: :manual, config: %{}}]
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "Sample user profile",
+          description: "Matches the transform steps for pick/set/rename demo",
+          data: %{
+            "id" => 99,
+            "name" => "Grace Hopper",
+            "email" => "grace@example.com",
+            "company" => %{"name" => "Navy"},
+            "role" => "Engineer"
+          }
+        }
+      ]
+    }
   })
 
 # =============================================================================
@@ -655,7 +757,16 @@ err_debug = SeedHelpers.node_id("debug")
     connections: [
       %{id: SeedHelpers.conn_id(), source_node_id: err_http, target_node_id: err_debug}
     ],
-    triggers: [%{type: :manual, config: %{}}]
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "Timeout check",
+          description: "Attach a request id to track the failing call",
+          data: %{"request_id" => "demo-500"}
+        }
+      ]
+    }
   })
 
 # =============================================================================
