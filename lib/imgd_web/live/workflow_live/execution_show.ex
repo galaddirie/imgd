@@ -54,7 +54,9 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
 
   defp fetch_execution(scope, workflow_id, execution_id) do
     execution =
-      Executions.get_execution!(scope, execution_id, preload: [:workflow, :workflow_version, :node_executions])
+      Executions.get_execution!(scope, execution_id,
+        preload: [:workflow, :workflow_version, :node_executions]
+      )
 
     if execution.workflow_id == workflow_id do
       {:ok, execution}
