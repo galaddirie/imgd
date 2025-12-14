@@ -53,7 +53,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:dag_edges, edges)
           |> assign(:dag_meta, layout_meta)
           |> assign(:execution, nil)
-          |> assign(:subscribed_execution_ids, MapSet.new())
           |> assign(:node_states, %{})
           |> assign(:selected_node_id, nil)
           |> assign(:running?, false)
@@ -78,12 +77,14 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         {:noreply, put_flash(socket, :error, "Execution not found")}
 
       execution ->
+        # Subscribe to this execution's updates
+        PubSub.subscribe_execution(execution.id)
+
         # Rebuild state from existing execution
         node_states = build_node_states_from_execution(execution)
 
         socket =
           socket
-          |> ensure_execution_subscription(execution)
           |> assign(:execution, execution)
           |> assign(:node_states, node_states)
           |> assign(:running?, Execution.active?(execution))
@@ -116,11 +117,12 @@ defmodule ImgdWeb.WorkflowLive.Runner do
                trigger: %{type: :manual, data: parsed.trigger_data},
                metadata: build_manual_metadata(parsed.demo_label)
              }) do
+        PubSub.subscribe_execution(execution.id)
+
         run_form = build_run_form(input_string)
 
         socket =
           socket
-          |> ensure_execution_subscription(execution)
           |> assign(:execution, execution)
           |> assign(:running?, true)
           |> assign(:node_states, %{})
@@ -354,23 +356,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     do: String.slice(v, 0, 100) <> "..."
 
   defp truncate_value(v), do: v
-
-  defp ensure_execution_subscription(socket, nil), do: socket
-
-  defp ensure_execution_subscription(socket, %Execution{id: id}) do
-    ensure_execution_subscription(socket, id)
-  end
-
-  defp ensure_execution_subscription(socket, id) when is_binary(id) do
-    subscribed = Map.get(socket.assigns, :subscribed_execution_ids, MapSet.new())
-
-    if MapSet.member?(subscribed, id) do
-      socket
-    else
-      PubSub.subscribe_execution(id)
-      assign(socket, :subscribed_execution_ids, MapSet.put(subscribed, id))
-    end
-  end
 
   defp parse_input_payload(input_string, demo_inputs, raw_key) do
     trimmed = String.trim(input_string || "")
