@@ -21,6 +21,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
   require Runic
   alias Runic.Workflow
+  alias Runic.Workflow.{Components, Step}
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Workflows.Embeds.Node
   alias Imgd.Executions.Context
@@ -217,13 +218,16 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
   defp create_runic_step(%Node{} = node, %Context{} = context) do
     # Create a step that wraps the NodeExecutor
-    # The work function is wrapped to catch any exceptions and convert them to
-    # NodeExecutionError for proper error handling in the workflow runner
-    Runic.step(
+    # We must provide a stable, per-node hash because Runic uses the step hash
+    # as the graph vertex identifier. Relying on the macro-generated hash would
+    # produce identical hashes for every node (all share the same anonymous
+    # function AST), collapsing the graph into a single vertex.
+    work = fn input -> execute_node(node, input, context) end
+
+    Step.new(
       name: String.to_atom(node.id),
-      work: fn input ->
-        execute_node(node, input, context)
-      end
+      work: work,
+      hash: Components.fact_hash({node.id, node.type_id})
     )
   end
 
