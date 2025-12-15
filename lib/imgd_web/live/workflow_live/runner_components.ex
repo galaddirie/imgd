@@ -973,10 +973,10 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
     """
   end
 
-  defp duration_bar_width(ms) when ms < 100, do: 20
-  defp duration_bar_width(ms) when ms < 500, do: 40
-  defp duration_bar_width(ms) when ms < 1000, do: 60
-  defp duration_bar_width(ms) when ms < 5000, do: 80
+  defp duration_bar_width(us) when us < 1000, do: 20
+  defp duration_bar_width(us) when us < 10_000, do: 40
+  defp duration_bar_width(us) when us < 100_000, do: 60
+  defp duration_bar_width(us) when us < 1_000_000, do: 80
   defp duration_bar_width(_), do: 100
 
   defp node_bg_class(nil, false), do: "fill-base-100 stroke-base-300"
