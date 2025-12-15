@@ -157,7 +157,18 @@ defmodule ImgdWeb.WorkflowLive.Show do
                   <tbody>
                     <%= for execution <- @executions do %>
                       <tr class="hover">
-                        <td class="font-mono text-xs">{short_id(execution.id)}</td>
+                        <td class="font-mono text-xs">
+                          <div class="flex items-center gap-2">
+                            
+                            {short_id(execution.id)}
+                            <.icon
+                              :if={partial_execution?(execution)}
+                              name="hero-beaker"
+                              class="size-4 text-primary/80"
+                              title="Partial execution"
+                            />
+                          </div>
+                        </td>
                         <td>
                           <span class={["badge badge-xs", execution_status_class(execution.status)]}>
                             {execution.status}
@@ -311,6 +322,18 @@ defmodule ImgdWeb.WorkflowLive.Show do
   end
 
   # Helper functions
+
+  defp partial_execution?(%{metadata: %{extras: extras}}) when is_map(extras) do
+    mode = Map.get(extras, "execution_mode") || Map.get(extras, :execution_mode)
+
+    case mode do
+      mode when is_binary(mode) -> String.starts_with?(mode, "partial")
+      mode when is_atom(mode) -> mode |> Atom.to_string() |> String.starts_with?("partial")
+      _ -> false
+    end
+  end
+
+  defp partial_execution?(_), do: false
 
   defp execution_status_class(:completed), do: "badge-success"
   defp execution_status_class(:failed), do: "badge-error"
