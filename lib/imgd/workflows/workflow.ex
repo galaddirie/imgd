@@ -7,6 +7,14 @@ defmodule Imgd.Workflows.Workflow do
 
   This is the mutable "draft" state. When published, an immutable
   `WorkflowVersion` snapshot is created.
+
+  ## Pinned Outputs
+
+  The `pinned_outputs` field stores development-time node output pins.
+  These are NOT included in published versions - they're iterative
+  development tools, not production artifacts.
+
+  Structure: `%{node_id => %{data: ..., pinned_at: ..., ...}}`
   """
   @derive {Jason.Encoder,
            except: [
@@ -33,6 +41,16 @@ defmodule Imgd.Workflows.Workflow do
           optional(atom() | String.t()) => any()
         }
 
+  @typedoc "Pinned output structure"
+  @type pinned_output :: %{
+          required(:data) => map() | any(),
+          required(:pinned_at) => String.t(),
+          required(:pinned_by) => String.t(),
+          required(:config_hash) => String.t(),
+          optional(:source_execution_id) => String.t() | nil,
+          optional(:label) => String.t() | nil
+        }
+
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
           name: String.t(),
@@ -42,6 +60,7 @@ defmodule Imgd.Workflows.Workflow do
           connections: [Connection.t()],
           triggers: [Trigger.t()],
           settings: settings(),
+          pinned_outputs: %{String.t() => pinned_output()},
           current_version_tag: String.t() | nil,
           published_version_id: Ecto.UUID.t() | nil,
           user_id: Ecto.UUID.t(),
@@ -63,6 +82,10 @@ defmodule Imgd.Workflows.Workflow do
         timeout_ms: 300_000,
         max_retries: 3
       }
+
+    # Development-time pinned node outputs
+    # Structure: %{node_id => %{data: ..., pinned_at: ..., pinned_by: ..., config_hash: ..., ...}}
+    field :pinned_outputs, :map, default: %{}
 
     # What you're calling the current draft version (e.g., "1.3.0-dev", "next")
     field :current_version_tag, :string
@@ -87,7 +110,8 @@ defmodule Imgd.Workflows.Workflow do
       :current_version_tag,
       :published_version_id,
       :user_id,
-      :settings
+      :settings,
+      :pinned_outputs
     ])
     |> cast_embed(:nodes)
     |> cast_embed(:connections)
@@ -95,6 +119,7 @@ defmodule Imgd.Workflows.Workflow do
     |> validate_required([:name, :user_id, :status])
     |> validate_length(:name, max: 200)
     |> validate_settings()
+    |> validate_pinned_outputs()
   end
 
   defp validate_settings(changeset) do
@@ -114,6 +139,29 @@ defmodule Imgd.Workflows.Workflow do
       end
     end)
   end
+
+  defp validate_pinned_outputs(changeset) do
+    validate_change(changeset, :pinned_outputs, fn :pinned_outputs, outputs ->
+      cond do
+        not is_map(outputs) ->
+          [pinned_outputs: "must be a map"]
+
+        not Enum.all?(outputs, &valid_pinned_output?/1) ->
+          [pinned_outputs: "contains invalid pin data"]
+
+        true ->
+          []
+      end
+    end)
+  end
+
+  defp valid_pinned_output?({node_id, pin}) when is_binary(node_id) and is_map(pin) do
+    has_data = Map.has_key?(pin, "data") or Map.has_key?(pin, :data)
+    has_hash = Map.has_key?(pin, "config_hash") or Map.has_key?(pin, :config_hash)
+    has_data and has_hash
+  end
+
+  defp valid_pinned_output?(_), do: false
 
   defp valid_timeout?(settings) do
     case fetch_setting(settings, :timeout_ms) do
@@ -135,7 +183,9 @@ defmodule Imgd.Workflows.Workflow do
     Map.get(settings, key) || Map.get(settings, Atom.to_string(key))
   end
 
-  # Convenience functions
+  # ============================================================================
+  # Convenience Functions
+  # ============================================================================
 
   @doc "Returns the primary trigger for the workflow, if any."
   def primary_trigger(%__MODULE__{triggers: [trigger | _]}), do: trigger
@@ -144,5 +194,28 @@ defmodule Imgd.Workflows.Workflow do
   @doc "Checks if the workflow has a specific trigger type."
   def has_trigger_type?(%__MODULE__{triggers: triggers}, type) do
     Enum.any?(triggers, &(&1.type == type))
+  end
+
+  @doc "Returns pinned output data for a node, or nil if not pinned."
+  def get_pinned_output(%__MODULE__{pinned_outputs: pins}, node_id) do
+    case Map.get(pins || %{}, node_id) do
+      nil -> nil
+      pin -> Map.get(pin, "data") || Map.get(pin, :data)
+    end
+  end
+
+  @doc "Checks if a node has pinned output."
+  def node_pinned?(%__MODULE__{pinned_outputs: pins}, node_id) do
+    Map.has_key?(pins || %{}, node_id)
+  end
+
+  @doc "Returns all pinned node IDs."
+  def pinned_node_ids(%__MODULE__{pinned_outputs: pins}) do
+    Map.keys(pins || %{})
+  end
+
+  @doc "Returns the count of pinned nodes."
+  def pinned_count(%__MODULE__{pinned_outputs: pins}) do
+    map_size(pins || %{})
   end
 end

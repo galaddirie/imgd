@@ -31,6 +31,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   alias Runic.Workflow.{Components, Step}
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Workflows.Embeds.Node
+  alias Imgd.Workflows.DagUtils
   alias Ecto.Changeset
   alias Imgd.Executions.{Context, Execution, NodeExecution, NodeExecutionBuffer}
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
@@ -82,6 +83,160 @@ defmodule Imgd.Runtime.WorkflowBuilder do
       {:ok, workflow} -> workflow
       {:error, reason} -> raise "Failed to build workflow: #{inspect(reason)}"
     end
+  end
+
+  @spec build_partial(WorkflowVersion.t(), Context.t(), Execution.t(), keyword()) ::
+          build_result()
+  def build_partial(
+        %WorkflowVersion{} = version,
+        %Context{} = context,
+        %Execution{} = execution,
+        opts \\ []
+      ) do
+    target_node_ids = Keyword.get(opts, :target_nodes, [])
+    pinned_outputs = Keyword.get(opts, :pinned_outputs, %{})
+    include_targets = Keyword.get(opts, :include_targets, true)
+
+    pinned_ids = Map.keys(pinned_outputs)
+
+    # Compute which nodes actually need to run
+    nodes_to_run =
+      DagUtils.compute_execution_set(
+        target_node_ids,
+        version.nodes,
+        version.connections,
+        pinned_ids
+      )
+
+    # Optionally exclude target nodes themselves (for "run upstream only")
+    nodes_to_run =
+      if include_targets do
+        # Ensure targets are included
+        Enum.uniq(nodes_to_run ++ target_node_ids) -- pinned_ids
+      else
+        nodes_to_run -- target_node_ids
+      end
+
+    # If nothing to run, return early
+    if nodes_to_run == [] do
+      {:ok, build_empty_workflow(version)}
+    else
+      # Filter version to only include nodes we're running
+      filtered_nodes = Enum.filter(version.nodes, &(&1.id in nodes_to_run))
+
+      filtered_connections =
+        Enum.filter(version.connections, fn c ->
+          # Include connection if EITHER endpoint is in our execution set
+          # OR if source is pinned (we need the connection to wire up data flow)
+          source_in_set = c.source_node_id in nodes_to_run
+          target_in_set = c.target_node_id in nodes_to_run
+          source_is_pinned = c.source_node_id in pinned_ids
+
+          (source_in_set or source_is_pinned) and target_in_set
+        end)
+
+      partial_version = %{version | nodes: filtered_nodes, connections: filtered_connections}
+
+      # Pre-seed context with pinned outputs
+      context_with_pins = %{
+        context
+        | node_outputs: Map.merge(context.node_outputs, pinned_outputs)
+      }
+
+      # Also pre-seed the ExecutionState so hooks can see pinned data
+      for {node_id, output} <- pinned_outputs do
+        ExecutionState.record_output(context.execution_id, node_id, output)
+      end
+
+      # Build the partial workflow using the standard build function
+      build(partial_version, context_with_pins, execution)
+    end
+  end
+
+  @doc """
+  Builds a partial workflow for executing downstream from a starting node.
+
+  The starting node must have pinned output. All downstream nodes will
+  execute using the pinned data as their input source.
+
+  ## Options
+
+  - `:from_node` - The node ID to start from (must be pinned)
+  - `:pinned_outputs` - Map of all pinned outputs (required)
+
+  ## Example
+
+      # Run all nodes downstream of "http_request" using its pinned output
+      {:ok, workflow} = build_downstream(version, context, execution,
+        from_node: "http_request",
+        pinned_outputs: %{"http_request" => %{"status" => 200, ...}}
+      )
+  """
+  @spec build_downstream(WorkflowVersion.t(), Context.t(), Execution.t(), keyword()) ::
+          build_result()
+  def build_downstream(
+        %WorkflowVersion{} = version,
+        %Context{} = context,
+        %Execution{} = execution,
+        opts \\ []
+      ) do
+    from_node_id = Keyword.fetch!(opts, :from_node)
+    pinned_outputs = Keyword.get(opts, :pinned_outputs, %{})
+
+    # Get all downstream nodes
+    downstream_ids =
+      DagUtils.downstream_closure(
+        from_node_id,
+        version.nodes,
+        version.connections
+      )
+
+    # Build partial workflow with downstream nodes as targets
+    build_partial(version, context, execution,
+      target_nodes: downstream_ids,
+      pinned_outputs: pinned_outputs,
+      include_targets: true
+    )
+  end
+
+  @doc """
+  Builds a workflow that executes a single node only.
+
+  Assumes all upstream dependencies are satisfied (via pins or prior execution).
+  Useful for re-running a single node during debugging.
+  """
+  @spec build_single_node(WorkflowVersion.t(), Context.t(), Execution.t(), String.t(), map()) ::
+          build_result()
+  def build_single_node(
+        %WorkflowVersion{} = version,
+        %Context{} = context,
+        %Execution{} = execution,
+        node_id,
+        input_data
+      ) do
+    # Find the node
+    case Enum.find(version.nodes, &(&1.id == node_id)) do
+      nil ->
+        {:error, {:node_not_found, node_id}}
+
+      node ->
+        # Create a minimal version with just this node
+        single_node_version = %{version | nodes: [node], connections: []}
+
+        # The input_data will be the trigger data for this single-node workflow
+        context_with_input = %{
+          context
+          | node_outputs: Map.put(context.node_outputs, "__trigger__", input_data)
+        }
+
+        build(single_node_version, context_with_input, execution)
+    end
+  end
+
+  # Helper to build an empty/no-op workflow
+  defp build_empty_workflow(version) do
+    require Runic
+    Runic.workflow(name: "empty_partial_#{version.workflow_id}")
   end
 
   # ============================================================================

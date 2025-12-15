@@ -62,6 +62,15 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:selected_demo, initial_demo)
           |> assign(:run_form, run_form)
           |> assign(:run_form_error, nil)
+        |> assign(:execution_mode, :full)
+        |> assign(:show_pin_modal, false)
+        |> assign(:pin_modal_node_id, nil)
+        |> assign(:pin_modal_data, nil)
+        |> assign(:pin_modal_existing, nil)
+        |> assign(:show_context_menu, false)
+        |> assign(:context_menu_node_id, nil)
+        |> assign(:context_menu_position, %{x: 0, y: 0})
+        |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(workflow))
           |> stream(:trace_log, [], dom_id: &"trace-#{&1.id}")
 
         {:ok, socket}
@@ -103,48 +112,17 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   # ============================================================================
 
   @impl true
+  def handle_event("set_execution_mode", %{"mode" => mode}, socket) do
+    mode_atom = String.to_existing_atom(mode)
+    {:noreply, assign(socket, :execution_mode, mode_atom)}
+  end
+
+  @impl true
   def handle_event("run_workflow", params, socket) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
-    run_params = Map.get(params, "run", %{})
-    input_string = Map.get(run_params, "data", "")
-
-    if socket.assigns.can_run? do
-      with {:ok, parsed} <-
-             parse_input_payload(input_string, socket.assigns.demo_inputs, @raw_input_key),
-           {:ok, %{execution: execution}} <-
-             Executions.start_and_enqueue_execution(scope, workflow, %{
-               trigger: %{type: :manual, data: parsed.trigger_data},
-               metadata: build_manual_metadata(parsed.demo_label)
-             }) do
-        run_form = build_run_form(input_string)
-
-        socket =
-          socket
-          |> assign(:execution, execution)
-          |> assign(:running?, true)
-          |> assign(:node_states, %{})
-          |> assign(:trace_log_count, 0)
-          |> assign(:selected_demo, parsed.demo)
-          |> assign(:run_form, run_form)
-          |> assign(:run_form_error, nil)
-          |> stream(:trace_log, [], reset: true)
-          |> append_trace_log(:info, "Execution started", %{execution_id: short_id(execution.id)})
-          |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
-
-        {:noreply, socket}
-      else
-        {:error, :invalid_payload, message} ->
-          {:noreply,
-           socket
-           |> assign(:run_form, build_run_form(input_string, errors: [data: {message, []}]))
-           |> assign(:run_form_error, message)}
-
-        {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
-      end
-    else
-      {:noreply, put_flash(socket, :error, "Workflow must be published before running")}
+    case socket.assigns.execution_mode do
+      :full -> handle_full_workflow_run(params, socket)
+      :to_node -> handle_execute_to_node(socket)
+      :downstream -> handle_execute_downstream(socket)
     end
   end
 
@@ -177,6 +155,195 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   end
 
   @impl true
+  def handle_event("execute_to_node", %{"node-id" => node_id}, socket) do
+    handle_execute_to_node_impl(socket, node_id)
+  end
+  @impl true
+  def handle_event("execute_downstream", %{"node-id" => node_id}, socket) do
+    handle_execute_downstream_impl(socket, node_id)
+  end
+
+  # ============================================================================
+  # Pin Management Events
+  # ============================================================================
+
+  @impl true
+  def handle_event("pin_node", %{"node-id" => node_id}, socket) do
+    node_output = get_in(socket.assigns.node_states, [node_id, :output_data])
+    existing_pin = get_in(socket.assigns.workflow.pinned_outputs || %{}, [node_id])
+
+    socket =
+      socket
+      |> assign(:show_pin_modal, true)
+      |> assign(:pin_modal_node_id, node_id)
+      |> assign(:pin_modal_data, node_output)
+      |> assign(:pin_modal_existing, existing_pin)
+      |> assign(:show_context_menu, false)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("pin_from_execution", %{"node-id" => node_id}, socket) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+
+    node_output = get_in(socket.assigns.node_states, [node_id, :output_data])
+
+    if node_output do
+      execution_id = socket.assigns.execution && socket.assigns.execution.id
+
+      case Workflows.pin_node_output(scope, workflow, node_id, node_output,
+             execution_id: execution_id,
+             label: "From execution"
+           ) do
+        {:ok, updated_workflow} ->
+          socket =
+            socket
+            |> assign(:workflow, updated_workflow)
+            |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(updated_workflow))
+            |> assign(:show_context_menu, false)
+            |> put_flash(:info, "Output pinned successfully")
+            |> append_trace_log(:info, "Pinned node output", %{node_id: node_id})
+
+          {:noreply, socket}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to pin: #{format_error(reason)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "No output data available to pin")}
+    end
+  end
+
+  @impl true
+  def handle_event("confirm_pin", %{"node_id" => node_id, "data" => data_json} = params, socket) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+    label = Map.get(params, "label")
+
+    case Jason.decode(data_json) do
+      {:ok, data} ->
+        case Workflows.pin_node_output(scope, workflow, node_id, data, label: label) do
+          {:ok, updated_workflow} ->
+            socket =
+              socket
+              |> assign(:workflow, updated_workflow)
+              |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(updated_workflow))
+              |> assign(:show_pin_modal, false)
+              |> put_flash(:info, "Output pinned successfully")
+              |> append_trace_log(:info, "Pinned node output", %{node_id: node_id, label: label})
+
+            {:noreply, socket}
+
+          {:error, {:pin_too_large, size, max}} ->
+            {:noreply, put_flash(socket, :error, "Pin data too large (#{size} bytes, max #{max})")}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to pin: #{format_error(reason)}")}
+        end
+
+      {:error, %Jason.DecodeError{} = error} ->
+        {:noreply, put_flash(socket, :error, "Invalid JSON: #{Exception.message(error)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("clear_pin", %{"node-id" => node_id}, socket) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+
+    case Workflows.unpin_node_output(scope, workflow, node_id) do
+      {:ok, updated_workflow} ->
+        socket =
+          socket
+          |> assign(:workflow, updated_workflow)
+          |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(updated_workflow))
+          |> assign(:show_context_menu, false)
+          |> put_flash(:info, "Pin removed")
+          |> append_trace_log(:info, "Removed pin", %{node_id: node_id})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to remove pin: #{format_error(reason)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("clear_all_pins", _params, socket) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+
+    case Workflows.clear_all_pins(scope, workflow) do
+      {:ok, updated_workflow} ->
+        socket =
+          socket
+          |> assign(:workflow, updated_workflow)
+          |> assign(:pins_with_status, %{})
+          |> put_flash(:info, "All pins cleared")
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to clear pins: #{format_error(reason)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("view_pin", %{"node-id" => node_id}, socket) do
+    existing_pin = get_in(socket.assigns.workflow.pinned_outputs || %{}, [node_id])
+    pin_data = existing_pin && (Map.get(existing_pin, "data") || Map.get(existing_pin, :data))
+
+    socket =
+      socket
+      |> assign(:show_pin_modal, true)
+      |> assign(:pin_modal_node_id, node_id)
+      |> assign(:pin_modal_data, pin_data)
+      |> assign(:pin_modal_existing, existing_pin)
+      |> assign(:show_context_menu, false)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("close_pin_modal", _params, socket) do
+    socket =
+      socket
+      |> assign(:show_pin_modal, false)
+      |> assign(:pin_modal_node_id, nil)
+      |> assign(:pin_modal_data, nil)
+      |> assign(:pin_modal_existing, nil)
+
+    {:noreply, socket}
+  end
+
+  # ============================================================================
+  # Context Menu Events
+  # ============================================================================
+
+  @impl true
+  def handle_event("open_context_menu", %{"node-id" => node_id, "x" => x, "y" => y}, socket) do
+    socket =
+      socket
+      |> assign(:show_context_menu, true)
+      |> assign(:context_menu_node_id, node_id)
+      |> assign(:context_menu_position, %{x: x, y: y})
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("close_context_menu", _params, socket) do
+    socket =
+      socket
+      |> assign(:show_context_menu, false)
+      |> assign(:context_menu_node_id, nil)
+
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_event("select_node", %{"node-id" => node_id}, socket) do
     selected = if socket.assigns.selected_node_id == node_id, do: nil, else: node_id
     {:noreply, assign(socket, :selected_node_id, selected)}
@@ -185,6 +352,141 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   @impl true
   def handle_event("clear_selection", _params, socket) do
     {:noreply, assign(socket, :selected_node_id, nil)}
+  end
+
+  # ============================================================================
+  # Execution Mode Handlers
+  # ============================================================================
+
+  defp handle_full_workflow_run(params, socket) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+    run_params = Map.get(params, "run", %{})
+    input_string = Map.get(run_params, "data", "")
+
+    if socket.assigns.can_run? do
+      with {:ok, parsed} <-
+             parse_input_payload(input_string, socket.assigns.demo_inputs, @raw_input_key),
+           {:ok, %{execution: execution}} <-
+             Executions.start_and_enqueue_execution(scope, workflow, %{
+               trigger: %{type: :manual, data: parsed.trigger_data},
+               metadata: build_manual_metadata(parsed.demo_label)
+             }) do
+        PubSub.subscribe_execution(execution.id)
+        run_form = build_run_form(input_string)
+
+        socket =
+          socket
+          |> assign(:execution, execution)
+          |> assign(:running?, true)
+          |> assign(:node_states, %{})
+          |> assign(:trace_log_count, 0)
+          |> assign(:selected_demo, parsed.demo)
+          |> assign(:run_form, run_form)
+          |> assign(:run_form_error, nil)
+          |> stream(:trace_log, [], reset: true)
+          |> append_trace_log(:info, "Execution started", %{execution_id: short_id(execution.id)})
+          |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
+
+        {:noreply, socket}
+      else
+        {:error, :invalid_payload, message} ->
+          {:noreply,
+           socket
+           |> assign(:run_form, build_run_form(input_string, errors: [data: {message, []}]))
+           |> assign(:run_form_error, message)}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Workflow must be published before running")}
+    end
+  end
+
+  defp handle_execute_to_node(socket) do
+    case socket.assigns.selected_node_id do
+      nil ->
+        {:noreply, put_flash(socket, :error, "No node selected")}
+
+      node_id ->
+        handle_execute_to_node_impl(socket, node_id)
+    end
+  end
+
+  defp handle_execute_to_node_impl(socket, node_id) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+    trigger_data = get_trigger_data_from_form(socket)
+
+    case Executions.execute_node(scope, workflow, node_id, trigger_data: trigger_data) do
+      {:ok, execution} ->
+        PubSub.subscribe_execution(execution.id)
+
+        socket =
+          socket
+          |> assign(:execution, execution)
+          |> assign(:running?, true)
+          |> assign(:node_states, build_initial_pin_states(workflow))
+          |> assign(:trace_log_count, 0)
+          |> stream(:trace_log, [], reset: true)
+          |> append_trace_log(:info, "Partial execution started", %{
+            mode: "to_node",
+            target: node_id
+          })
+          |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
+          |> assign(:show_context_menu, false)
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Execution failed: #{format_error(reason)}")}
+    end
+  end
+
+  defp handle_execute_downstream(socket) do
+    case socket.assigns.selected_node_id do
+      nil ->
+        {:noreply, put_flash(socket, :error, "No node selected")}
+
+      node_id ->
+        handle_execute_downstream_impl(socket, node_id)
+    end
+  end
+
+  defp handle_execute_downstream_impl(socket, node_id) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+
+    case Executions.execute_downstream(scope, workflow, node_id) do
+      {:ok, execution} ->
+        PubSub.subscribe_execution(execution.id)
+
+        socket =
+          socket
+          |> assign(:execution, execution)
+          |> assign(:running?, true)
+          |> assign(:node_states, build_initial_pin_states(workflow))
+          |> assign(:trace_log_count, 0)
+          |> stream(:trace_log, [], reset: true)
+          |> append_trace_log(:info, "Downstream execution started", %{
+            mode: "downstream",
+            from_node: node_id
+          })
+          |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
+          |> assign(:show_context_menu, false)
+
+        {:noreply, socket}
+
+      {:error, {:node_not_pinned, _}} ->
+        {:noreply, put_flash(socket, :error, "Node must be pinned to execute downstream")}
+
+      {:error, :no_downstream_nodes} ->
+        {:noreply, put_flash(socket, :error, "No downstream nodes to execute")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Execution failed: #{format_error(reason)}")}
+    end
   end
 
   # ============================================================================
@@ -354,6 +656,42 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     do: String.slice(v, 0, 100) <> "..."
 
   defp truncate_value(v), do: v
+
+  defp get_trigger_data_from_form(socket) do
+    case socket.assigns.run_form do
+      %Phoenix.HTML.Form{source: %{"data" => data}} when is_binary(data) ->
+        case Jason.decode(data) do
+          {:ok, parsed} -> parsed
+          _ -> %{}
+        end
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp build_initial_pin_states(workflow) do
+    (workflow.pinned_outputs || %{})
+    |> Enum.map(fn {node_id, pin} ->
+      {node_id,
+       %{
+         status: :skipped,
+         output_data: Map.get(pin, "data") || Map.get(pin, :data),
+         pinned: true
+       }}
+    end)
+    |> Map.new()
+  end
+
+  defp format_error({:node_not_found, id}), do: "Node not found: #{id}"
+  defp format_error({:node_not_pinned, id}), do: "Node not pinned: #{id}"
+
+  defp format_error({:nodes_not_found, ids}),
+    do: "Nodes not found: #{Enum.join(ids, ", ")}"
+
+  defp format_error(:no_executable_version), do: "No executable version available"
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason)
 
   defp parse_input_payload(input_string, demo_inputs, raw_key) do
     trimmed = String.trim(input_string || "")
@@ -719,6 +1057,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             </div>
             <div class="flex items-center gap-3">
               <.execution_status_badge execution={@execution} running?={@running?} />
+              <.execution_mode_selector
+                execution_mode={@execution_mode}
+                selected_node_id={@selected_node_id}
+                workflow={@workflow}
+              />
               <button
                 type="submit"
                 form="run-config-form"
@@ -764,6 +1107,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
         <%!-- Right Panel: Node Details + Trace Log --%>
         <div class="space-y-6">
+          <.pins_summary_panel
+            workflow={@workflow}
+            pins_with_status={@pins_with_status}
+          />
           <.node_details_panel
             node_map={@node_map}
             node_states={@node_states}
@@ -779,6 +1126,29 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
       <%!-- Execution Metadata (bottom) --%>
       <.execution_metadata_panel :if={@execution} execution={@execution} />
+
+      <%!-- Pin Modal --%>
+      <.pin_modal
+        show={@show_pin_modal}
+        node_id={@pin_modal_node_id || ""}
+        node_name={@pin_modal_node_id && get_node_name(@node_map, @pin_modal_node_id) || ""}
+        current_data={@pin_modal_data}
+        existing_pin={@pin_modal_existing}
+      />
+
+      <%!-- Context Menu --%>
+      <%= if @show_context_menu and @context_menu_node_id do %>
+        <% node = Map.get(@node_map, @context_menu_node_id) %>
+        <% pin_status = Map.get(@pins_with_status || %{}, @context_menu_node_id) %>
+        <.node_context_menu
+          node_id={@context_menu_node_id}
+          node_name={node && node.name || @context_menu_node_id}
+          pinned={Map.has_key?(@workflow.pinned_outputs || %{}, @context_menu_node_id)}
+          pin_stale={pin_status && pin_status["stale"] || false}
+          has_output={get_in(@node_states, [@context_menu_node_id, :output_data]) != nil}
+          position={@context_menu_position}
+        />
+      <% end %>
     </Layouts.app>
     """
   end

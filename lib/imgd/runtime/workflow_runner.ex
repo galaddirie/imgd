@@ -66,6 +66,26 @@ defmodule Imgd.Runtime.WorkflowRunner do
     end)
   end
 
+  @doc """
+  Runs an execution using a provided builder function and precomputed context.
+
+  This is used for partial executions where only a subset of nodes are built.
+  """
+  @spec run_with_builder(Execution.t(), Context.t(), (-> WorkflowBuilder.build_result())) ::
+          run_result()
+  def run_with_builder(%Execution{} = execution, %Context{} = context, builder_fun)
+      when is_function(builder_fun, 0) do
+    Instrumentation.trace_execution(execution, fn ->
+      with {:ok, execution} <- mark_running(execution),
+           {:ok, runic_workflow} <- builder_fun.(),
+           result <- execute_with_timeout(execution, runic_workflow, context) do
+        handle_execution_result(execution, result)
+      else
+        {:error, reason} -> mark_failed(execution, reason)
+      end
+    end)
+  end
+
   defp do_run(%Execution{} = execution) do
     with {:ok, execution} <- mark_running(execution),
          {:ok, context} <- build_context(execution),

@@ -404,6 +404,8 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   attr :position, :map, required: true
   attr :state, :map, required: true
   attr :selected, :boolean, default: false
+  attr :pinned, :boolean, default: false
+  attr :pin_stale, :boolean, default: false
 
   def dag_node(assigns) do
     ~H"""
@@ -411,7 +413,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       transform={"translate(#{@position.x}, #{@position.y})"}
       phx-click="select_node"
       phx-value-node-id={@node.id}
-      class="cursor-pointer"
+      class="cursor-pointer group"
     >
       <%!-- Glow effect for running/selected nodes --%>
       <%= if @state[:status] == :running or @selected do %>
@@ -429,6 +431,21 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         />
       <% end %>
 
+      <%!-- Pin highlight border --%>
+      <%= if @pinned do %>
+        <rect
+          width="204"
+          height="84"
+          rx="14"
+          x="-2"
+          y="-2"
+          fill="none"
+          stroke-width="2"
+          stroke-dasharray="6,3"
+          class={[(@pin_stale && "stroke-warning") || "stroke-primary"]}
+        />
+      <% end %>
+
       <%!-- Node background --%>
       <rect
         width="200"
@@ -441,10 +458,28 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         stroke-width={if @selected, do: "3", else: "2"}
       />
 
+      <%!-- Pin indicator badge (top right) --%>
+      <%= if @pinned do %>
+        <g transform="translate(176, -8)" class="pointer-events-none">
+          <circle cx="12" cy="12" r="14" class={[(@pin_stale && "fill-warning") || "fill-primary"]} />
+          <text
+            x="12"
+            y="13"
+            text-anchor="middle"
+            dominant-baseline="middle"
+            class="text-xs fill-primary-content select-none"
+          >
+            📌
+          </text>
+          <%= if @pin_stale do %>
+            <title>Pin is stale - node config has changed</title>
+          <% end %>
+        </g>
+      <% end %>
+
       <%!-- Status indicator with animation --%>
       <g transform="translate(16, 16)">
         <%= if @state[:status] == :running do %>
-          <%!-- Animated running indicator --%>
           <circle cx="0" cy="0" r="8" class="fill-info/20" />
           <circle cx="0" cy="0" r="6" class="fill-info">
             <animate attributeName="r" values="4;6;4" dur="1s" repeatCount="indefinite" />
@@ -454,7 +489,12 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             <animate attributeName="opacity" values="0.5;0;0.5" dur="1s" repeatCount="indefinite" />
           </circle>
         <% else %>
-          <circle cx="0" cy="0" r="6" class={node_status_indicator_class(@state[:status])} />
+          <%= if @pinned and not @state[:status] do %>
+            <%!-- Pinned but not executed this run - show pin indicator --%>
+            <circle cx="0" cy="0" r="6" class={[(@pin_stale && "fill-warning") || "fill-primary/60"]} />
+          <% else %>
+            <circle cx="0" cy="0" r="6" class={node_status_indicator_class(@state[:status])} />
+          <% end %>
         <% end %>
       </g>
 
@@ -463,9 +503,12 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         {truncate_text(@node.name, 18)}
       </text>
 
-      <%!-- Node type --%>
+      <%!-- Node type + pin label --%>
       <text x="16" y="44" class="text-xs fill-current opacity-60">
         {node_type_label(@node.type_id)}
+        <%= if @pinned do %>
+          <tspan class="fill-primary">(pinned)</tspan>
+        <% end %>
       </text>
 
       <%!-- Duration display --%>
@@ -490,6 +533,11 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         <%= if @state[:status] == :running do %>
           <text x="16" y="64" class="text-[10px] fill-info animate-pulse">
             Running...
+          </text>
+        <% end %>
+        <%= if @pinned and not @state[:status] do %>
+          <text x="16" y="64" class="text-[10px] fill-primary/60">
+            Using pinned data
           </text>
         <% end %>
       <% end %>
@@ -518,6 +566,456 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         </g>
       <% end %>
     </g>
+    """
+  end
+
+  # ============================================================================
+  # Component: Node Context Menu
+  # ============================================================================
+
+  attr :node_id, :string, required: true
+  attr :node_name, :string, required: true
+  attr :pinned, :boolean, default: false
+  attr :pin_stale, :boolean, default: false
+  attr :has_output, :boolean, default: false
+  # {x, y} for menu positioning
+  attr :position, :map, required: true
+
+  def node_context_menu(assigns) do
+    ~H"""
+    <div
+      id={"context-menu-#{@node_id}"}
+      class="absolute z-50 bg-base-100 border border-base-300 rounded-xl shadow-xl py-2 min-w-[200px]"
+      style={"left: #{@position.x}px; top: #{@position.y}px;"}
+      phx-click-away="close_context_menu"
+    >
+      <div class="px-3 py-1.5 border-b border-base-200 mb-1">
+        <p class="text-sm font-medium text-base-content truncate">{@node_name}</p>
+      </div>
+
+      <%!-- Execute Actions --%>
+      <div class="px-1">
+        <button
+          type="button"
+          class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
+          phx-click="execute_to_node"
+          phx-value-node-id={@node_id}
+        >
+          <.icon name="hero-play" class="size-4 text-success" />
+          <span>Execute to Here</span>
+          <span class="ml-auto text-xs text-base-content/50">Run upstream</span>
+        </button>
+        <button
+          type="button"
+          class={[
+            "w-full flex items-center gap-2 px-3 py-2 text-sm text-left rounded-lg transition-colors",
+            (@pinned && "hover:bg-base-200") || "opacity-50 cursor-not-allowed"
+          ]}
+          phx-click={@pinned && "execute_downstream"}
+          phx-value-node-id={@node_id}
+          disabled={not @pinned}
+        >
+          <.icon name="hero-arrow-down-right" class="size-4 text-info" />
+          <span>Execute Downstream</span>
+          <%= unless @pinned do %>
+            <span class="ml-auto text-xs text-warning">Requires pin</span>
+          <% end %>
+        </button>
+      </div>
+
+      <div class="border-t border-base-200 my-1"></div>
+
+      <%!-- Pin Actions --%>
+      <div class="px-1">
+        <%= if @pinned do %>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
+            phx-click="view_pin"
+            phx-value-node-id={@node_id}
+          >
+            <.icon name="hero-eye" class="size-4 text-base-content/70" />
+            <span>View Pinned Data</span>
+            <%= if @pin_stale do %>
+              <span class="ml-auto badge badge-warning badge-xs">stale</span>
+            <% end %>
+          </button>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
+            phx-click="update_pin"
+            phx-value-node-id={@node_id}
+          >
+            <.icon name="hero-arrow-path" class="size-4 text-base-content/70" />
+            <span>Update Pin Data</span>
+          </button>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-error/10 text-error rounded-lg transition-colors"
+            phx-click="clear_pin"
+            phx-value-node-id={@node_id}
+          >
+            <.icon name="hero-x-mark" class="size-4" />
+            <span>Remove Pin</span>
+          </button>
+        <% else %>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
+            phx-click="pin_node"
+            phx-value-node-id={@node_id}
+          >
+            <.icon name="hero-bookmark" class="size-4 text-primary" />
+            <span>Pin Output...</span>
+          </button>
+          <%= if @has_output do %>
+            <button
+              type="button"
+              class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
+              phx-click="pin_from_execution"
+              phx-value-node-id={@node_id}
+            >
+              <.icon name="hero-bookmark-square" class="size-4 text-primary" />
+              <span>Pin from Last Run</span>
+            </button>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  # ============================================================================
+  # Component: Pin Modal
+  # ============================================================================
+
+  attr :node_id, :string, required: true
+  attr :node_name, :string, required: true
+  attr :current_data, :any, default: nil
+  attr :existing_pin, :map, default: nil
+  attr :show, :boolean, default: false
+
+  def pin_modal(assigns) do
+    # Encode data for display
+    encoded_data =
+      case assigns.current_data do
+        nil -> "{}"
+        data -> Jason.encode!(data, pretty: true)
+      end
+
+    assigns = assign(assigns, :encoded_data, encoded_data)
+
+    ~H"""
+    <div
+      :if={@show}
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      phx-click="close_pin_modal"
+    >
+      <div
+        class="bg-base-100 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden"
+        phx-click-away="close_pin_modal"
+        phx-window-keydown="close_pin_modal"
+        phx-key="escape"
+      >
+        <%!-- Header --%>
+        <div class="px-6 py-4 border-b border-base-200 flex items-center justify-between">
+          <div>
+            <h3 class="text-lg font-semibold text-base-content">
+              Pin Output: {@node_name}
+            </h3>
+            <p class="text-sm text-base-content/60 mt-0.5">
+              Freeze this node's output for iterative development
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm btn-circle"
+            phx-click="close_pin_modal"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        <%!-- Body --%>
+        <form phx-submit="confirm_pin" class="p-6 space-y-4 overflow-y-auto max-h-[60vh]">
+          <input type="hidden" name="node_id" value={@node_id} />
+
+          <%!-- Label field --%>
+          <div>
+            <label class="label">
+              <span class="label-text font-medium">Label (optional)</span>
+            </label>
+            <input
+              type="text"
+              name="label"
+              class="input input-bordered w-full"
+              placeholder="e.g., Successful API response"
+              value={@existing_pin && @existing_pin["label"]}
+            />
+          </div>
+
+          <%!-- Data field --%>
+          <div>
+            <label class="label">
+              <span class="label-text font-medium">Output Data (JSON)</span>
+            </label>
+            <textarea
+              name="data"
+              class="textarea textarea-bordered w-full font-mono text-sm"
+              rows="12"
+              placeholder='{"status": 200, "body": {...}}'
+              spellcheck="false"
+            >{@encoded_data}</textarea>
+            <label class="label">
+              <span class="label-text-alt text-base-content/60">
+                Edit the JSON above or paste new data
+              </span>
+            </label>
+          </div>
+
+          <%!-- Source options --%>
+          <%= if @current_data do %>
+            <div class="flex items-center gap-4 p-3 bg-base-200/50 rounded-lg">
+              <div class="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="source"
+                  value="last_run"
+                  id="source-last-run"
+                  class="radio radio-primary radio-sm"
+                  checked
+                />
+                <label for="source-last-run" class="text-sm cursor-pointer">
+                  Use output from last execution
+                </label>
+              </div>
+              <div class="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="source"
+                  value="custom"
+                  id="source-custom"
+                  class="radio radio-primary radio-sm"
+                />
+                <label for="source-custom" class="text-sm cursor-pointer">
+                  Enter custom data
+                </label>
+              </div>
+            </div>
+          <% end %>
+
+          <%!-- Existing pin info --%>
+          <%= if @existing_pin do %>
+            <div class="alert alert-info">
+              <.icon name="hero-information-circle" class="size-5" />
+              <div>
+                <p class="font-medium">This node already has a pin</p>
+                <p class="text-sm opacity-80">
+                  Pinned {format_relative_time(@existing_pin["pinned_at"])}
+                  <%= if @existing_pin["label"] do %>
+                    — "{@existing_pin["label"]}"
+                  <% end %>
+                </p>
+              </div>
+            </div>
+          <% end %>
+        </form>
+
+        <%!-- Footer --%>
+        <div class="px-6 py-4 border-t border-base-200 flex items-center justify-end gap-3">
+          <button type="button" class="btn btn-ghost" phx-click="close_pin_modal">
+            Cancel
+          </button>
+          <button type="submit" form="pin-form" class="btn btn-primary gap-2">
+            <.icon name="hero-bookmark" class="size-4" />
+            {if @existing_pin, do: "Update Pin", else: "Pin Output"}
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # ============================================================================
+  # Component: Execution Mode Selector
+  # ============================================================================
+
+  attr :execution_mode, :atom, default: :full
+  attr :selected_node_id, :string, default: nil
+  attr :workflow, :map, required: true
+
+  def execution_mode_selector(assigns) do
+    node_is_pinned =
+      if assigns.selected_node_id do
+        Map.has_key?(assigns.workflow.pinned_outputs || %{}, assigns.selected_node_id)
+      else
+        false
+      end
+
+    assigns = assign(assigns, :node_is_pinned, node_is_pinned)
+
+    ~H"""
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-base-content/60 font-medium">Run scope:</span>
+      <div class="join">
+        <button
+          type="button"
+          class={["join-item btn btn-sm", @execution_mode == :full && "btn-primary"]}
+          phx-click="set_execution_mode"
+          phx-value-mode="full"
+        >
+          <.icon name="hero-squares-2x2" class="size-4" /> Full
+        </button>
+        <button
+          type="button"
+          class={[
+            "join-item btn btn-sm",
+            @execution_mode == :to_node && "btn-primary",
+            is_nil(@selected_node_id) && "btn-disabled"
+          ]}
+          phx-click="set_execution_mode"
+          phx-value-mode="to_node"
+          disabled={is_nil(@selected_node_id)}
+          title={if @selected_node_id, do: "Execute to selected node", else: "Select a node first"}
+        >
+          <.icon name="hero-arrow-right-circle" class="size-4" /> To Node
+        </button>
+        <button
+          type="button"
+          class={[
+            "join-item btn btn-sm",
+            @execution_mode == :downstream && "btn-primary",
+            not @node_is_pinned && "btn-disabled"
+          ]}
+          phx-click="set_execution_mode"
+          phx-value-mode="downstream"
+          disabled={not @node_is_pinned}
+          title={
+            cond do
+              is_nil(@selected_node_id) -> "Select a node first"
+              not @node_is_pinned -> "Selected node must be pinned"
+              true -> "Execute from selected node downstream"
+            end
+          }
+        >
+          <.icon name="hero-arrow-down-right" class="size-4" /> Downstream
+        </button>
+      </div>
+      <%= if @selected_node_id do %>
+        <span class="text-xs text-base-content/50">
+          Selected: {truncate_text(@selected_node_id, 12)}
+          <%= if @node_is_pinned do %>
+            <span class="badge badge-primary badge-xs ml-1">pinned</span>
+          <% end %>
+        </span>
+      <% end %>
+    </div>
+    """
+  end
+
+  # ============================================================================
+  # Component: Pins Summary Panel
+  # ============================================================================
+
+  attr :workflow, :map, required: true
+  attr :pins_with_status, :map, required: true
+
+  def pins_summary_panel(assigns) do
+    pin_count = map_size(assigns.pins_with_status)
+
+    stale_count = Enum.count(assigns.pins_with_status, fn {_, p} -> p["stale"] end)
+
+    orphan_count = Enum.count(assigns.pins_with_status, fn {_, p} -> not p["node_exists"] end)
+
+    assigns =
+      assigns
+      |> assign(:pin_count, pin_count)
+      |> assign(:stale_count, stale_count)
+      |> assign(:orphan_count, orphan_count)
+
+    ~H"""
+    <div :if={@pin_count > 0} class="card border border-base-300 rounded-2xl shadow-sm bg-base-100">
+      <div class="border-b border-base-200 px-4 py-3 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-base-content flex items-center gap-2">
+          <.icon name="hero-bookmark" class="size-4 opacity-70" /> Pinned Outputs
+          <span class="badge badge-primary badge-sm">{@pin_count}</span>
+        </h2>
+        <div class="flex items-center gap-2">
+          <%= if @stale_count > 0 do %>
+            <span class="badge badge-warning badge-sm">{@stale_count} stale</span>
+          <% end %>
+          <%= if @orphan_count > 0 do %>
+            <span class="badge badge-error badge-sm">{@orphan_count} orphaned</span>
+          <% end %>
+          <button
+            type="button"
+            class="btn btn-ghost btn-xs"
+            phx-click="clear_all_pins"
+            data-confirm="Remove all pinned outputs?"
+          >
+            Clear all
+          </button>
+        </div>
+      </div>
+      <div class="p-3 space-y-2 max-h-48 overflow-y-auto">
+        <%= for {node_id, pin} <- @pins_with_status do %>
+          <div class={[
+            "flex items-center justify-between p-2 rounded-lg",
+            pin["stale"] && "bg-warning/10",
+            not pin["node_exists"] && "bg-error/10",
+            pin["node_exists"] && not pin["stale"] && "bg-base-200/50"
+          ]}>
+            <div class="flex items-center gap-2 min-w-0">
+              <.icon
+                name={
+                  cond do
+                    not pin["node_exists"] -> "hero-exclamation-triangle"
+                    pin["stale"] -> "hero-exclamation-circle"
+                    true -> "hero-bookmark-solid"
+                  end
+                }
+                class={
+                  [
+                    "size-4 flex-shrink-0",
+                    not pin["node_exists"] && "text-error",
+                    pin["stale"] && pin["node_exists"] && "text-warning",
+                    pin["node_exists"] && not pin["stale"] && "text-primary"
+                  ]
+                  |> Enum.filter(& &1)
+                  |> Enum.join(" ")
+                }
+              />
+              <div class="min-w-0">
+                <p class="text-sm font-medium truncate">{pin["label"] || node_id}</p>
+                <p class="text-xs text-base-content/60">
+                  {format_relative_time(pin["pinned_at"])}
+                </p>
+              </div>
+            </div>
+            <div class="flex items-center gap-1">
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs"
+                phx-click="view_pin"
+                phx-value-node-id={node_id}
+                title="View pinned data"
+              >
+                <.icon name="hero-eye" class="size-3" />
+              </button>
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs text-error"
+                phx-click="clear_pin"
+                phx-value-node-id={node_id}
+                title="Remove pin"
+              >
+                <.icon name="hero-x-mark" class="size-3" />
+              </button>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
     """
   end
 
@@ -930,5 +1428,25 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       </div>
     </div>
     """
+  end
+
+  defp format_relative_time(nil), do: "unknown time"
+
+  defp format_relative_time(datetime_str) when is_binary(datetime_str) do
+    case DateTime.from_iso8601(datetime_str) do
+      {:ok, dt, _} -> format_relative_time(dt)
+      _ -> datetime_str
+    end
+  end
+
+  defp format_relative_time(%DateTime{} = dt) do
+    diff = DateTime.diff(DateTime.utc_now(), dt, :second)
+
+    cond do
+      diff < 60 -> "just now"
+      diff < 3600 -> "#{div(diff, 60)} min ago"
+      diff < 86400 -> "#{div(diff, 3600)} hours ago"
+      true -> "#{div(diff, 86400)} days ago"
+    end
   end
 end

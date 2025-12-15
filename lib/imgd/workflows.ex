@@ -21,6 +21,9 @@ defmodule Imgd.Workflows do
 
   @type scope :: %Scope{}
 
+  # 1MB limit for pinned data
+  @pin_max_size_bytes 1_048_576
+
   # ============================================================================
   # Workflows
   # ============================================================================
@@ -305,6 +308,200 @@ defmodule Imgd.Workflows do
   end
 
   # ============================================================================
+  # Pin Management
+  # ============================================================================
+
+  @doc """
+  Pins a node's output data for development-time caching.
+
+  The pin includes a config hash to detect when the node's configuration
+  has changed since pinning (potentially invalidating the pin).
+
+  ## Options
+
+  - `:execution_id` - Optional execution ID the data came from
+  - `:label` - Optional user description for the pin
+
+  ## Returns
+
+  - `{:ok, updated_workflow}` - Pin saved successfully
+  - `{:error, :forbidden}` - User doesn't own workflow
+  - `{:error, :node_not_found}` - Node ID doesn't exist in workflow
+  - `{:error, :pin_too_large}` - Pin data exceeds size limit
+  """
+  def pin_node_output(%Scope{} = scope, %Workflow{} = workflow, node_id, output_data, opts \\ []) do
+    with :ok <- authorize_workflow(scope, workflow),
+         {:ok, node} <- find_node(workflow, node_id),
+         :ok <- validate_pin_size(output_data) do
+      pin = %{
+        "data" => output_data,
+        "pinned_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+        "pinned_by" => scope.user.id,
+        "config_hash" => compute_node_config_hash(node),
+        "source_execution_id" => Keyword.get(opts, :execution_id),
+        "label" => Keyword.get(opts, :label)
+      }
+
+      pinned_outputs = Map.put(workflow.pinned_outputs || %{}, node_id, pin)
+
+      workflow
+      |> Workflow.changeset(%{pinned_outputs: pinned_outputs})
+      |> Repo.update()
+    end
+  end
+
+  @doc """
+  Updates an existing pin's data without changing metadata.
+
+  Useful for quickly re-pinning from a new execution.
+  """
+  def update_pin_data(%Scope{} = scope, %Workflow{} = workflow, node_id, new_data, opts \\ []) do
+    with :ok <- authorize_workflow(scope, workflow),
+         {:ok, existing_pin} <- get_existing_pin(workflow, node_id),
+         :ok <- validate_pin_size(new_data) do
+      updated_pin =
+        existing_pin
+        |> Map.put("data", new_data)
+        |> Map.put("pinned_at", DateTime.utc_now() |> DateTime.to_iso8601())
+        |> maybe_update_label(Keyword.get(opts, :label))
+        |> maybe_update_execution_id(Keyword.get(opts, :execution_id))
+
+      pinned_outputs = Map.put(workflow.pinned_outputs, node_id, updated_pin)
+
+      workflow
+      |> Workflow.changeset(%{pinned_outputs: pinned_outputs})
+      |> Repo.update()
+    end
+  end
+
+  defp maybe_update_label(pin, nil), do: pin
+  defp maybe_update_label(pin, label), do: Map.put(pin, "label", label)
+
+  defp maybe_update_execution_id(pin, nil), do: pin
+  defp maybe_update_execution_id(pin, id), do: Map.put(pin, "source_execution_id", id)
+
+  @doc """
+  Removes a pinned output from a node.
+  """
+  def unpin_node_output(%Scope{} = scope, %Workflow{} = workflow, node_id) do
+    with :ok <- authorize_workflow(scope, workflow) do
+      pinned_outputs = Map.delete(workflow.pinned_outputs || %{}, node_id)
+
+      workflow
+      |> Workflow.changeset(%{pinned_outputs: pinned_outputs})
+      |> Repo.update()
+    end
+  end
+
+  @doc """
+  Removes all pinned outputs from a workflow.
+  """
+  def clear_all_pins(%Scope{} = scope, %Workflow{} = workflow) do
+    with :ok <- authorize_workflow(scope, workflow) do
+      workflow
+      |> Workflow.changeset(%{pinned_outputs: %{}})
+      |> Repo.update()
+    end
+  end
+
+  @doc """
+  Returns pinned outputs with staleness and validity information.
+
+  Each pin is annotated with:
+  - `stale` - true if node config has changed since pinning
+  - `node_exists` - true if the node still exists in the workflow
+  - `age_seconds` - how long ago the pin was created
+
+  ## Example
+
+      %{
+        "node_123" => %{
+          "data" => %{...},
+          "pinned_at" => "2024-01-15T...",
+          "stale" => false,
+          "node_exists" => true,
+          "age_seconds" => 3600
+        }
+      }
+  """
+  def get_pinned_outputs_with_status(%Workflow{} = workflow) do
+    node_map = Map.new(workflow.nodes || [], &{&1.id, &1})
+    now = DateTime.utc_now()
+
+    (workflow.pinned_outputs || %{})
+    |> Enum.map(fn {node_id, pin} ->
+      node = Map.get(node_map, node_id)
+      current_hash = node && compute_node_config_hash(node)
+      pin_hash = Map.get(pin, "config_hash") || Map.get(pin, :config_hash)
+      stale? = current_hash != nil and pin_hash != current_hash
+
+      pinned_at = parse_pin_datetime(pin)
+      age_seconds = if pinned_at, do: DateTime.diff(now, pinned_at, :second), else: nil
+
+      annotated_pin =
+        pin
+        |> Map.put("stale", stale?)
+        |> Map.put("node_exists", node != nil)
+        |> Map.put("age_seconds", age_seconds)
+
+      {node_id, annotated_pin}
+    end)
+    |> Map.new()
+  end
+
+  @doc """
+  Returns only stale pins (where node config has changed).
+  """
+  def get_stale_pins(%Workflow{} = workflow) do
+    workflow
+    |> get_pinned_outputs_with_status()
+    |> Enum.filter(fn {_id, pin} -> pin["stale"] == true end)
+    |> Map.new()
+  end
+
+  @doc """
+  Returns orphaned pins (where node no longer exists).
+  """
+  def get_orphaned_pins(%Workflow{} = workflow) do
+    workflow
+    |> get_pinned_outputs_with_status()
+    |> Enum.filter(fn {_id, pin} -> pin["node_exists"] == false end)
+    |> Map.new()
+  end
+
+  @doc """
+  Removes all orphaned pins (pins for nodes that no longer exist).
+  """
+  def cleanup_orphaned_pins(%Scope{} = scope, %Workflow{} = workflow) do
+    with :ok <- authorize_workflow(scope, workflow) do
+      node_ids = MapSet.new(workflow.nodes || [], & &1.id)
+
+      cleaned_pins =
+        (workflow.pinned_outputs || %{})
+        |> Enum.filter(fn {node_id, _} -> MapSet.member?(node_ids, node_id) end)
+        |> Map.new()
+
+      workflow
+      |> Workflow.changeset(%{pinned_outputs: cleaned_pins})
+      |> Repo.update()
+    end
+  end
+
+  @doc """
+  Extracts just the data from pinned outputs (for injection into execution context).
+
+  Returns a map of `%{node_id => data}` suitable for seeding execution context.
+  """
+  def extract_pinned_data(%Workflow{pinned_outputs: pins}) do
+    (pins || %{})
+    |> Enum.map(fn {node_id, pin} ->
+      data = Map.get(pin, "data") || Map.get(pin, :data)
+      {node_id, data}
+    end)
+    |> Map.new()
+  end
+
+  # ============================================================================
   # Private Helpers
   # ============================================================================
 
@@ -417,6 +614,63 @@ defmodule Imgd.Workflows do
       end
     else
       nil
+    end
+  end
+
+  # ============================================================================
+  # Private Helpers for Pins
+  # ============================================================================
+
+  defp find_node(%Workflow{nodes: nodes}, node_id) do
+    case Enum.find(nodes || [], &(&1.id == node_id)) do
+      nil -> {:error, :node_not_found}
+      node -> {:ok, node}
+    end
+  end
+
+  defp get_existing_pin(%Workflow{pinned_outputs: pins}, node_id) do
+    case Map.get(pins || %{}, node_id) do
+      nil -> {:error, :not_pinned}
+      pin -> {:ok, pin}
+    end
+  end
+
+  defp compute_node_config_hash(%{config: config, type_id: type_id}) do
+    %{config: config, type_id: type_id}
+    |> Jason.encode!()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+    |> String.slice(0, 16)
+  end
+
+  defp validate_pin_size(data) do
+    case Jason.encode(data) do
+      {:ok, json} when byte_size(json) <= @pin_max_size_bytes ->
+        :ok
+
+      {:ok, json} ->
+        {:error, {:pin_too_large, byte_size(json), @pin_max_size_bytes}}
+
+      {:error, _} ->
+        {:error, :pin_not_serializable}
+    end
+  end
+
+  defp parse_pin_datetime(pin) do
+    raw = Map.get(pin, "pinned_at") || Map.get(pin, :pinned_at)
+
+    case raw do
+      nil ->
+        nil
+
+      %DateTime{} = dt ->
+        dt
+
+      str when is_binary(str) ->
+        case DateTime.from_iso8601(str) do
+          {:ok, dt, _} -> dt
+          _ -> nil
+        end
     end
   end
 end
