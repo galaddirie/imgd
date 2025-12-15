@@ -477,6 +477,37 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         </g>
       <% end %>
 
+      <%!-- Inline run controls (hover-revealed) --%>
+      <foreignObject x="8" y="-28" width="184" height="28" class="opacity-0 group-hover:opacity-100 transition duration-150">
+        <div class="w-full flex items-center justify-end gap-2 pointer-events-auto">
+          <button
+            type="button"
+            phx-click="execute_to_node"
+            phx-value-node-id={@node.id}
+            class={[
+              "px-2 py-1 rounded-full text-xs font-semibold shadow-sm",
+              "bg-primary text-primary-content hover:bg-primary/90 transition"
+            ]}
+          >
+            Run
+          </button>
+          <button
+            type="button"
+            phx-click={@pinned && "execute_downstream"}
+            phx-value-node-id={@node.id}
+            disabled={not @pinned}
+            class={[
+              "px-2 py-1 rounded-full text-xs font-semibold shadow-sm transition",
+              @pinned &&
+                "bg-base-200 text-base-content hover:bg-base-300" ||
+                "bg-base-200/70 text-base-content/50 cursor-not-allowed"
+            ]}
+          >
+            Downstream
+          </button>
+        </div>
+      </foreignObject>
+
       <%!-- Status indicator with animation --%>
       <g transform="translate(16, 16)">
         <%= if @state[:status] == :running do %>
@@ -832,83 +863,6 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           </button>
         </div>
       </div>
-    </div>
-    """
-  end
-
-  # ============================================================================
-  # Component: Execution Mode Selector
-  # ============================================================================
-
-  attr :execution_mode, :atom, default: :full
-  attr :selected_node_id, :string, default: nil
-  attr :workflow, :map, required: true
-
-  def execution_mode_selector(assigns) do
-    node_is_pinned =
-      if assigns.selected_node_id do
-        Map.has_key?(assigns.workflow.pinned_outputs || %{}, assigns.selected_node_id)
-      else
-        false
-      end
-
-    assigns = assign(assigns, :node_is_pinned, node_is_pinned)
-
-    ~H"""
-    <div class="flex items-center gap-3">
-      <span class="text-xs text-base-content/60 font-medium">Run scope:</span>
-      <div class="join">
-        <button
-          type="button"
-          class={["join-item btn btn-sm", @execution_mode == :full && "btn-primary"]}
-          phx-click="set_execution_mode"
-          phx-value-mode="full"
-        >
-          <.icon name="hero-squares-2x2" class="size-4" /> Full
-        </button>
-        <button
-          type="button"
-          class={[
-            "join-item btn btn-sm",
-            @execution_mode == :to_node && "btn-primary",
-            is_nil(@selected_node_id) && "btn-disabled"
-          ]}
-          phx-click="set_execution_mode"
-          phx-value-mode="to_node"
-          disabled={is_nil(@selected_node_id)}
-          title={if @selected_node_id, do: "Execute to selected node", else: "Select a node first"}
-        >
-          <.icon name="hero-arrow-right-circle" class="size-4" /> To Node
-        </button>
-        <button
-          type="button"
-          class={[
-            "join-item btn btn-sm",
-            @execution_mode == :downstream && "btn-primary",
-            not @node_is_pinned && "btn-disabled"
-          ]}
-          phx-click="set_execution_mode"
-          phx-value-mode="downstream"
-          disabled={not @node_is_pinned}
-          title={
-            cond do
-              is_nil(@selected_node_id) -> "Select a node first"
-              not @node_is_pinned -> "Selected node must be pinned"
-              true -> "Execute from selected node downstream"
-            end
-          }
-        >
-          <.icon name="hero-arrow-down-right" class="size-4" /> Downstream
-        </button>
-      </div>
-      <%= if @selected_node_id do %>
-        <span class="text-xs text-base-content/50">
-          Selected: {truncate_text(@selected_node_id, 12)}
-          <%= if @node_is_pinned do %>
-            <span class="badge badge-primary badge-xs ml-1">pinned</span>
-          <% end %>
-        </span>
-      <% end %>
     </div>
     """
   end

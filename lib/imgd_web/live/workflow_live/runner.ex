@@ -60,9 +60,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:trace_log_count, 0)
           |> assign(:demo_inputs, demo_inputs)
           |> assign(:selected_demo, initial_demo)
-          |> assign(:run_form, run_form)
-          |> assign(:run_form_error, nil)
-        |> assign(:execution_mode, :full)
+        |> assign(:run_form, run_form)
+        |> assign(:run_form_error, nil)
         |> assign(:show_pin_modal, false)
         |> assign(:pin_modal_node_id, nil)
         |> assign(:pin_modal_data, nil)
@@ -112,18 +111,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   # ============================================================================
 
   @impl true
-  def handle_event("set_execution_mode", %{"mode" => mode}, socket) do
-    mode_atom = String.to_existing_atom(mode)
-    {:noreply, assign(socket, :execution_mode, mode_atom)}
-  end
-
-  @impl true
   def handle_event("run_workflow", params, socket) do
-    case socket.assigns.execution_mode do
-      :full -> handle_full_workflow_run(params, socket)
-      :to_node -> handle_execute_to_node(socket)
-      :downstream -> handle_execute_downstream(socket)
-    end
+    handle_full_workflow_run(params, socket)
   end
 
   @impl true
@@ -419,7 +408,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     workflow = socket.assigns.workflow
     trigger_data = get_trigger_data_from_form(socket)
 
-    case Executions.execute_node(scope, workflow, node_id, trigger_data: trigger_data) do
+    case Executions.execute_node(scope, workflow, node_id,
+           trigger_data: trigger_data,
+           async: true,
+           subscribe_fun: &PubSub.subscribe_execution/1
+         ) do
       {:ok, execution} ->
         PubSub.subscribe_execution(execution.id)
 
@@ -458,7 +451,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
 
-    case Executions.execute_downstream(scope, workflow, node_id) do
+    case Executions.execute_downstream(scope, workflow, node_id,
+           async: true,
+           subscribe_fun: &PubSub.subscribe_execution/1
+         ) do
       {:ok, execution} ->
         PubSub.subscribe_execution(execution.id)
 
@@ -1057,11 +1053,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             </div>
             <div class="flex items-center gap-3">
               <.execution_status_badge execution={@execution} running?={@running?} />
-              <.execution_mode_selector
-                execution_mode={@execution_mode}
-                selected_node_id={@selected_node_id}
-                workflow={@workflow}
-              />
               <button
                 type="submit"
                 form="run-config-form"

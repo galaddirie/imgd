@@ -20,6 +20,7 @@ defmodule Imgd.Executions do
   alias Imgd.Workflows.{Workflow, WorkflowVersion, DagUtils}
   alias Imgd.Runtime.{WorkflowBuilder, ExecutionState}
   alias Imgd.Repo
+require Logger
 
   @type scope :: %Scope{}
 
@@ -497,13 +498,7 @@ defmodule Imgd.Executions do
   - `:async` - Run asynchronously (default: `false`)
 
   """
-  def execute_single_node(
-        %Scope{} = scope,
-        %Workflow{} = workflow,
-        node_id,
-        input_data,
-        opts \\ []
-      ) do
+  def execute_single_node(%Scope{} = scope, %Workflow{} = workflow, node_id, input_data, opts \\ []) do
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, _node} <- find_workflow_node(workflow, node_id),
          {:ok, version} <- resolve_execution_version(workflow) do
@@ -531,15 +526,18 @@ defmodule Imgd.Executions do
   # Private: Partial Execution Helpers
   # ============================================================================
 
-  defp execute_partial(scope, workflow, version, target_nodes, pinned_outputs, attrs, opts) do
-    with {:ok, execution} <- start_execution(scope, workflow, attrs) do
-      if Keyword.get(opts, :async, false) do
-        enqueue_partial_execution(scope, execution, target_nodes, pinned_outputs, opts)
-      else
-        run_partial_sync(execution, version, target_nodes, pinned_outputs)
-      end
+defp execute_partial(scope, workflow, version, target_nodes, pinned_outputs, attrs, opts) do
+  with {:ok, execution} <- start_execution(scope, workflow, attrs) do
+    maybe_subscribe(execution, opts)
+
+    if Keyword.get(opts, :async, true) do
+      run_partial_async(execution, version, target_nodes, pinned_outputs)
+      {:ok, execution}
+    else
+      run_partial_sync(execution, version, target_nodes, pinned_outputs)
     end
   end
+end
 
   defp run_partial_sync(execution, version, target_nodes, pinned_outputs) do
     # Load execution with preloads
@@ -550,8 +548,7 @@ defmodule Imgd.Executions do
 
     case WorkflowBuilder.build_partial(version, context, execution,
            target_nodes: target_nodes,
-           pinned_outputs: pinned_outputs
-         ) do
+           pinned_outputs: pinned_outputs) do
       {:ok, runic_workflow} ->
         # Use a modified runner that handles partial execution
         run_partial_workflow(execution, runic_workflow, context, pinned_outputs)
@@ -577,10 +574,7 @@ defmodule Imgd.Executions do
 
       # Mark as running
       now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-
-      {:ok, execution} =
-        Repo.update(Execution.changeset(execution, %{status: :running, started_at: now}))
-
+      {:ok, execution} = Repo.update(Execution.changeset(execution, %{status: :running, started_at: now}))
       Imgd.Executions.PubSub.broadcast_execution_started(execution)
 
       # Get trigger data for initial input
@@ -604,7 +598,6 @@ defmodule Imgd.Executions do
 
       # Mark completed
       now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-
       {:ok, execution} =
         Repo.update(
           Execution.changeset(execution, %{
@@ -619,6 +612,7 @@ defmodule Imgd.Executions do
       ExecutionState.cleanup(execution.id)
 
       {:ok, execution}
+
     rescue
       e ->
         ExecutionState.cleanup(execution.id)
@@ -656,6 +650,26 @@ defmodule Imgd.Executions do
       {:error, reason} -> {:error, {:enqueue_failed, reason}}
     end
   end
+
+defp maybe_subscribe(%Execution{id: execution_id}, opts) do
+  case Keyword.get(opts, :subscribe_fun) do
+    fun when is_function(fun, 1) -> fun.(execution_id)
+    _ -> :ok
+  end
+end
+
+defp run_partial_async(execution, version, target_nodes, pinned_outputs) do
+  Task.start(fn ->
+    try do
+      _ = run_partial_sync(execution, version, target_nodes, pinned_outputs)
+      :ok
+    rescue
+      e ->
+        Logger.error("Partial execution crashed", error: inspect(e), execution_id: execution.id)
+        :ok
+    end
+  end)
+end
 
   defp enqueue_single_node_execution(_scope, execution, node_id, input_data, opts) do
     args = %{
@@ -757,14 +771,8 @@ defmodule Imgd.Executions do
   end
 
   defp sanitize_for_json(value) when is_list(value), do: Enum.map(value, &sanitize_for_json/1)
-
-  defp sanitize_for_json(value)
-       when is_atom(value) and not is_boolean(value) and not is_nil(value),
-       do: to_string(value)
-
-  defp sanitize_for_json(value) when is_struct(value),
-    do: value |> Map.from_struct() |> sanitize_for_json()
-
+  defp sanitize_for_json(value) when is_atom(value) and not is_boolean(value) and not is_nil(value), do: to_string(value)
+  defp sanitize_for_json(value) when is_struct(value), do: value |> Map.from_struct() |> sanitize_for_json()
   defp sanitize_for_json(value), do: value
 
   # ============================================================================
