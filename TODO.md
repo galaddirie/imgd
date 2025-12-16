@@ -19,3 +19,6 @@ datasets
 Evaluations
 ai chat workflow builder 
 Light weight deployments and easy installs (should be able to run the entire system on a rasberry pi )
+
+
+integrate wasm sandbox with OTEL metrics and telemetry
