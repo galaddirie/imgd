@@ -17,10 +17,12 @@ defmodule Imgd.Executions do
 
   alias Imgd.Accounts.Scope
   alias Imgd.Executions.{Execution, NodeExecution, Context}
+  alias Imgd.Executions.PubSub, as: ExecutionPubSub
   alias Imgd.Workflows.{Workflow, WorkflowVersion, DagUtils}
-  alias Imgd.Runtime.{WorkflowBuilder, ExecutionState}
+  alias Imgd.Runtime.{WorkflowBuilder, WorkflowRunner, ExecutionState}
   alias Imgd.Repo
-require Logger
+
+  require Logger
 
   @type scope :: %Scope{}
 
@@ -215,9 +217,6 @@ require Logger
   end
 
   defp cancel_oban_job(execution_id) do
-    import Ecto.Query
-
-    # Find and cancel any pending jobs for this execution
     Oban.Job
     |> where([j], j.queue == "executions")
     |> where([j], j.state in ["available", "scheduled", "retryable"])
@@ -339,23 +338,16 @@ require Logger
   ## Options
 
   - `:trigger_data` - Initial trigger data (default: `%{}`)
-  - `:async` - Run asynchronously via Oban (default: `false` for interactive use)
+  - `:async` - Run asynchronously (default: `true`)
+  - `:subscribe_fun` - Optional function to call with execution_id for PubSub subscription
 
   ## Returns
 
-  - `{:ok, execution}` - Execution completed (check `execution.status`)
+  - `{:ok, execution}` - Execution created (check status after completion if async)
   - `{:error, :forbidden}` - User doesn't own workflow
   - `{:error, :node_not_found}` - Target node doesn't exist
   - `{:error, :no_executable_version}` - No published or draft version available
   - `{:error, reason}` - Other execution errors
-
-  ## Example
-
-      # Execute node "transform_1" and everything it depends on
-      {:ok, execution} = Executions.execute_node(scope, workflow, "transform_1")
-
-      # The execution.context will contain outputs for all executed nodes
-      transform_output = execution.context["transform_1"]
   """
   def execute_node(%Scope{} = scope, %Workflow{} = workflow, node_id, opts \\ []) do
     with :ok <- authorize_workflow(scope, workflow),
@@ -388,37 +380,24 @@ require Logger
 
   ## Options
 
-  - `:async` - Run asynchronously via Oban (default: `false`)
+  - `:async` - Run asynchronously (default: `true`)
+  - `:subscribe_fun` - Optional function to call with execution_id for PubSub subscription
 
   ## Returns
 
   Same as `execute_node/4`.
-
-  ## Example
-
-      # First, pin the HTTP request node's output
-      {:ok, workflow} = Workflows.pin_node_output(scope, workflow, "http_request", response_data)
-
-      # Then execute everything downstream
-      {:ok, execution} = Executions.execute_downstream(scope, workflow, "http_request")
   """
   def execute_downstream(%Scope{} = scope, %Workflow{} = workflow, from_node_id, opts \\ []) do
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, version} <- resolve_execution_version(workflow),
          :ok <- validate_node_pinned(workflow, from_node_id) do
       downstream_ids =
-        DagUtils.downstream_closure(
-          from_node_id,
-          workflow.nodes,
-          workflow.connections
-        )
+        DagUtils.downstream_closure(from_node_id, workflow.nodes, workflow.connections)
 
       if downstream_ids == [] do
         {:error, :no_downstream_nodes}
       else
         pinned_outputs = Imgd.Workflows.extract_pinned_data(workflow)
-
-        # Use the pinned node's output as part of trigger data for logging
         source_data = Map.get(pinned_outputs, from_node_id, %{})
 
         attrs = %{
@@ -447,9 +426,9 @@ require Logger
   ## Options
 
   - `:trigger_data` - Initial trigger data
-  - `:async` - Run asynchronously
+  - `:async` - Run asynchronously (default: `true`)
   - `:include_upstream` - Auto-include upstream dependencies (default: `true`)
-
+  - `:subscribe_fun` - Optional function to call with execution_id for PubSub subscription
   """
   def execute_subset(%Scope{} = scope, %Workflow{} = workflow, node_ids, opts \\ []) do
     with :ok <- authorize_workflow(scope, workflow),
@@ -457,10 +436,8 @@ require Logger
          :ok <- validate_nodes_exist(workflow, node_ids) do
       pinned_outputs = Imgd.Workflows.extract_pinned_data(workflow)
       trigger_data = Keyword.get(opts, :trigger_data, %{})
-
       include_upstream = Keyword.get(opts, :include_upstream, true)
 
-      # Optionally expand to include upstream
       target_ids =
         if include_upstream do
           node_ids
@@ -495,10 +472,16 @@ require Logger
 
   ## Options
 
-  - `:async` - Run asynchronously (default: `false`)
-
+  - `:async` - Run asynchronously (default: `false` for interactive debugging)
+  - `:subscribe_fun` - Optional function to call with execution_id for PubSub subscription
   """
-  def execute_single_node(%Scope{} = scope, %Workflow{} = workflow, node_id, input_data, opts \\ []) do
+  def execute_single_node(
+        %Scope{} = scope,
+        %Workflow{} = workflow,
+        node_id,
+        input_data,
+        opts \\ []
+      ) do
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, _node} <- find_workflow_node(workflow, node_id),
          {:ok, version} <- resolve_execution_version(workflow) do
@@ -513,178 +496,90 @@ require Logger
       }
 
       with {:ok, execution} <- start_execution(scope, workflow, attrs) do
-        if Keyword.get(opts, :async, false) do
-          enqueue_single_node_execution(scope, execution, node_id, input_data, opts)
-        else
-          run_single_node_sync(execution, version, node_id, input_data)
+        execution = preload_for_execution(execution)
+        context = Context.new(execution)
+
+        maybe_subscribe(execution, opts)
+
+        builder_fun = fn ->
+          WorkflowBuilder.build_single_node(version, context, execution, node_id, input_data)
         end
+
+        run_with_mode(execution, context, builder_fun, opts)
       end
     end
   end
 
   # ============================================================================
-  # Private: Partial Execution Helpers
+  # Private: Partial Execution Implementation
   # ============================================================================
 
-defp execute_partial(scope, workflow, version, target_nodes, pinned_outputs, attrs, opts) do
-  with {:ok, execution} <- start_execution(scope, workflow, attrs) do
-    maybe_subscribe(execution, opts)
+  defp execute_partial(scope, workflow, version, target_nodes, pinned_outputs, attrs, opts) do
+    with {:ok, execution} <- start_execution(scope, workflow, attrs) do
+      execution = preload_for_execution(execution)
+      context = build_partial_context(execution, pinned_outputs)
 
-    if Keyword.get(opts, :async, true) do
-      run_partial_async(execution, version, target_nodes, pinned_outputs)
-      {:ok, execution}
-    else
-      run_partial_sync(execution, version, target_nodes, pinned_outputs)
-    end
-  end
-end
+      maybe_subscribe(execution, opts)
 
-  defp run_partial_sync(execution, version, target_nodes, pinned_outputs) do
-    # Load execution with preloads
-    execution =
-      Repo.preload(execution, [:workflow, workflow_version: [:workflow]])
-
-    context = Context.new(execution)
-
-    case WorkflowBuilder.build_partial(version, context, execution,
-           target_nodes: target_nodes,
-           pinned_outputs: pinned_outputs) do
-      {:ok, runic_workflow} ->
-        # Use a modified runner that handles partial execution
-        run_partial_workflow(execution, runic_workflow, context, pinned_outputs)
-
-      {:error, reason} ->
-        mark_execution_failed(execution, {:build_failed, reason})
-    end
-  end
-
-  defp run_partial_workflow(execution, runic_workflow, context, pinned_outputs) do
-    # Similar to WorkflowRunner.run but for partial execution
-    alias Runic.Workflow
-    alias Imgd.Runtime.ExecutionState
-
-    try do
-      # Initialize execution state
-      ExecutionState.start(execution.id)
-
-      # Pre-seed with pinned outputs
-      for {node_id, output} <- pinned_outputs do
-        ExecutionState.record_output(execution.id, node_id, output)
-      end
-
-      # Mark as running
-      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-      {:ok, execution} = Repo.update(Execution.changeset(execution, %{status: :running, started_at: now}))
-      Imgd.Executions.PubSub.broadcast_execution_started(execution)
-
-      # Get trigger data for initial input
-      trigger_data = Execution.trigger_data(execution)
-
-      # Run the workflow
-      executed_workflow = Workflow.react_until_satisfied(runic_workflow, trigger_data)
-
-      # Gather results
-      productions = Workflow.raw_productions(executed_workflow)
-      node_outputs = ExecutionState.outputs(execution.id)
-      final_context = %{context | node_outputs: Map.merge(context.node_outputs, node_outputs)}
-
-      # Determine output
-      output =
-        case productions do
-          [] -> %{"partial" => true, "nodes_executed" => Map.keys(node_outputs)}
-          [single] -> %{"result" => single, "partial" => true}
-          multiple -> %{"results" => multiple, "partial" => true}
-        end
-
-      # Mark completed
-      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-      {:ok, execution} =
-        Repo.update(
-          Execution.changeset(execution, %{
-            status: :completed,
-            completed_at: now,
-            output: sanitize_for_json(output),
-            context: sanitize_for_json(final_context.node_outputs)
-          })
+      builder_fun = fn ->
+        WorkflowBuilder.build_partial(version, context, execution,
+          target_nodes: target_nodes,
+          pinned_outputs: pinned_outputs
         )
+      end
 
-      Imgd.Executions.PubSub.broadcast_execution_completed(execution)
-      ExecutionState.cleanup(execution.id)
-
-      {:ok, execution}
-
-    rescue
-      e ->
-        ExecutionState.cleanup(execution.id)
-        mark_execution_failed(execution, {:execution_error, Exception.message(e)})
+      run_with_mode(execution, context, builder_fun, opts)
     end
   end
 
-  defp run_single_node_sync(execution, version, node_id, input_data) do
-    execution = Repo.preload(execution, [:workflow, workflow_version: [:workflow]])
+  defp build_partial_context(execution, pinned_outputs) do
     context = Context.new(execution)
+    %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
+  end
 
-    case WorkflowBuilder.build_single_node(version, context, execution, node_id, input_data) do
-      {:ok, runic_workflow} ->
-        run_partial_workflow(execution, runic_workflow, context, %{})
+  defp run_with_mode(execution, context, builder_fun, opts) do
+    async = Keyword.get(opts, :async, true)
 
-      {:error, reason} ->
-        mark_execution_failed(execution, {:build_failed, reason})
+    if async do
+      run_async(execution, context, builder_fun)
+    else
+      run_sync(execution, context, builder_fun)
     end
   end
 
-  defp enqueue_partial_execution(_scope, execution, target_nodes, pinned_outputs, opts) do
-    # For async partial execution, we'd need to store the partial params
-    # This is a simplified version - full implementation would use Oban job args
-    args = %{
-      "execution_id" => execution.id,
-      "mode" => "partial",
-      "target_nodes" => target_nodes,
-      "pinned_outputs" => pinned_outputs
-    }
+  defp run_sync(execution, context, builder_fun) do
+    WorkflowRunner.run_with_builder(execution, context, builder_fun)
+  end
 
-    job_opts = Keyword.take(opts, [:scheduled_at, :priority])
+  defp run_async(execution, context, builder_fun) do
+    Task.Supervisor.start_child(
+      Imgd.TaskSupervisor,
+      fn ->
+        try do
+          WorkflowRunner.run_with_builder(execution, context, builder_fun)
+        rescue
+          e ->
+            Logger.error("Async partial execution failed",
+              execution_id: execution.id,
+              error: Exception.message(e)
+            )
+        end
+      end,
+      restart: :temporary
+    )
 
-    case Imgd.Workers.ExecutionWorker.new(args, job_opts) |> Oban.insert() do
-      {:ok, _job} -> {:ok, execution}
-      {:error, reason} -> {:error, {:enqueue_failed, reason}}
+    {:ok, execution}
+  end
+
+  defp maybe_subscribe(%Execution{id: execution_id}, opts) do
+    case Keyword.get(opts, :subscribe_fun) do
+      fun when is_function(fun, 1) -> fun.(execution_id)
+      _ -> :ok
     end
   end
 
-defp maybe_subscribe(%Execution{id: execution_id}, opts) do
-  case Keyword.get(opts, :subscribe_fun) do
-    fun when is_function(fun, 1) -> fun.(execution_id)
-    _ -> :ok
-  end
-end
-
-defp run_partial_async(execution, version, target_nodes, pinned_outputs) do
-  Task.start(fn ->
-    try do
-      _ = run_partial_sync(execution, version, target_nodes, pinned_outputs)
-      :ok
-    rescue
-      e ->
-        Logger.error("Partial execution crashed", error: inspect(e), execution_id: execution.id)
-        :ok
-    end
-  end)
-end
-
-  defp enqueue_single_node_execution(_scope, execution, node_id, input_data, opts) do
-    args = %{
-      "execution_id" => execution.id,
-      "mode" => "single_node",
-      "target_node" => node_id,
-      "input_data" => input_data
-    }
-
-    job_opts = Keyword.take(opts, [:scheduled_at, :priority])
-
-    case Imgd.Workers.ExecutionWorker.new(args, job_opts) |> Oban.insert() do
-      {:ok, _job} -> {:ok, execution}
-      {:error, reason} -> {:error, {:enqueue_failed, reason}}
-    end
+  defp preload_for_execution(execution) do
+    Repo.preload(execution, [:workflow, workflow_version: [:workflow]])
   end
 
   # ============================================================================
@@ -719,14 +614,12 @@ end
 
   defp resolve_execution_version(%Workflow{} = workflow) do
     cond do
-      # Prefer published version for production-like execution
       workflow.published_version_id ->
         case Repo.get(WorkflowVersion, workflow.published_version_id) do
           nil -> {:error, :version_not_found}
           v -> {:ok, v}
         end
 
-      # Fall back to draft nodes for testing unpublished changes
       length(workflow.nodes || []) > 0 ->
         {:ok,
          %WorkflowVersion{
@@ -744,37 +637,6 @@ end
     end
   end
 
-  defp mark_execution_failed(execution, reason) do
-    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-
-    error =
-      case reason do
-        {:build_failed, r} -> %{"type" => "build_failed", "reason" => inspect(r)}
-        {:execution_error, msg} -> %{"type" => "execution_error", "message" => msg}
-        other -> %{"type" => "unknown", "reason" => inspect(other)}
-      end
-
-    case Repo.update(
-           Execution.changeset(execution, %{status: :failed, completed_at: now, error: error})
-         ) do
-      {:ok, execution} ->
-        Imgd.Executions.PubSub.broadcast_execution_failed(execution, error)
-        {:error, reason}
-
-      {:error, _changeset} ->
-        {:error, reason}
-    end
-  end
-
-  defp sanitize_for_json(value) when is_map(value) do
-    Map.new(value, fn {k, v} -> {to_string(k), sanitize_for_json(v)} end)
-  end
-
-  defp sanitize_for_json(value) when is_list(value), do: Enum.map(value, &sanitize_for_json/1)
-  defp sanitize_for_json(value) when is_atom(value) and not is_boolean(value) and not is_nil(value), do: to_string(value)
-  defp sanitize_for_json(value) when is_struct(value), do: value |> Map.from_struct() |> sanitize_for_json()
-  defp sanitize_for_json(value), do: value
-
   # ============================================================================
   # Authorization Helpers
   # ============================================================================
@@ -786,9 +648,6 @@ end
     end
   end
 
-  @doc false
-  # Single-query authorization for executions.
-  # Always performs a DB check to avoid issues with partially-loaded structs.
   defp authorize_execution(%Scope{} = scope, %Execution{} = execution) do
     user_id = scope_user_id!(scope)
 
@@ -802,8 +661,6 @@ end
     if authorized, do: :ok, else: {:error, :forbidden}
   end
 
-  @doc false
-  # Single-query authorization for node executions.
   defp authorize_node_execution(%Scope{} = scope, %NodeExecution{} = node_execution) do
     user_id = scope_user_id!(scope)
 

@@ -502,6 +502,37 @@ defmodule Imgd.Workflows do
   end
 
   # ============================================================================
+  # Source Hash Computation
+  # ============================================================================
+
+  @doc """
+  Computes a SHA-256 hash of the workflow's executable content.
+
+  Used to detect changes between the draft workflow and its published version.
+  """
+  @spec compute_source_hash(Workflow.t()) :: String.t()
+  def compute_source_hash(%Workflow{} = workflow) do
+    WorkflowVersion.compute_source_hash(
+      workflow.nodes || [],
+      workflow.connections || [],
+      workflow.triggers || []
+    )
+  end
+
+  @doc """
+  Returns the source hash of the currently published version, or nil if unpublished.
+  """
+  @spec get_published_source_hash(Workflow.t()) :: String.t() | nil
+  def get_published_source_hash(%Workflow{published_version_id: nil}), do: nil
+
+  def get_published_source_hash(%Workflow{published_version_id: version_id}) do
+    case Repo.get(WorkflowVersion, version_id) do
+      nil -> nil
+      version -> version.source_hash
+    end
+  end
+
+  # ============================================================================
   # Private Helpers
   # ============================================================================
 
@@ -573,47 +604,6 @@ defmodule Imgd.Workflows do
       {:ok, tag}
     else
       {:error, :missing_version_tag}
-    end
-  end
-
-  def compute_source_hash(%Workflow{} = workflow) do
-    payload = %{
-      nodes: normalize_embeds(workflow.nodes),
-      connections: normalize_embeds(workflow.connections),
-      triggers: normalize_embeds(workflow.triggers),
-      settings: workflow.settings || %{}
-    }
-
-    payload
-    |> Jason.encode!()
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
-  end
-
-  defp normalize_embeds(nil), do: []
-
-  defp normalize_embeds(list) when is_list(list) do
-    Enum.map(list, &normalize_embed/1)
-  end
-
-  defp normalize_embeds(other), do: other
-
-  defp normalize_embed(%_struct{} = embed) do
-    embed
-    |> Map.from_struct()
-    |> Map.drop([:__meta__])
-  end
-
-  defp normalize_embed(other), do: other
-
-  def get_published_source_hash(%Workflow{} = workflow) do
-    if workflow.published_version_id do
-      case Repo.get(WorkflowVersion, workflow.published_version_id) do
-        nil -> nil
-        version -> version.source_hash
-      end
-    else
-      nil
     end
   end
 
