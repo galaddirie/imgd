@@ -484,7 +484,7 @@ defmodule Imgd.Executions do
       ) do
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, _node} <- find_workflow_node(workflow, node_id),
-         {:ok, version} <- resolve_execution_version(workflow) do
+         {:ok, _version} <- resolve_execution_version(workflow) do
       attrs = %{
         trigger: %{type: :manual, data: input_data},
         metadata: %{
@@ -497,15 +497,11 @@ defmodule Imgd.Executions do
 
       with {:ok, execution} <- start_execution(scope, workflow, attrs) do
         execution = preload_for_execution(execution)
-        context = Context.new(execution)
 
         maybe_subscribe(execution, opts)
 
-        builder_fun = fn ->
-          WorkflowBuilder.build_single_node(version, context, execution, node_id, input_data)
-        end
-
-        run_with_mode(execution, context, builder_fun, opts)
+        mode_args = %{node_id: node_id, input_data: input_data}
+        run_with_mode(execution, :single_node, mode_args, opts)
       end
     end
   end
@@ -514,60 +510,67 @@ defmodule Imgd.Executions do
   # Private: Partial Execution Implementation
   # ============================================================================
 
-  defp execute_partial(scope, workflow, version, target_nodes, pinned_outputs, attrs, opts) do
+  defp execute_partial(scope, workflow, _version, target_nodes, pinned_outputs, attrs, opts) do
     with {:ok, execution} <- start_execution(scope, workflow, attrs) do
       execution = preload_for_execution(execution)
-      context = build_partial_context(execution, pinned_outputs)
 
       maybe_subscribe(execution, opts)
 
-      builder_fun = fn ->
-        WorkflowBuilder.build_partial(version, context, execution,
-          target_nodes: target_nodes,
-          pinned_outputs: pinned_outputs
-        )
-      end
-
-      run_with_mode(execution, context, builder_fun, opts)
+      mode_args = %{target_nodes: target_nodes, pinned_outputs: pinned_outputs}
+      run_with_mode(execution, :partial, mode_args, opts)
     end
   end
 
-  defp build_partial_context(execution, pinned_outputs) do
-    context = Context.new(execution)
-    %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
-  end
-
-  defp run_with_mode(execution, context, builder_fun, opts) do
+  defp run_with_mode(execution, mode, mode_args, opts) do
     async = Keyword.get(opts, :async, true)
 
     if async do
-      run_async(execution, context, builder_fun)
+      run_async(execution, mode, mode_args, opts)
     else
-      run_sync(execution, context, builder_fun)
+      run_sync(execution, mode, mode_args)
     end
   end
 
-  defp run_sync(execution, context, builder_fun) do
+  defp run_sync(execution, :single_node, %{node_id: node_id, input_data: input_data}) do
+    context = Context.new(execution)
+
+    builder_fun = fn ->
+      WorkflowBuilder.build_single_node(
+        execution.workflow_version,
+        context,
+        execution,
+        node_id,
+        input_data
+      )
+    end
+
     WorkflowRunner.run_with_builder(execution, context, builder_fun)
   end
 
-  defp run_async(execution, context, builder_fun) do
-    Task.Supervisor.start_child(
-      Imgd.TaskSupervisor,
-      fn ->
-        try do
-          WorkflowRunner.run_with_builder(execution, context, builder_fun)
-        rescue
-          e ->
-            Logger.error("Async partial execution failed",
-              execution_id: execution.id,
-              error: Exception.message(e)
-            )
-        end
-      end,
-      restart: :temporary
-    )
+  defp run_sync(execution, :partial, %{target_nodes: target_nodes, pinned_outputs: pinned_outputs}) do
+    context = Context.new(execution)
+    context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
 
+    builder_fun = fn ->
+      WorkflowBuilder.build_partial(execution.workflow_version, context, execution,
+        target_nodes: target_nodes,
+        pinned_outputs: pinned_outputs
+      )
+    end
+
+    WorkflowRunner.run_with_builder(execution, context, builder_fun)
+  end
+
+  defp run_async(execution, mode, mode_args, opts) do
+    # Convert mode_args to use string keys for Oban serialization
+    string_mode_args =
+      mode_args
+      |> Enum.map(fn {k, v} -> {to_string(k), v} end)
+      |> Enum.into(%{})
+      |> Map.put("mode", to_string(mode))
+
+    opts = Keyword.put(opts, :metadata, string_mode_args)
+    Imgd.Workers.ExecutionWorker.enqueue(execution.id, opts)
     {:ok, execution}
   end
 

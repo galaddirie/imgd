@@ -50,23 +50,24 @@ defmodule Imgd.Workers.ExecutionWorker do
   require Logger
 
   alias Imgd.Repo
-  alias Imgd.Executions.Execution
-  alias Imgd.Runtime.WorkflowRunner
+  alias Imgd.Executions.{Execution, Context}
+  alias Imgd.Runtime.{WorkflowRunner, WorkflowBuilder}
   alias Imgd.Observability.Instrumentation
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
     execution_id = Map.fetch!(args, "execution_id")
+    mode = Map.get(args, "mode", "full")
 
     # Extract and restore trace context for distributed tracing
     Instrumentation.extract_trace_context(args)
 
-    Logger.metadata(execution_id: execution_id)
-    Logger.info("Starting workflow execution job")
+    Logger.metadata(execution_id: execution_id, mode: mode)
+    Logger.info("Starting workflow execution job [mode: #{mode}]")
 
     case load_execution(execution_id) do
       {:ok, execution} ->
-        run_execution(execution)
+        run_execution(execution, mode, args)
 
       {:error, :not_found} ->
         Logger.error("Execution not found", execution_id: execution_id)
@@ -102,8 +103,47 @@ defmodule Imgd.Workers.ExecutionWorker do
     end
   end
 
-  defp run_execution(%Execution{} = execution) do
-    case WorkflowRunner.run(execution) do
+  defp run_execution(%Execution{} = execution, "full", _args) do
+    handle_runner_result(execution, WorkflowRunner.run(execution))
+  end
+
+  defp run_execution(%Execution{} = execution, "single_node", args) do
+    node_id = Map.fetch!(args, "node_id")
+    input_data = Map.get(args, "input_data", %{})
+    context = Context.new(execution)
+
+    builder_fun = fn ->
+      WorkflowBuilder.build_single_node(
+        execution.workflow_version,
+        context,
+        execution,
+        node_id,
+        input_data
+      )
+    end
+
+    handle_runner_result(execution, WorkflowRunner.run_with_builder(execution, context, builder_fun))
+  end
+
+  defp run_execution(%Execution{} = execution, "partial", args) do
+    target_nodes = Map.get(args, "target_nodes", [])
+    pinned_outputs = Map.get(args, "pinned_outputs", %{})
+
+    context = Context.new(execution)
+    context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
+
+    builder_fun = fn ->
+      WorkflowBuilder.build_partial(execution.workflow_version, context, execution,
+        target_nodes: target_nodes,
+        pinned_outputs: pinned_outputs
+      )
+    end
+
+    handle_runner_result(execution, WorkflowRunner.run_with_builder(execution, context, builder_fun))
+  end
+
+  defp handle_runner_result(execution, result) do
+    case result do
       {:ok, %Execution{status: :completed}} ->
         Logger.info("Workflow execution completed successfully",
           execution_id: execution.id
