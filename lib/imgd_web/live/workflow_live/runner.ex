@@ -5,18 +5,17 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   Features:
   - Visual DAG representation with live node status updates
   - Real-time trace log streaming
-  - Node input/output inspection
-  - Colored edges based on execution status
+  - Node configuration modal with expression support
+  - Pin management for iterative development
   """
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
   alias Imgd.Executions
-  alias Imgd.Executions.{Execution, NodeExecution, PubSub}
+  alias Imgd.Executions.{Execution, NodeExecution, Context, PubSub}
   alias Imgd.Workflows.DagLayout
+  alias ImgdWeb.WorkflowLive.NodeConfigModal
   import ImgdWeb.WorkflowLive.RunnerComponents
-
-  # NodeExecution is used for building states from existing executions
 
   @trace_log_limit 500
 
@@ -52,6 +51,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:dag_edges, edges)
           |> assign(:dag_meta, layout_meta)
           |> assign(:execution, nil)
+          |> assign(:execution_context, nil)
           |> assign(:node_states, %{})
           |> assign(:selected_node_id, nil)
           |> assign(:running?, false)
@@ -61,10 +61,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:selected_demo, initial_demo)
           |> assign(:run_form, run_form)
           |> assign(:run_form_error, nil)
-          |> assign(:show_pin_modal, false)
-          |> assign(:pin_modal_node_id, nil)
-          |> assign(:pin_modal_data, nil)
-          |> assign(:pin_modal_existing, nil)
+          # Modal state
+          |> assign(:show_config_modal, false)
+          |> assign(:config_modal_node, nil)
+          # Context menu state
           |> assign(:show_context_menu, false)
           |> assign(:context_menu_node_id, nil)
           |> assign(:context_menu_position, %{x: 0, y: 0})
@@ -84,15 +84,16 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         {:noreply, put_flash(socket, :error, "Execution not found")}
 
       execution ->
-        # Subscribe to this execution's updates
         PubSub.subscribe_execution(execution.id)
-
-        # Rebuild state from existing execution
         node_states = build_node_states_from_execution(execution)
+
+        # Build execution context for expression preview
+        exec_context = build_execution_context(execution, node_states)
 
         socket =
           socket
           |> assign(:execution, execution)
+          |> assign(:execution_context, exec_context)
           |> assign(:node_states, node_states)
           |> assign(:running?, Execution.active?(execution))
           |> maybe_stream_existing_logs(execution)
@@ -106,8 +107,51 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   end
 
   # ============================================================================
-  # Event Handlers
+  # Build Execution Context for Expression Preview
   # ============================================================================
+
+  defp build_execution_context(nil, _), do: nil
+  defp build_execution_context(%Execution{} = execution, node_states) do
+    # Build node outputs from node_states
+    node_outputs =
+      node_states
+      |> Enum.filter(fn {_, state} -> state[:output_data] != nil end)
+      |> Enum.map(fn {node_id, state} -> {node_id, state[:output_data]} end)
+      |> Map.new()
+
+    # Create context with accumulated outputs
+    Context.new(execution)
+    |> Map.put(:node_outputs, node_outputs)
+  end
+
+  # ============================================================================
+  # Node Config Modal Events
+  # ============================================================================
+
+  @impl true
+  def handle_event("open_node_config", %{"node-id" => node_id}, socket) do
+    node = Map.get(socket.assigns.node_map, node_id)
+
+    if node do
+      socket =
+        socket
+        |> assign(:show_config_modal, true)
+        |> assign(:config_modal_node, node)
+        |> assign(:show_context_menu, false)
+
+      {:noreply, socket}
+    else
+      {:noreply, put_flash(socket, :error, "Node not found")}
+    end
+  end
+
+  @impl true
+  def handle_event("close_config_modal", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_config_modal, false)
+     |> assign(:config_modal_node, nil)}
+  end
 
   @impl true
   def handle_event("run_workflow", params, socket) do
@@ -148,96 +192,45 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   end
 
   # ============================================================================
-  # Pin Management Events
+  # Node Selection & Context Menu
   # ============================================================================
 
   @impl true
-  def handle_event("pin_node", %{"node-id" => node_id}, socket) do
-    node_output = get_in(socket.assigns.node_states, [node_id, :output_data])
-    existing_pin = get_in(socket.assigns.workflow.pinned_outputs || %{}, [node_id])
+  def handle_event("select_node", %{"node-id" => node_id}, socket) do
+    # Double-click opens modal, single click selects
+    selected = if socket.assigns.selected_node_id == node_id, do: nil, else: node_id
+    {:noreply, assign(socket, :selected_node_id, selected)}
+  end
 
+  @impl true
+  def handle_event("open_context_menu", %{"node-id" => node_id, "x" => x, "y" => y}, socket) do
     socket =
       socket
-      |> assign(:show_pin_modal, true)
-      |> assign(:pin_modal_node_id, node_id)
-      |> assign(:pin_modal_data, node_output)
-      |> assign(:pin_modal_existing, existing_pin)
-      |> assign(:show_context_menu, false)
+      |> assign(:show_context_menu, true)
+      |> assign(:context_menu_node_id, node_id)
+      |> assign(:context_menu_position, %{x: x, y: y})
 
     {:noreply, socket}
   end
 
   @impl true
-  def handle_event("pin_from_execution", %{"node-id" => node_id}, socket) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
+  def handle_event("close_context_menu", _params, socket) do
+    socket =
+      socket
+      |> assign(:show_context_menu, false)
+      |> assign(:context_menu_node_id, nil)
 
-    node_output = get_in(socket.assigns.node_states, [node_id, :output_data])
-
-    if node_output do
-      execution_id = socket.assigns.execution && socket.assigns.execution.id
-
-      case Workflows.pin_node_output(scope, workflow, node_id, node_output,
-             execution_id: execution_id,
-             label: "From execution"
-           ) do
-        {:ok, updated_workflow} ->
-          socket =
-            socket
-            |> assign(:workflow, updated_workflow)
-            |> assign(
-              :pins_with_status,
-              Workflows.get_pinned_outputs_with_status(updated_workflow)
-            )
-            |> assign(:show_context_menu, false)
-            |> put_flash(:info, "Output pinned successfully")
-            |> append_trace_log(:info, "Pinned node output", %{node_id: node_id})
-
-          {:noreply, socket}
-
-        {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Failed to pin: #{format_error(reason)}")}
-      end
-    else
-      {:noreply, put_flash(socket, :error, "No output data available to pin")}
-    end
+    {:noreply, socket}
   end
 
   @impl true
-  def handle_event("confirm_pin", %{"node_id" => node_id, "data" => data_json} = params, socket) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
-    label = Map.get(params, "label")
-
-    case Jason.decode(data_json) do
-      {:ok, data} ->
-        case Workflows.pin_node_output(scope, workflow, node_id, data, label: label) do
-          {:ok, updated_workflow} ->
-            socket =
-              socket
-              |> assign(:workflow, updated_workflow)
-              |> assign(
-                :pins_with_status,
-                Workflows.get_pinned_outputs_with_status(updated_workflow)
-              )
-              |> assign(:show_pin_modal, false)
-              |> put_flash(:info, "Output pinned successfully")
-              |> append_trace_log(:info, "Pinned node output", %{node_id: node_id, label: label})
-
-            {:noreply, socket}
-
-          {:error, {:pin_too_large, size, max}} ->
-            {:noreply,
-             put_flash(socket, :error, "Pin data too large (#{size} bytes, max #{max})")}
-
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "Failed to pin: #{format_error(reason)}")}
-        end
-
-      {:error, %Jason.DecodeError{} = error} ->
-        {:noreply, put_flash(socket, :error, "Invalid JSON: #{Exception.message(error)}")}
-    end
+  def handle_event("clear_selection", _params, socket) do
+    {:noreply, assign(socket, :selected_node_id, nil)}
   end
+
+  # ============================================================================
+  # Pin Management Events
+  # ============================================================================
 
   @impl true
   def handle_event("clear_pin", %{"node-id" => node_id}, socket) do
@@ -281,70 +274,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     end
   end
 
-  @impl true
-  def handle_event("view_pin", %{"node-id" => node_id}, socket) do
-    existing_pin = get_in(socket.assigns.workflow.pinned_outputs || %{}, [node_id])
-    pin_data = existing_pin && (Map.get(existing_pin, "data") || Map.get(existing_pin, :data))
-
-    socket =
-      socket
-      |> assign(:show_pin_modal, true)
-      |> assign(:pin_modal_node_id, node_id)
-      |> assign(:pin_modal_data, pin_data)
-      |> assign(:pin_modal_existing, existing_pin)
-      |> assign(:show_context_menu, false)
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("close_pin_modal", _params, socket) do
-    socket =
-      socket
-      |> assign(:show_pin_modal, false)
-      |> assign(:pin_modal_node_id, nil)
-      |> assign(:pin_modal_data, nil)
-      |> assign(:pin_modal_existing, nil)
-
-    {:noreply, socket}
-  end
-
-  # ============================================================================
-  # Context Menu Events
-  # ============================================================================
-
-  @impl true
-  def handle_event("open_context_menu", %{"node-id" => node_id, "x" => x, "y" => y}, socket) do
-    socket =
-      socket
-      |> assign(:show_context_menu, true)
-      |> assign(:context_menu_node_id, node_id)
-      |> assign(:context_menu_position, %{x: x, y: y})
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("close_context_menu", _params, socket) do
-    socket =
-      socket
-      |> assign(:show_context_menu, false)
-      |> assign(:context_menu_node_id, nil)
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("select_node", %{"node-id" => node_id}, socket) do
-    selected = if socket.assigns.selected_node_id == node_id, do: nil, else: node_id
-    {:noreply, assign(socket, :selected_node_id, selected)}
-  end
-
-  @impl true
-  def handle_event("clear_selection", _params, socket) do
-    {:noreply, assign(socket, :selected_node_id, nil)}
-  end
-
   # ============================================================================
   # Execution Mode Handlers
   # ============================================================================
@@ -371,6 +300,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:execution, execution)
           |> assign(:running?, true)
           |> assign(:node_states, %{})
+          |> assign(:execution_context, nil)
           |> assign(:trace_log_count, 0)
           |> assign(:selected_demo, parsed.demo)
           |> assign(:run_form, run_form)
@@ -413,6 +343,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:execution, execution)
           |> assign(:running?, true)
           |> assign(:node_states, build_initial_pin_states(workflow))
+          |> assign(:execution_context, nil)
           |> assign(:trace_log_count, 0)
           |> stream(:trace_log, [], reset: true)
           |> append_trace_log(:info, "Partial execution started", %{
@@ -433,6 +364,75 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   # PubSub Handlers
   # ============================================================================
 
+  # Handle messages from NodeConfigModal
+  @impl true
+  def handle_info(:close_node_config_modal, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_config_modal, false)
+     |> assign(:config_modal_node, nil)}
+  end
+
+  @impl true
+  def handle_info({:node_config_saved, node_id, new_config}, socket) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+
+    # Update the node's config in the workflow
+    updated_nodes =
+      Enum.map(workflow.nodes || [], fn node ->
+        if node.id == node_id do
+          %{node | config: new_config}
+        else
+          node
+        end
+      end)
+
+    case Workflows.update_workflow(scope, workflow, %{nodes: updated_nodes}) do
+      {:ok, updated_workflow} ->
+        node_map = Map.new(updated_workflow.nodes || [], &{&1.id, &1})
+
+        socket =
+          socket
+          |> assign(:workflow, updated_workflow)
+          |> assign(:node_map, node_map)
+          |> assign(:show_config_modal, false)
+          |> assign(:config_modal_node, nil)
+          |> put_flash(:info, "Node configuration saved")
+          |> append_trace_log(:info, "Node config updated", %{node_id: short_id(node_id)})
+
+        {:noreply, socket}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to save configuration")}
+    end
+  end
+
+  @impl true
+  def handle_info({:pin_node_output, node_id, output_data, label}, socket) do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+    execution_id = socket.assigns.execution && socket.assigns.execution.id
+
+    case Workflows.pin_node_output(scope, workflow, node_id, output_data,
+           execution_id: execution_id,
+           label: if(label == "", do: nil, else: label)
+         ) do
+      {:ok, updated_workflow} ->
+        socket =
+          socket
+          |> assign(:workflow, updated_workflow)
+          |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(updated_workflow))
+          |> put_flash(:info, "Output pinned successfully")
+          |> append_trace_log(:info, "Pinned node output", %{node_id: node_id})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to pin: #{format_error(reason)}")}
+    end
+  end
+
   @impl true
   def handle_info({:execution_started, execution}, socket) do
     socket =
@@ -451,9 +451,14 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   @impl true
   def handle_info({:execution_completed, execution}, socket) do
+    # Rebuild context now that execution is complete
+    node_states = socket.assigns.node_states
+    exec_context = build_execution_context(execution, node_states)
+
     socket =
       socket
       |> assign(:execution, execution)
+      |> assign(:execution_context, exec_context)
       |> assign(:running?, false)
       |> append_trace_log(:success, "Execution completed", %{
         duration_us: Execution.duration_us(execution),
@@ -506,8 +511,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     node_id = payload.node_id
     node_name = get_node_name(socket.assigns.node_map, node_id)
     existing = Map.get(socket.assigns.node_states, node_id, %{})
-
-    # payload is a map from build_node_payload, duration_us is already computed
     duration_us = payload.duration_us
 
     node_states =
@@ -521,9 +524,13 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         error: nil
       })
 
+    # Update execution context with new output
+    exec_context = build_execution_context(socket.assigns.execution, node_states)
+
     socket =
       socket
       |> assign(:node_states, node_states)
+      |> assign(:execution_context, exec_context)
       |> append_trace_log(:success, "Node completed: #{node_name}", %{
         duration_us: duration_us,
         node_id: short_id(node_id)
@@ -537,8 +544,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     node_id = payload.node_id
     node_name = get_node_name(socket.assigns.node_map, node_id)
     existing = Map.get(socket.assigns.node_states, node_id, %{})
-
-    # payload is a map from build_node_payload, duration_us is already computed
     duration_us = payload.duration_us
 
     node_states =
@@ -564,7 +569,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     {:noreply, socket}
   end
 
-  # Catch-all for other messages
   @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}
 
@@ -625,10 +629,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   defp format_error({:node_not_found, id}), do: "Node not found: #{id}"
   defp format_error({:node_not_pinned, id}), do: "Node not pinned: #{id}"
-
-  defp format_error({:nodes_not_found, ids}),
-    do: "Nodes not found: #{Enum.join(ids, ", ")}"
-
+  defp format_error({:nodes_not_found, ids}), do: "Nodes not found: #{Enum.join(ids, ", ")}"
   defp format_error(:no_executable_version), do: "No executable version available"
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason), do: inspect(reason)
@@ -646,13 +647,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       {:ok, value} ->
         trigger_data =
           case value do
-            %{} = map ->
-              map
-
-            _other ->
-              # We no longer support raw input, so if it's not a map, we return error
-              # or just treat it as empty. Given the user's request, we'll enforce maps.
-              %{}
+            %{} = map -> map
+            _other -> %{}
           end
 
         demo = match_demo_input(value, demo_inputs)
@@ -1042,10 +1038,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             node_map={@node_map}
             node_states={@node_states}
             selected_node_id={@selected_node_id}
+            pins_with_status={@pins_with_status}
           />
         </div>
 
-        <%!-- Right Panel: Node Details + Trace Log --%>
+        <%!-- Right Panel --%>
         <div class="space-y-6">
           <.pins_summary_panel
             workflow={@workflow}
@@ -1064,17 +1061,20 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         </div>
       </div>
 
-      <%!-- Execution Metadata (bottom) --%>
+      <%!-- Execution Metadata --%>
       <.execution_metadata_panel :if={@execution} execution={@execution} />
 
-      <%!-- Pin Modal --%>
-      <.pin_modal
-        show={@show_pin_modal}
-        node_id={@pin_modal_node_id || ""}
-        node_name={(@pin_modal_node_id && get_node_name(@node_map, @pin_modal_node_id)) || ""}
-        current_data={@pin_modal_data}
-        existing_pin={@pin_modal_existing}
-      />
+      <%!-- Node Config Modal --%>
+      <%= if @show_config_modal and @config_modal_node do %>
+        <.live_component
+          module={NodeConfigModal}
+          id={"node-config-#{@config_modal_node.id}"}
+          node={@config_modal_node}
+          execution_context={@execution_context}
+          node_output={get_in(@node_states, [@config_modal_node.id, :output_data])}
+          pinned_data={Map.get(@pins_with_status, @config_modal_node.id)}
+        />
+      <% end %>
 
       <%!-- Context Menu --%>
       <%= if @show_context_menu and @context_menu_node_id do %>
