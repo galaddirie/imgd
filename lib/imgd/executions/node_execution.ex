@@ -9,11 +9,21 @@ defmodule Imgd.Executions.NodeExecution do
   use Imgd.Schema
   import Imgd.ChangesetHelpers
 
+  alias Ecto.Changeset
   alias Imgd.Executions.Execution
 
   @type status :: :pending | :queued | :running | :completed | :failed | :skipped
 
   @statuses [:pending, :queued, :running, :completed, :failed, :skipped]
+
+  @allowed_transitions %{
+    pending: [:queued, :running, :completed, :failed, :skipped],
+    queued: [:running, :completed, :failed, :skipped],
+    running: [:completed, :failed, :skipped],
+    completed: [],
+    failed: [],
+    skipped: []
+  }
 
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
@@ -86,6 +96,7 @@ defmodule Imgd.Executions.NodeExecution do
     |> validate_map_field(:output_data, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
     |> validate_map_field(:metadata)
+    |> validate_status_transition()
   end
 
   # Convenience functions
@@ -135,4 +146,29 @@ defmodule Imgd.Executions.NodeExecution do
   @doc "Returns true if this is a retry attempt."
   def retry?(%__MODULE__{attempt: attempt}) when attempt > 1, do: true
   def retry?(%__MODULE__{}), do: false
+
+  defp validate_status_transition(%Changeset{} = changeset) do
+    case Changeset.fetch_change(changeset, :status) do
+      {:ok, new_status} ->
+        old_status = changeset.data.status
+
+        if transition_allowed?(old_status, new_status) do
+          changeset
+        else
+          Changeset.add_error(changeset, :status, "invalid status transition",
+            validation: :transition
+          )
+        end
+
+      :error ->
+        changeset
+    end
+  end
+
+  defp transition_allowed?(nil, _new_status), do: true
+  defp transition_allowed?(old_status, new_status) when old_status == new_status, do: true
+
+  defp transition_allowed?(old_status, new_status) do
+    new_status in Map.get(@allowed_transitions, old_status, [])
+  end
 end
