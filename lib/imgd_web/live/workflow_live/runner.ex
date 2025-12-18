@@ -416,7 +416,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:trace_log_count, 0)
           |> stream(:trace_log, [], reset: true)
           |> append_trace_log(:info, "Partial execution started", %{
-            mode: "to_node",
+            partial: true,
             target: node_id
           })
           |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")

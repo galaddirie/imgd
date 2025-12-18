@@ -359,7 +359,7 @@ defmodule Imgd.Executions do
         trigger: %{type: :manual, data: trigger_data},
         metadata: %{
           extras: %{
-            "execution_mode" => "partial_to_node",
+            "partial" => true,
             "target_node" => node_id,
             "pinned_nodes" => Map.keys(pinned_outputs)
           }
@@ -401,7 +401,7 @@ defmodule Imgd.Executions do
       mode_args
       |> Enum.map(fn {k, v} -> {to_string(k), v} end)
       |> Enum.into(%{})
-      |> Map.put("mode", to_string(mode))
+      |> Map.put("partial", mode == :partial)
 
     opts = Keyword.put(opts, :metadata, string_mode_args)
     Imgd.Workers.ExecutionWorker.enqueue(execution.id, opts)

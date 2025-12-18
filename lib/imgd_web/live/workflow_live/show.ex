@@ -322,13 +322,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
   # Helper functions
 
   defp partial_execution?(%{metadata: %{extras: extras}}) when is_map(extras) do
-    mode = Map.get(extras, "execution_mode") || Map.get(extras, :execution_mode)
-
-    case mode do
-      mode when is_binary(mode) -> String.starts_with?(mode, "partial")
-      mode when is_atom(mode) -> mode |> Atom.to_string() |> String.starts_with?("partial")
-      _ -> false
-    end
+    Map.get(extras, "partial") || Map.get(extras, :partial) || false
   end
 
   defp partial_execution?(_), do: false

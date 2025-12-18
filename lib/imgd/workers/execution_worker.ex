@@ -57,17 +57,17 @@ defmodule Imgd.Workers.ExecutionWorker do
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
     execution_id = Map.fetch!(args, "execution_id")
-    mode = Map.get(args, "mode", "full")
+    partial = Map.get(args, "partial", false)
 
     # Extract and restore trace context for distributed tracing
     Instrumentation.extract_trace_context(args)
 
-    Logger.metadata(execution_id: execution_id, mode: mode)
-    Logger.info("Starting workflow execution job [mode: #{mode}]")
+    Logger.metadata(execution_id: execution_id, partial: partial)
+    Logger.info("Starting workflow execution job [partial: #{partial}]")
 
     case load_execution(execution_id) do
       {:ok, execution} ->
-        run_execution(execution, mode, args)
+        run_execution(execution, partial, args)
 
       {:error, :not_found} ->
         Logger.error("Execution not found", execution_id: execution_id)
@@ -103,11 +103,11 @@ defmodule Imgd.Workers.ExecutionWorker do
     end
   end
 
-  defp run_execution(%Execution{} = execution, "full", _args) do
+  defp run_execution(%Execution{} = execution, false, _args) do
     handle_runner_result(execution, WorkflowRunner.run(execution, ExecutionState))
   end
 
-  defp run_execution(%Execution{} = execution, "partial", args) do
+  defp run_execution(%Execution{} = execution, true, args) do
     target_nodes = Map.get(args, "target_nodes", [])
     pinned_outputs = Map.get(args, "pinned_outputs", %{})
 
