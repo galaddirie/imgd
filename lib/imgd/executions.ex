@@ -18,8 +18,7 @@ defmodule Imgd.Executions do
   alias Imgd.Accounts.Scope
   alias Imgd.Executions.{Execution, NodeExecution, Context}
   alias Imgd.Workflows.{Workflow, WorkflowVersion}
-  alias Imgd.Graph
-  alias Imgd.Runtime.{ExecutionState, WorkflowBuilder, WorkflowRunner}
+  alias Imgd.Runtime.WorkflowRunner
   alias Imgd.Repo
 
   require Logger
@@ -371,141 +370,6 @@ defmodule Imgd.Executions do
     end
   end
 
-  @doc """
-  Executes all downstream nodes from a pinned node.
-
-  This is the "Execute from Here" / "Run Downstream" feature. The source
-  node must have pinned output, which becomes the starting point for
-  executing all nodes that depend on it.
-
-  ## Options
-
-  - `:async` - Run asynchronously (default: `true`)
-  - `:subscribe_fun` - Optional function to call with execution_id for PubSub subscription
-
-  ## Returns
-
-  Same as `execute_node/4`.
-  """
-  def execute_downstream(%Scope{} = scope, %Workflow{} = workflow, from_node_id, opts \\ []) do
-    with :ok <- authorize_workflow(scope, workflow),
-         {:ok, version} <- resolve_execution_version(workflow),
-         :ok <- validate_node_pinned(workflow, from_node_id) do
-      graph = Graph.from_workflow!(workflow.nodes, workflow.connections)
-      downstream_ids = Graph.downstream(graph, from_node_id)
-
-      if downstream_ids == [] do
-        {:error, :no_downstream_nodes}
-      else
-        pinned_outputs = Imgd.Workflows.extract_pinned_data(workflow)
-        source_data = Map.get(pinned_outputs, from_node_id, %{})
-
-        attrs = %{
-          trigger: %{type: :manual, data: source_data},
-          metadata: %{
-            extras: %{
-              "execution_mode" => "partial_downstream",
-              "from_node" => from_node_id,
-              "downstream_nodes" => downstream_ids,
-              "pinned_nodes" => Map.keys(pinned_outputs)
-            }
-          }
-        }
-
-        execute_partial(scope, workflow, version, downstream_ids, pinned_outputs, attrs, opts)
-      end
-    end
-  end
-
-  @doc """
-  Executes a specific subset of nodes.
-
-  Lower-level function for custom partial execution scenarios.
-  Nodes are executed in topological order, with pinned outputs injected.
-
-  ## Options
-
-  - `:trigger_data` - Initial trigger data
-  - `:async` - Run asynchronously (default: `true`)
-  - `:include_upstream` - Auto-include upstream dependencies (default: `true`)
-  - `:subscribe_fun` - Optional function to call with execution_id for PubSub subscription
-  """
-  def execute_subset(%Scope{} = scope, %Workflow{} = workflow, node_ids, opts \\ []) do
-    with :ok <- authorize_workflow(scope, workflow),
-         {:ok, version} <- resolve_execution_version(workflow),
-         :ok <- validate_nodes_exist(workflow, node_ids) do
-      pinned_outputs = Imgd.Workflows.extract_pinned_data(workflow)
-      trigger_data = Keyword.get(opts, :trigger_data, %{})
-      include_upstream = Keyword.get(opts, :include_upstream, true)
-
-      target_ids =
-        if include_upstream do
-          graph = Graph.from_workflow!(workflow.nodes, workflow.connections)
-
-          node_ids
-          |> Enum.flat_map(fn id -> [id | Graph.upstream(graph, id)] end)
-          |> Enum.uniq()
-        else
-          node_ids
-        end
-
-      attrs = %{
-        trigger: %{type: :manual, data: trigger_data},
-        metadata: %{
-          extras: %{
-            "execution_mode" => "partial_subset",
-            "target_nodes" => target_ids,
-            "pinned_nodes" => Map.keys(pinned_outputs)
-          }
-        }
-      }
-
-      execute_partial(scope, workflow, version, target_ids, pinned_outputs, attrs, opts)
-    end
-  end
-
-  @doc """
-  Re-executes a single node using provided input data.
-
-  Useful for debugging a specific node with custom input.
-  Does not execute any upstream nodes.
-
-  ## Options
-
-  - `:async` - Run asynchronously (default: `false` for interactive debugging)
-  - `:subscribe_fun` - Optional function to call with execution_id for PubSub subscription
-  """
-  def execute_single_node(
-        %Scope{} = scope,
-        %Workflow{} = workflow,
-        node_id,
-        input_data,
-        opts \\ []
-      ) do
-    with :ok <- authorize_workflow(scope, workflow),
-         {:ok, _node} <- find_workflow_node(workflow, node_id),
-         {:ok, _version} <- resolve_execution_version(workflow) do
-      attrs = %{
-        trigger: %{type: :manual, data: input_data},
-        metadata: %{
-          extras: %{
-            "execution_mode" => "single_node",
-            "target_node" => node_id
-          }
-        }
-      }
-
-      with {:ok, execution} <- start_execution(scope, workflow, attrs) do
-        execution = preload_for_execution(execution)
-
-        maybe_subscribe(execution, opts)
-
-        mode_args = %{node_id: node_id, input_data: input_data}
-        run_with_mode(execution, :single_node, mode_args, opts)
-      end
-    end
-  end
-
   # ============================================================================
   # Private: Partial Execution Implementation
   # ============================================================================
@@ -531,43 +395,6 @@ defmodule Imgd.Executions do
     end
   end
 
-  defp run_sync(execution, :single_node, %{node_id: node_id, input_data: input_data}) do
-    context = Context.new(execution)
-
-    builder_fun = fn ->
-      WorkflowBuilder.build_single_node(
-        execution.workflow_version,
-        context,
-        execution,
-        node_id,
-        input_data,
-        ExecutionState
-      )
-    end
-
-    WorkflowRunner.run_with_builder(execution, context, builder_fun, ExecutionState)
-  end
-
-  defp run_sync(execution, :partial, %{target_nodes: target_nodes, pinned_outputs: pinned_outputs}) do
-    context = Context.new(execution)
-    context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
-
-    builder_fun = fn ->
-      WorkflowBuilder.build_partial(
-        execution.workflow_version,
-        context,
-        execution,
-        [
-          target_nodes: target_nodes,
-          pinned_outputs: pinned_outputs
-        ],
-        ExecutionState
-      )
-    end
-
-    WorkflowRunner.run_with_builder(execution, context, builder_fun, ExecutionState)
-  end
-
   defp run_async(execution, mode, mode_args, opts) do
     # Convert mode_args to use string keys for Oban serialization
     string_mode_args =
@@ -579,6 +406,20 @@ defmodule Imgd.Executions do
     opts = Keyword.put(opts, :metadata, string_mode_args)
     Imgd.Workers.ExecutionWorker.enqueue(execution.id, opts)
     {:ok, execution}
+  end
+
+  defp run_sync(execution, :partial, %{target_nodes: target_nodes, pinned_outputs: pinned_outputs}) do
+    context = Context.new(execution)
+    context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
+
+    builder_fun = fn ->
+      ExecutionEngine.build_partial(execution.workflow_version, context, execution,
+        target_nodes: target_nodes,
+        pinned_outputs: pinned_outputs
+      )
+    end
+
+    WorkflowRunner.run_with_builder(execution, context, builder_fun)
   end
 
   defp maybe_subscribe(%Execution{id: execution_id}, opts) do
@@ -600,25 +441,6 @@ defmodule Imgd.Executions do
     case Enum.find(nodes || [], &(&1.id == node_id)) do
       nil -> {:error, :node_not_found}
       node -> {:ok, node}
-    end
-  end
-
-  defp validate_node_pinned(workflow, node_id) do
-    if Map.has_key?(workflow.pinned_outputs || %{}, node_id) do
-      :ok
-    else
-      {:error, {:node_not_pinned, node_id}}
-    end
-  end
-
-  defp validate_nodes_exist(workflow, node_ids) do
-    existing_ids = MapSet.new(workflow.nodes || [], & &1.id)
-    missing = Enum.reject(node_ids, &MapSet.member?(existing_ids, &1))
-
-    if missing == [] do
-      :ok
-    else
-      {:error, {:nodes_not_found, missing}}
     end
   end
 

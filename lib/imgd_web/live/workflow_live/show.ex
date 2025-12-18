@@ -8,8 +8,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
   alias Imgd.Executions
   import ImgdWeb.Formatters, except: [trigger_label: 1]
 
-  @raw_input_key "__imgd_raw_input__"
-
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     scope = socket.assigns.current_scope
@@ -345,9 +343,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
   defp execution_status_class(_), do: "badge-ghost"
 
   defp format_execution_value(nil), do: "-"
-
-  defp format_execution_value(%{@raw_input_key => raw} = value) when map_size(value) == 1,
-    do: format_execution_value(raw)
 
   defp format_execution_value(%{"value" => value}), do: inspect(value)
   defp format_execution_value(%{"productions" => prods}) when is_list(prods), do: inspect(prods)

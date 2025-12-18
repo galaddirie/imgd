@@ -107,28 +107,6 @@ defmodule Imgd.Workers.ExecutionWorker do
     handle_runner_result(execution, WorkflowRunner.run(execution, ExecutionState))
   end
 
-  defp run_execution(%Execution{} = execution, "single_node", args) do
-    node_id = Map.fetch!(args, "node_id")
-    input_data = Map.get(args, "input_data", %{})
-    context = Context.new(execution)
-
-    builder_fun = fn ->
-      WorkflowBuilder.build_single_node(
-        execution.workflow_version,
-        context,
-        execution,
-        node_id,
-        input_data,
-        ExecutionState
-      )
-    end
-
-    handle_runner_result(
-      execution,
-      WorkflowRunner.run_with_builder(execution, context, builder_fun, ExecutionState)
-    )
-  end
-
   defp run_execution(%Execution{} = execution, "partial", args) do
     target_nodes = Map.get(args, "target_nodes", [])
     pinned_outputs = Map.get(args, "pinned_outputs", %{})

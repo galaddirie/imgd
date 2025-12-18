@@ -478,13 +478,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       <% end %>
 
       <%!-- Inline run controls (hover-revealed) --%>
-      <foreignObject
-        x="8"
-        y="-28"
-        width="184"
-        height="28"
-        class="opacity-0 group-hover:opacity-100 transition duration-150"
-      >
+      <foreignObject x="8" y="-28" width="184" height="28" class="opacity-0 group-hover:opacity-100 transition duration-150">
         <div class="w-full flex items-center justify-end gap-2 pointer-events-auto">
           <button
             type="button"
@@ -495,21 +489,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               "bg-primary text-primary-content hover:bg-primary/90 transition"
             ]}
           >
-            Run
-          </button>
-          <button
-            type="button"
-            phx-click={@pinned && "execute_downstream"}
-            phx-value-node-id={@node.id}
-            disabled={not @pinned}
-            class={[
-              "px-2 py-1 rounded-full text-xs font-semibold shadow-sm transition",
-              (@pinned &&
-                 "bg-base-200 text-base-content hover:bg-base-300") ||
-                "bg-base-200/70 text-base-content/50 cursor-not-allowed"
-            ]}
-          >
-            Downstream
+            Run to Here
           </button>
         </div>
       </foreignObject>
@@ -641,22 +621,6 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <.icon name="hero-play" class="size-4 text-success" />
           <span>Execute to Here</span>
           <span class="ml-auto text-xs text-base-content/50">Run upstream</span>
-        </button>
-        <button
-          type="button"
-          class={[
-            "w-full flex items-center gap-2 px-3 py-2 text-sm text-left rounded-lg transition-colors",
-            (@pinned && "hover:bg-base-200") || "opacity-50 cursor-not-allowed"
-          ]}
-          phx-click={@pinned && "execute_downstream"}
-          phx-value-node-id={@node_id}
-          disabled={not @pinned}
-        >
-          <.icon name="hero-arrow-down-right" class="size-4 text-info" />
-          <span>Execute Downstream</span>
-          <%= unless @pinned do %>
-            <span class="ml-auto text-xs text-warning">Requires pin</span>
-          <% end %>
         </button>
       </div>
 

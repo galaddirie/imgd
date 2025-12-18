@@ -19,7 +19,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   # NodeExecution is used for building states from existing executions
 
   @trace_log_limit 500
-  @raw_input_key "__imgd_raw_input__"
 
   @impl true
   def mount(%{"id" => workflow_id}, _session, socket) do
@@ -146,11 +145,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   @impl true
   def handle_event("execute_to_node", %{"node-id" => node_id}, socket) do
     handle_execute_to_node_impl(socket, node_id)
-  end
-
-  @impl true
-  def handle_event("execute_downstream", %{"node-id" => node_id}, socket) do
-    handle_execute_downstream_impl(socket, node_id)
   end
 
   # ============================================================================
@@ -363,7 +357,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
     if socket.assigns.can_run? do
       with {:ok, parsed} <-
-             parse_input_payload(input_string, socket.assigns.demo_inputs, @raw_input_key),
+             parse_input_payload(input_string, socket.assigns.demo_inputs),
            {:ok, %{execution: execution}} <-
              Executions.start_and_enqueue_execution(scope, workflow, %{
                trigger: %{type: :manual, data: parsed.trigger_data},
@@ -429,44 +423,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:show_context_menu, false)
 
         {:noreply, socket}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Execution failed: #{format_error(reason)}")}
-    end
-  end
-
-  defp handle_execute_downstream_impl(socket, node_id) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
-
-    case Executions.execute_downstream(scope, workflow, node_id,
-           async: true,
-           subscribe_fun: &PubSub.subscribe_execution/1
-         ) do
-      {:ok, execution} ->
-        PubSub.subscribe_execution(execution.id)
-
-        socket =
-          socket
-          |> assign(:execution, execution)
-          |> assign(:running?, true)
-          |> assign(:node_states, build_initial_pin_states(workflow))
-          |> assign(:trace_log_count, 0)
-          |> stream(:trace_log, [], reset: true)
-          |> append_trace_log(:info, "Downstream execution started", %{
-            mode: "downstream",
-            from_node: node_id
-          })
-          |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
-          |> assign(:show_context_menu, false)
-
-        {:noreply, socket}
-
-      {:error, {:node_not_pinned, _}} ->
-        {:noreply, put_flash(socket, :error, "Node must be pinned to execute downstream")}
-
-      {:error, :no_downstream_nodes} ->
-        {:noreply, put_flash(socket, :error, "No downstream nodes to execute")}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Execution failed: #{format_error(reason)}")}
@@ -677,7 +633,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason), do: inspect(reason)
 
-  defp parse_input_payload(input_string, demo_inputs, raw_key) do
+  defp parse_input_payload(input_string, demo_inputs) do
     trimmed = String.trim(input_string || "")
 
     decoded =
@@ -690,8 +646,13 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       {:ok, value} ->
         trigger_data =
           case value do
-            %{} = map -> map
-            other -> %{raw_key => other}
+            %{} = map ->
+              map
+
+            _other ->
+              # We no longer support raw input, so if it's not a map, we return error
+              # or just treat it as empty. Given the user's request, we'll enforce maps.
+              %{}
           end
 
         demo = match_demo_input(value, demo_inputs)

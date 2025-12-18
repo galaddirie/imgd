@@ -52,7 +52,6 @@ defmodule Imgd.Runtime.WorkflowRunner do
   alias Imgd.Observability.Instrumentation
 
   @default_timeout_ms 300_000
-  @raw_input_key "__imgd_raw_input__"
 
   @type run_result :: {:ok, Execution.t()} | {:error, term()}
 
@@ -245,8 +244,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp build_context(%Execution{} = execution) do
     trigger_data = Execution.trigger_data(execution)
-    initial_input = extract_trigger_input(trigger_data)
-    context = Context.new(execution, current_node_id: nil, current_input: initial_input)
+    context = Context.new(execution, current_node_id: nil, current_input: trigger_data)
     {:ok, context}
   end
 
@@ -257,13 +255,12 @@ defmodule Imgd.Runtime.WorkflowRunner do
   defp execute_with_timeout(%Execution{} = execution, executable, context, state_store) do
     timeout_ms = get_timeout_ms(execution)
     trigger_data = Execution.trigger_data(execution)
-    initial_input = extract_trigger_input(trigger_data)
 
     state_store.start(execution.id)
 
     task =
       Task.async(fn ->
-        execute_workflow(executable, initial_input, context, state_store)
+        execute_workflow(executable, trigger_data, context, state_store)
       end)
 
     result =
@@ -296,11 +293,6 @@ defmodule Imgd.Runtime.WorkflowRunner do
         @default_timeout_ms
     end
   end
-
-  defp extract_trigger_input(%{@raw_input_key => raw}), do: raw
-  defp extract_trigger_input(%{_imgd_raw_input__: raw}), do: raw
-  defp extract_trigger_input(%{} = data), do: data
-  defp extract_trigger_input(other), do: other
 
   # ===========================================================================
   # Workflow Execution (via Engine)

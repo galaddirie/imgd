@@ -12,8 +12,6 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   alias ImgdWeb.WorkflowLive.Components.TracePanel
   import ImgdWeb.Formatters, except: [trigger_label: 1]
 
-  @raw_input_key "__imgd_raw_input__"
-
   @impl true
   def mount(%{"workflow_id" => workflow_id, "id" => execution_id}, _session, socket) do
     scope = socket.assigns.current_scope
@@ -541,9 +539,6 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
   end
 
   defp pretty_data(nil), do: "-"
-
-  defp pretty_data(%{@raw_input_key => raw} = value) when map_size(value) == 1,
-    do: pretty_data(raw)
 
   defp pretty_data(data) do
     try do
