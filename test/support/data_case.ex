@@ -40,7 +40,11 @@ defmodule Imgd.DataCase do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Imgd.Repo, shared: not tags[:async])
 
     if tags[:async] do
-      Ecto.Adapters.SQL.Sandbox.allow(Imgd.Repo, pid, Process.whereis(Imgd.Executions.NodeExecutionBuffer))
+      Ecto.Adapters.SQL.Sandbox.allow(
+        Imgd.Repo,
+        pid,
+        Process.whereis(Imgd.Executions.NodeExecutionBuffer)
+      )
     end
 
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)

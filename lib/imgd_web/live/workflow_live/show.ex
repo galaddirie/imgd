@@ -159,7 +159,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
                       <tr class="hover">
                         <td class="font-mono text-xs">
                           <div class="flex items-center gap-2">
-                            
                             {short_id(execution.id)}
                             <.icon
                               :if={partial_execution?(execution)}

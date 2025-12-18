@@ -318,7 +318,10 @@ defmodule Imgd.Runtime.WorkflowRunner do
   # Result Handling
   # ===========================================================================
 
-  defp handle_result(execution, {:ok, %{output: output, node_outputs: outputs, engine_logs: logs}}) do
+  defp handle_result(
+         execution,
+         {:ok, %{output: output, node_outputs: outputs, engine_logs: logs}}
+       ) do
     mark_completed(execution, output, outputs, logs)
   end
 

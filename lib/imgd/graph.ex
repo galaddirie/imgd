@@ -430,8 +430,12 @@ defmodule Imgd.Graph do
 
   defp has_path_to_execution?(graph, id, nodes_to_run, excluded, visited) do
     cond do
-      MapSet.member?(visited, id) -> false
-      MapSet.member?(excluded, id) -> false
+      MapSet.member?(visited, id) ->
+        false
+
+      MapSet.member?(excluded, id) ->
+        false
+
       true ->
         child_ids = children(graph, id)
 

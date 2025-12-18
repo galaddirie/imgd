@@ -30,7 +30,8 @@ defmodule Imgd.Factory do
       nodes: nodes,
       connections: connections,
       triggers: triggers,
-      source_hash: Imgd.Workflows.WorkflowVersion.compute_source_hash(nodes, connections, triggers),
+      source_hash:
+        Imgd.Workflows.WorkflowVersion.compute_source_hash(nodes, connections, triggers),
       workflow: insert(:workflow)
     }
   end

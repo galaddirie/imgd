@@ -60,16 +60,16 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:trace_log_count, 0)
           |> assign(:demo_inputs, demo_inputs)
           |> assign(:selected_demo, initial_demo)
-        |> assign(:run_form, run_form)
-        |> assign(:run_form_error, nil)
-        |> assign(:show_pin_modal, false)
-        |> assign(:pin_modal_node_id, nil)
-        |> assign(:pin_modal_data, nil)
-        |> assign(:pin_modal_existing, nil)
-        |> assign(:show_context_menu, false)
-        |> assign(:context_menu_node_id, nil)
-        |> assign(:context_menu_position, %{x: 0, y: 0})
-        |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(workflow))
+          |> assign(:run_form, run_form)
+          |> assign(:run_form_error, nil)
+          |> assign(:show_pin_modal, false)
+          |> assign(:pin_modal_node_id, nil)
+          |> assign(:pin_modal_data, nil)
+          |> assign(:pin_modal_existing, nil)
+          |> assign(:show_context_menu, false)
+          |> assign(:context_menu_node_id, nil)
+          |> assign(:context_menu_position, %{x: 0, y: 0})
+          |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(workflow))
           |> stream(:trace_log, [], dom_id: &"trace-#{&1.id}")
 
         {:ok, socket}
@@ -147,6 +147,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   def handle_event("execute_to_node", %{"node-id" => node_id}, socket) do
     handle_execute_to_node_impl(socket, node_id)
   end
+
   @impl true
   def handle_event("execute_downstream", %{"node-id" => node_id}, socket) do
     handle_execute_downstream_impl(socket, node_id)
@@ -190,7 +191,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           socket =
             socket
             |> assign(:workflow, updated_workflow)
-            |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(updated_workflow))
+            |> assign(
+              :pins_with_status,
+              Workflows.get_pinned_outputs_with_status(updated_workflow)
+            )
             |> assign(:show_context_menu, false)
             |> put_flash(:info, "Output pinned successfully")
             |> append_trace_log(:info, "Pinned node output", %{node_id: node_id})
@@ -218,7 +222,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             socket =
               socket
               |> assign(:workflow, updated_workflow)
-              |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(updated_workflow))
+              |> assign(
+                :pins_with_status,
+                Workflows.get_pinned_outputs_with_status(updated_workflow)
+              )
               |> assign(:show_pin_modal, false)
               |> put_flash(:info, "Output pinned successfully")
               |> append_trace_log(:info, "Pinned node output", %{node_id: node_id, label: label})
@@ -226,7 +233,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             {:noreply, socket}
 
           {:error, {:pin_too_large, size, max}} ->
-            {:noreply, put_flash(socket, :error, "Pin data too large (#{size} bytes, max #{max})")}
+            {:noreply,
+             put_flash(socket, :error, "Pin data too large (#{size} bytes, max #{max})")}
 
           {:error, reason} ->
             {:noreply, put_flash(socket, :error, "Failed to pin: #{format_error(reason)}")}
@@ -1122,7 +1130,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       <.pin_modal
         show={@show_pin_modal}
         node_id={@pin_modal_node_id || ""}
-        node_name={@pin_modal_node_id && get_node_name(@node_map, @pin_modal_node_id) || ""}
+        node_name={(@pin_modal_node_id && get_node_name(@node_map, @pin_modal_node_id)) || ""}
         current_data={@pin_modal_data}
         existing_pin={@pin_modal_existing}
       />
@@ -1133,9 +1141,9 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         <% pin_status = Map.get(@pins_with_status || %{}, @context_menu_node_id) %>
         <.node_context_menu
           node_id={@context_menu_node_id}
-          node_name={node && node.name || @context_menu_node_id}
+          node_name={(node && node.name) || @context_menu_node_id}
           pinned={Map.has_key?(@workflow.pinned_outputs || %{}, @context_menu_node_id)}
-          pin_stale={pin_status && pin_status["stale"] || false}
+          pin_stale={(pin_status && pin_status["stale"]) || false}
           has_output={get_in(@node_states, [@context_menu_node_id, :output_data]) != nil}
           position={@context_menu_position}
         />
