@@ -90,9 +90,11 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
       Enum.reduce(modes, {%{}, %{}}, fn {field, mode}, {prev_acc, err_acc} ->
         if mode == :expression do
           expr = Map.get(values, field, "")
+
           case evaluate_expression(expr, context) do
             {:ok, result} ->
               {Map.put(prev_acc, field, result), err_acc}
+
             {:error, reason} ->
               {prev_acc, Map.put(err_acc, field, format_eval_error(reason))}
           end
@@ -199,11 +201,18 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
       case evaluate_expression(value, socket.assigns.execution_context) do
         {:ok, result} ->
           socket
-          |> assign(:expression_previews, Map.put(socket.assigns.expression_previews, field, result))
+          |> assign(
+            :expression_previews,
+            Map.put(socket.assigns.expression_previews, field, result)
+          )
           |> assign(:expression_errors, Map.delete(socket.assigns.expression_errors, field))
+
         {:error, reason} ->
           socket
-          |> assign(:expression_errors, Map.put(socket.assigns.expression_errors, field, format_eval_error(reason)))
+          |> assign(
+            :expression_errors,
+            Map.put(socket.assigns.expression_errors, field, format_eval_error(reason))
+          )
           |> assign(:expression_previews, Map.delete(socket.assigns.expression_previews, field))
       end
     else
@@ -237,6 +246,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   end
 
   defp humanize_key(key) when is_atom(key), do: key |> Atom.to_string() |> humanize_key()
+
   defp humanize_key(key) when is_binary(key) do
     key
     |> String.replace("_", " ")
@@ -250,6 +260,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   defp infer_field_type(value) when is_float(value), do: :number
   defp infer_field_type(value) when is_map(value), do: :json
   defp infer_field_type(value) when is_list(value), do: :json
+
   defp infer_field_type(value) when is_binary(value) do
     cond do
       String.length(value) > 100 -> :textarea
@@ -257,6 +268,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
       true -> :text
     end
   end
+
   defp infer_field_type(_), do: :text
 
   @impl true
@@ -283,7 +295,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
             <div>
               <div class="flex items-center gap-2">
                 <h2 class="text-lg font-bold text-base-content leading-none">{@node.name}</h2>
-                <span class="badge badge-primary badge-sm font-mono opacity-80">{short_id(@node.id)}</span>
+                <span class="badge badge-primary badge-sm font-mono opacity-80">
+                  {short_id(@node.id)}
+                </span>
               </div>
               <p class="text-xs text-base-content/50 mt-1 font-medium flex items-center gap-1.5">
                 <span class="size-1.5 rounded-full bg-success"></span>
@@ -352,7 +366,10 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
           <div class="w-80 border-r border-base-200 bg-base-100/50 flex flex-col overflow-hidden">
             <div class="p-4 border-b border-base-200 bg-base-200/10">
               <div class="relative">
-                <.icon name="hero-magnifying-glass" class="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
+                <.icon
+                  name="hero-magnifying-glass"
+                  class="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
+                />
                 <input
                   type="text"
                   placeholder="Search variables..."
@@ -372,7 +389,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
               />
             </div>
             <div class="p-4 border-t border-base-200 bg-base-200/5">
-              <div class="text-[10px] font-bold uppercase tracking-wider text-base-content/40 mb-2">Expression Tip</div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-base-content/40 mb-2">
+                Expression Tip
+              </div>
               <p class="text-[11px] text-base-content/60 leading-relaxed">
                 Click any variable to copy its Liquid expression to your clipboard.
               </p>
@@ -415,7 +434,8 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
               <div class={[
                 "size-2 rounded-full",
                 if(@execution_context, do: "bg-success animate-pulse", else: "bg-warning")
-              ]}></div>
+              ]}>
+              </div>
               <span class="text-xs font-bold text-base-content/70">
                 {if @execution_context, do: "Live Preview Active", else: "Static Mode"}
               </span>
@@ -471,16 +491,44 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
       end
 
     sections = [
-      %{id: "json", label: "Current Input", icon: "hero-arrow-right-on-rectangle", data: context_map && context_map["json"]},
-      %{id: "nodes", label: "Upstream Nodes", icon: "hero-cpu-chip", data: context_map && context_map["nodes"]},
-      %{id: "variables", label: "Workflow Variables", icon: "hero-variable", data: context_map && context_map["variables"]},
-      %{id: "execution", label: "Execution Metadata", icon: "hero-identification", data: context_map && context_map["execution"]},
-      %{id: "system", label: "System", icon: "hero-globe-alt", data: context_map && %{
-        "now" => context_map["now"],
-        "today" => context_map["today"],
-        "env" => context_map["env"]
-      }}
+      %{
+        id: "json",
+        label: "Current Input",
+        icon: "hero-arrow-right-on-rectangle",
+        data: context_map && context_map["json"]
+      },
+      %{
+        id: "nodes",
+        label: "Upstream Nodes",
+        icon: "hero-cpu-chip",
+        data: context_map && context_map["nodes"]
+      },
+      %{
+        id: "variables",
+        label: "Workflow Variables",
+        icon: "hero-variable",
+        data: context_map && context_map["variables"]
+      },
+      %{
+        id: "execution",
+        label: "Execution Metadata",
+        icon: "hero-identification",
+        data: context_map && context_map["execution"]
+      },
+      %{
+        id: "system",
+        label: "System",
+        icon: "hero-globe-alt",
+        data:
+          context_map &&
+            %{
+              "now" => context_map["now"],
+              "today" => context_map["today"],
+              "env" => context_map["env"]
+            }
+      }
     ]
+
     assigns = assigns |> assign(:sections, sections) |> assign(:context_map, context_map)
 
     ~H"""
@@ -552,7 +600,10 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
         <%= if is_map(value) and value != %{} do %>
           <details class="group/node">
             <summary class="flex items-center gap-1.5 p-1.5 rounded-lg hover:bg-base-200 cursor-pointer transition-colors list-none">
-              <.icon name="hero-chevron-right" class="size-3 opacity-30 group-open/node:rotate-90 transition-transform" />
+              <.icon
+                name="hero-chevron-right"
+                class="size-3 opacity-30 group-open/node:rotate-90 transition-transform"
+              />
               <span class="text-[11px] font-mono text-base-content/70">{key}</span>
               <span class="text-[9px] text-base-content/30 italic">Map</span>
             </summary>
@@ -565,7 +616,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
             class="group/item flex items-center justify-between p-1.5 rounded-lg hover:bg-primary/10 hover:text-primary cursor-pointer transition-all"
             title={"Click to copy: #{full_expr}"}
             data-expr={full_expr}
-            onclick={"navigator.clipboard.writeText(this.getAttribute('data-expr'))"}
+            onclick="navigator.clipboard.writeText(this.getAttribute('data-expr'))"
           >
             <div class="flex items-center gap-2 overflow-hidden">
               <.icon name="hero-variable" class="size-3 opacity-30 group-hover/item:opacity-100" />
@@ -608,7 +659,10 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   defp sort_keys(data), do: data
 
   defp format_short_value(nil), do: "null"
-  defp format_short_value(v) when is_binary(v), do: "\"#{String.slice(v, 0, 20)}#{if byte_size(v) > 20, do: "...", else: ""}\""
+
+  defp format_short_value(v) when is_binary(v),
+    do: "\"#{String.slice(v, 0, 20)}#{if byte_size(v) > 20, do: "...", else: ""}\""
+
   defp format_short_value(v) when is_boolean(v), do: to_string(v)
   defp format_short_value(v) when is_number(v), do: to_string(v)
   defp format_short_value(_), do: "..."
@@ -629,7 +683,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
     <div class="max-w-3xl mx-auto space-y-12 pb-20">
       <div class="space-y-1">
         <h3 class="text-lg font-semibold text-base-content tracking-tight">Node Configuration</h3>
-        <p class="text-xs text-base-content/50 font-medium">Configure the parameters for this {@node.type_id} operation.</p>
+        <p class="text-xs text-base-content/50 font-medium">
+          Configure the parameters for this {@node.type_id} operation.
+        </p>
       </div>
 
       <%!-- Fields --%>
@@ -665,7 +721,8 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
           <div>
             <h4 class="text-xs font-bold text-primary mb-1">Using Expressions</h4>
             <p class="text-[11px] text-base-content/60 leading-relaxed">
-              Switch any field to <span class="font-bold text-secondary">Expression Mode</span> to use dynamic data from upstream nodes. Use the sidebar to find and copy variable paths.
+              Switch any field to <span class="font-bold text-secondary">Expression Mode</span>
+              to use dynamic data from upstream nodes. Use the sidebar to find and copy variable paths.
             </p>
           </div>
         </div>
@@ -693,7 +750,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
         <%!-- Field Header --%>
         <div class="px-5 py-3 border-b border-base-200/50 flex items-center justify-between">
           <div>
-            <label class="block text-sm font-medium text-base-content tracking-tight">{@field.label}</label>
+            <label class="block text-sm font-medium text-base-content tracking-tight">
+              {@field.label}
+            </label>
             <p :if={@field.description} class="text-[10px] text-base-content/40 font-medium mt-0.5">
               {@field.description}
             </p>
@@ -712,8 +771,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
               phx-value-field={@field.key}
               phx-target={@myself}
             >
-              <.icon name="hero-pencil" class="size-3" />
-              Fixed
+              <.icon name="hero-pencil" class="size-3" /> Fixed
             </button>
             <button
               type="button"
@@ -726,8 +784,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
               phx-value-field={@field.key}
               phx-target={@myself}
             >
-              <.icon name="hero-code-bracket" class="size-3" />
-              Expression
+              <.icon name="hero-code-bracket" class="size-3" /> Expression
             </button>
           </div>
         </div>
@@ -847,7 +904,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
             @error && "border-error/30 focus:border-error/60 focus:ring-error/5"
           ]}
           spellcheck="false"
-          placeholder='{{ nodes.PreviousNode.json.field }}'
+          placeholder="{{ nodes.PreviousNode.json.field }}"
           phx-keyup="update_field"
           phx-blur="update_field"
           phx-debounce="300"
@@ -859,7 +916,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
       <%!-- Preview Result --%>
       <div class="overflow-hidden rounded-xl border border-base-200/60 bg-base-200/20">
         <div class="flex items-center justify-between px-4 py-1.5 border-b border-base-200/40 bg-base-200/30">
-          <span class="text-[9px] font-bold uppercase tracking-widest text-base-content/30">Live Preview</span>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-base-content/30">
+            Live Preview
+          </span>
           <%= cond do %>
             <% @error -> %>
               <span class="text-[9px] font-bold text-error uppercase">Error</span>
@@ -868,7 +927,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
             <% @has_context -> %>
               <span class="text-[9px] font-bold text-base-content/20 uppercase">Empty</span>
             <% true -> %>
-              <span class="text-[9px] font-bold text-warning uppercase tracking-tighter">Context Missing</span>
+              <span class="text-[9px] font-bold text-warning uppercase tracking-tighter">
+                Context Missing
+              </span>
           <% end %>
         </div>
 
@@ -905,7 +966,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
       <div class="flex items-center justify-between">
         <div class="space-y-1">
           <h3 class="text-xl font-bold text-base-content tracking-tight">Execution Output</h3>
-          <p class="text-sm text-base-content/50 font-medium">Data captured from the last time this node was executed.</p>
+          <p class="text-sm text-base-content/50 font-medium">
+            Data captured from the last time this node was executed.
+          </p>
         </div>
         <%= if @node_output do %>
           <button
@@ -926,10 +989,15 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
 
       <%= if @node_output do %>
         <%!-- Pin Form --%>
-        <div :if={@show_pin_form} class="rounded-3xl bg-primary/5 border-2 border-primary/10 p-8 shadow-inner animate-in fade-in slide-in-from-top-4">
+        <div
+          :if={@show_pin_form}
+          class="rounded-3xl bg-primary/5 border-2 border-primary/10 p-8 shadow-inner animate-in fade-in slide-in-from-top-4"
+        >
           <div class="flex flex-col sm:flex-row items-end gap-4">
             <div class="flex-1 w-full">
-              <label class="block text-xs font-bold uppercase tracking-widest text-primary/60 mb-2 ml-1">Pin Label (Optional)</label>
+              <label class="block text-xs font-bold uppercase tracking-widest text-primary/60 mb-2 ml-1">
+                Pin Label (Optional)
+              </label>
               <input
                 type="text"
                 class="input input-bordered w-full bg-base-100 border-primary/20 focus:border-primary font-bold rounded-xl"
@@ -957,12 +1025,15 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
           <div class="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               class="btn btn-xs btn-neutral font-bold rounded-lg"
-              onclick={"navigator.clipboard.writeText(document.getElementById('output-code').innerText)"}
+              onclick="navigator.clipboard.writeText(document.getElementById('output-code').innerText)"
             >
               Copy JSON
             </button>
           </div>
-          <pre id="output-code" class="text-xs font-mono bg-base-300/20 p-8 rounded-3xl overflow-auto max-h-[500px] border border-base-200 leading-relaxed scrollbar-hide">{format_json(@node_output)}</pre>
+          <pre
+            id="output-code"
+            class="text-xs font-mono bg-base-300/20 p-8 rounded-3xl overflow-auto max-h-[500px] border border-base-200 leading-relaxed scrollbar-hide"
+          >{format_json(@node_output)}</pre>
         </div>
       <% else %>
         <div class="flex flex-col items-center justify-center py-32 bg-base-200/20 rounded-[40px] border-2 border-dashed border-base-300">
@@ -970,7 +1041,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
             <.icon name="hero-arrow-path" class="size-10 text-base-content/10" />
           </div>
           <h4 class="text-lg font-bold text-base-content/40">No Output Available</h4>
-          <p class="text-sm text-base-content/30 font-medium mt-1">Run the workflow to capture this node's output.</p>
+          <p class="text-sm text-base-content/30 font-medium mt-1">
+            Run the workflow to capture this node's output.
+          </p>
         </div>
       <% end %>
     </div>
@@ -985,7 +1058,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
     <div class="max-w-4xl mx-auto space-y-8 pb-20">
       <div class="space-y-1">
         <h3 class="text-xl font-bold text-base-content tracking-tight">Pinned Data</h3>
-        <p class="text-sm text-base-content/50 font-medium">Reusable snapshots for consistent testing and development.</p>
+        <p class="text-sm text-base-content/50 font-medium">
+          Reusable snapshots for consistent testing and development.
+        </p>
       </div>
 
       <%= if @pinned_data do %>
@@ -998,8 +1073,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
               phx-click="clear_pin"
               phx-value-node-id={@node_id}
             >
-              <.icon name="hero-trash" class="size-4" />
-              Remove Pin
+              <.icon name="hero-trash" class="size-4" /> Remove Pin
             </button>
           </div>
 
@@ -1030,7 +1104,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
         <div class="space-y-4">
           <div class="flex items-center gap-2 px-1">
             <.icon name="hero-document-text" class="size-4 text-base-content/40" />
-            <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-base-content/40">Data Snapshot</span>
+            <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-base-content/40">
+              Data Snapshot
+            </span>
           </div>
           <pre class="text-xs font-mono bg-base-300/20 p-8 rounded-[32px] overflow-auto max-h-[500px] border border-base-200 leading-relaxed scrollbar-hide">{format_json(@pinned_data["data"])}</pre>
         </div>
@@ -1040,7 +1116,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
             <.icon name="hero-bookmark" class="size-10 text-base-content/10" />
           </div>
           <h4 class="text-lg font-bold text-base-content/40">No Pinned Data</h4>
-          <p class="text-sm text-base-content/30 font-medium mt-1">Pin an output to use it as a persistent mock for testing.</p>
+          <p class="text-sm text-base-content/30 font-medium mt-1">
+            Pin an output to use it as a persistent mock for testing.
+          </p>
         </div>
       <% end %>
     </div>
@@ -1063,6 +1141,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
 
   defp format_json(nil), do: "null"
   defp format_json(data) when is_binary(data), do: data
+
   defp format_json(data) do
     case Jason.encode(data, pretty: true) do
       {:ok, json} -> json
@@ -1072,6 +1151,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
 
   defp format_preview(nil), do: "null"
   defp format_preview(data) when is_binary(data), do: data
+
   defp format_preview(data) do
     case Jason.encode(data, pretty: true) do
       {:ok, json} -> truncate(json, 500)
@@ -1082,17 +1162,21 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   defp truncate(str, max) when byte_size(str) > max do
     String.slice(str, 0, max) <> "\n... (truncated)"
   end
+
   defp truncate(str, _), do: str
 
   defp format_relative_time(nil), do: "unknown"
+
   defp format_relative_time(datetime_str) when is_binary(datetime_str) do
     case DateTime.from_iso8601(datetime_str) do
       {:ok, dt, _} -> format_relative_time(dt)
       _ -> datetime_str
     end
   end
+
   defp format_relative_time(%DateTime{} = dt) do
     diff = DateTime.diff(DateTime.utc_now(), dt, :second)
+
     cond do
       diff < 60 -> "just now"
       diff < 3600 -> "#{div(diff, 60)} min ago"

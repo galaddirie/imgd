@@ -111,7 +111,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   # ============================================================================
 
   defp build_execution_context(nil, _), do: nil
-
   defp build_execution_context(%Execution{} = execution, node_states) do
     # Build node outputs from node_states
     node_outputs =
@@ -382,10 +381,13 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     # Update the node's config in the workflow
     updated_nodes =
       Enum.map(workflow.nodes || [], fn node ->
+        # Convert struct to map so Ecto can cast it correctly in the changeset
+        node_params = Map.from_struct(node)
+
         if node.id == node_id do
-          %{node | config: new_config}
+          %{node_params | config: new_config}
         else
-          node
+          node_params
         end
       end)
 
