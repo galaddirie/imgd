@@ -358,49 +358,59 @@ defmodule Imgd.Runtime.Engines.Runic do
     end
   end
 
-  defp handle_node_started(execution, node_id, node_info, fact, state_store) do
+  @doc false
+  def handle_node_started(execution, node_id, node_info, fact, state_store) do
     node_type_id = node_info.type_id
     node_name = node_info.name
 
     state_store.record_start_time(execution.id, node_id, System.monotonic_time(:millisecond))
 
-    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    input_data = Serializer.wrap_for_db(fact.value)
+    case state_store.fetch_node_execution(execution.id, node_id) do
+      {:ok, _existing} ->
+        :ok
 
-    attrs = %{
-      execution_id: execution.id,
-      node_id: node_id,
-      node_type_id: node_type_id,
-      status: :running,
-      input_data: input_data,
-      started_at: now,
-      queued_at: now,
-      attempt: 1
-    }
+      :error ->
+        now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+        input_data = Serializer.wrap_for_db(fact.value)
+        id = Ecto.UUID.generate()
 
-    attrs = Map.put_new(attrs, :id, Ecto.UUID.generate())
-
-    case Changeset.apply_action(NodeExecution.changeset(%NodeExecution{}, attrs), :insert) do
-      {:ok, node_exec} ->
-        state_store.put_node_execution(execution.id, node_id, node_exec)
-        NodeExecutionBuffer.record(node_exec)
-        Instrumentation.record_node_started(execution, node_exec)
-
-        Logger.info("Node started: #{node_name}",
-          node_type: node_type_id,
-          node_id: node_id
-        )
-
-      {:error, changeset} ->
-        Logger.warning("Failed to validate node execution start",
+        attrs = %{
           execution_id: execution.id,
           node_id: node_id,
-          errors: inspect(changeset.errors)
-        )
+          node_type_id: node_type_id,
+          status: :running,
+          input_data: input_data,
+          started_at: now,
+          queued_at: now,
+          attempt: 1
+        }
+
+        case Changeset.apply_action(
+               NodeExecution.changeset(%NodeExecution{id: id}, attrs),
+               :insert
+             ) do
+          {:ok, node_exec} ->
+            state_store.put_node_execution(execution.id, node_id, node_exec)
+            NodeExecutionBuffer.record(node_exec)
+            Instrumentation.record_node_started(execution, node_exec)
+
+            Logger.info("Node started: #{node_name}",
+              node_type: node_type_id,
+              node_id: node_id
+            )
+
+          {:error, changeset} ->
+            Logger.warning("Failed to validate node execution start",
+              execution_id: execution.id,
+              node_id: node_id,
+              errors: inspect(changeset.errors)
+            )
+        end
     end
   end
 
-  defp handle_node_completed(execution, node_id, node_info, fact, state_store) do
+  @doc false
+  def handle_node_completed(execution, node_id, node_info, fact, state_store) do
     node_type_id = node_info.type_id
     node_name = node_info.name
 
@@ -415,11 +425,17 @@ defmodule Imgd.Runtime.Engines.Runic do
 
     node_exec =
       case state_store.fetch_node_execution(execution.id, node_id) do
-        {:ok, node_exec} -> node_exec
-        :error -> find_running_node_execution(execution.id, node_id)
+        {:ok, node_exec} ->
+          node_exec
+
+        :error ->
+          find_running_node_execution(execution.id, node_id)
       end
 
     case node_exec do
+      %NodeExecution{status: :completed} ->
+        :ok
+
       %NodeExecution{} = node_exec ->
         case Changeset.apply_action(
                NodeExecution.changeset(node_exec, %{
@@ -449,9 +465,9 @@ defmodule Imgd.Runtime.Engines.Runic do
 
       nil ->
         started_at = DateTime.add(now, -duration_ms, :millisecond)
+        id = Ecto.UUID.generate()
 
         attrs = %{
-          id: Ecto.UUID.generate(),
           execution_id: execution.id,
           node_id: node_id,
           node_type_id: node_type_id,
@@ -463,7 +479,10 @@ defmodule Imgd.Runtime.Engines.Runic do
           attempt: 1
         }
 
-        case Changeset.apply_action(NodeExecution.changeset(%NodeExecution{}, attrs), :insert) do
+        case Changeset.apply_action(
+               NodeExecution.changeset(%NodeExecution{id: id}, attrs),
+               :insert
+             ) do
           {:ok, node_exec} ->
             state_store.put_node_execution(execution.id, node_id, node_exec)
             NodeExecutionBuffer.record(node_exec)

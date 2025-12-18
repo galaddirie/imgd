@@ -167,6 +167,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp mark_completed(%Execution{} = execution, output, node_outputs, engine_logs) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
     duration_ms =
       case execution.started_at do
         nil -> 0
@@ -198,6 +199,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp mark_failed(%Execution{} = execution, reason) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
     duration_ms =
       case execution.started_at do
         nil -> 0
@@ -225,6 +227,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp mark_timeout(%Execution{} = execution) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
     duration_ms =
       case execution.started_at do
         nil -> 0

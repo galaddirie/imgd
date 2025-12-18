@@ -404,7 +404,8 @@ defmodule Imgd.Graph do
       end
 
     # Prune nodes only needed to feed excluded nodes
-    pruned = prune_unnecessary_upstream(graph, nodes_to_run, exclude)
+    target_ids_set = MapSet.new(target_ids)
+    pruned = prune_unnecessary_upstream(graph, nodes_to_run, exclude, target_ids_set)
 
     subgraph(graph, pruned)
   end
@@ -421,20 +422,23 @@ defmodule Imgd.Graph do
     subgraph(graph, vertex_ids)
   end
 
-  defp prune_unnecessary_upstream(graph, nodes_to_run, excluded) do
+  defp prune_unnecessary_upstream(graph, nodes_to_run, excluded, target_ids) do
     # Remove nodes whose only purpose is to feed excluded nodes
     Enum.filter(nodes_to_run, fn id ->
-      has_path_to_execution?(graph, id, nodes_to_run, excluded, MapSet.new())
+      has_path_to_execution?(graph, id, nodes_to_run, excluded, MapSet.new(), target_ids)
     end)
   end
 
-  defp has_path_to_execution?(graph, id, nodes_to_run, excluded, visited) do
+  defp has_path_to_execution?(graph, id, nodes_to_run, excluded, visited, target_ids) do
     cond do
       MapSet.member?(visited, id) ->
         false
 
       MapSet.member?(excluded, id) ->
         false
+
+      MapSet.member?(target_ids, id) and MapSet.member?(nodes_to_run, id) ->
+        true
 
       true ->
         child_ids = children(graph, id)
@@ -446,7 +450,7 @@ defmodule Imgd.Graph do
 
           Enum.any?(child_ids, fn child ->
             MapSet.member?(nodes_to_run, child) or
-              has_path_to_execution?(graph, child, nodes_to_run, excluded, visited)
+              has_path_to_execution?(graph, child, nodes_to_run, excluded, visited, target_ids)
           end)
         end
     end
