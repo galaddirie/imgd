@@ -30,3 +30,5 @@ Create example workflows
 - flame example take in video and return thumbnails ( we should have the example realtime ui here maybe via sdk for now), workflow output should a streaming endpoint
 
 - multi node example for self hosted audience - get file from pc send it to laptop to run code 
+
+ADD ERROR HIGHLIGHTING TO EXPRESSION UI
