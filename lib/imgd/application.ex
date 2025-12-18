@@ -16,6 +16,7 @@ defmodule Imgd.Application do
         ImgdWeb.Telemetry,
         Imgd.Observability.PromEx,
         Imgd.Repo,
+        Imgd.Runtime.ExecutionState,
         {Oban, Application.fetch_env!(:imgd, Oban)},
         {DNSCluster, query: Application.get_env(:imgd, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Imgd.PubSub},
