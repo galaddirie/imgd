@@ -22,7 +22,9 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
      |> assign(:expression_errors, %{})
      |> assign(:active_tab, :config)
      |> assign(:pin_label, "")
-     |> assign(:show_pin_form, false)}
+     |> assign(:show_pin_form, false)
+     |> assign(:variable_search, "")
+     |> assign(:explorer_expanded, %{"json" => true, "nodes" => true, "variables" => true})}
   end
 
   @impl true
@@ -143,6 +145,18 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   end
 
   @impl true
+  def handle_event("search_variables", %{"value" => search}, socket) do
+    {:noreply, assign(socket, :variable_search, search)}
+  end
+
+  @impl true
+  def handle_event("toggle_explorer_section", %{"section" => section}, socket) do
+    expanded = socket.assigns.explorer_expanded
+    new_expanded = Map.put(expanded, section, !Map.get(expanded, section, false))
+    {:noreply, assign(socket, :explorer_expanded, new_expanded)}
+  end
+
+  @impl true
   def handle_event("toggle_pin_form", _, socket) do
     {:noreply, assign(socket, :show_pin_form, not socket.assigns.show_pin_form)}
   end
@@ -250,153 +264,185 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
     ~H"""
     <div
       id={@id}
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6"
       phx-window-keydown="close"
       phx-key="escape"
       phx-target={@myself}
     >
       <div
-        class="bg-base-100 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-base-300"
+        class="bg-base-100 rounded-3xl shadow-2xl w-full max-w-7xl h-[90vh] flex flex-col overflow-hidden border border-base-300 transition-all duration-300"
         phx-click-away="close"
         phx-target={@myself}
       >
         <%!-- Header --%>
-        <div class="px-6 py-4 border-b border-base-200 flex items-center justify-between bg-base-200/30">
+        <div class="px-6 py-4 border-b border-base-200 flex items-center justify-between bg-base-200/40">
           <div class="flex items-center gap-4">
-            <div class="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary">
+            <div class="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary/10 text-primary shadow-inner">
               <.icon name="hero-cube" class="size-6" />
             </div>
             <div>
-              <h2 class="text-lg font-semibold text-base-content">{@node.name}</h2>
-              <p class="text-sm text-base-content/60 flex items-center gap-2">
-                <span class="badge badge-ghost badge-sm">{node_type_label(@node.type_id)}</span>
-                <span class="font-mono text-xs opacity-50">{short_id(@node.id)}</span>
+              <div class="flex items-center gap-2">
+                <h2 class="text-lg font-bold text-base-content leading-none">{@node.name}</h2>
+                <span class="badge badge-primary badge-sm font-mono opacity-80">{short_id(@node.id)}</span>
+              </div>
+              <p class="text-xs text-base-content/50 mt-1 font-medium flex items-center gap-1.5">
+                <span class="size-1.5 rounded-full bg-success"></span>
+                {node_type_label(@node.type_id)} Node
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm btn-circle"
-            phx-click="close"
-            phx-target={@myself}
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
 
-        <%!-- Tabs --%>
-        <div class="border-b border-base-200 px-6">
-          <div class="flex gap-1">
-            <button
-              type="button"
-              class={[
-                "px-4 py-3 text-sm font-medium border-b-2 transition-colors",
-                @active_tab == :config && "border-primary text-primary",
-                @active_tab != :config && "border-transparent text-base-content/60 hover:text-base-content"
-              ]}
-              phx-click="switch_tab"
-              phx-value-tab="config"
-              phx-target={@myself}
-            >
-              <.icon name="hero-cog-6-tooth" class="size-4 inline mr-1.5" />
-              Configuration
-            </button>
-            <button
-              type="button"
-              class={[
-                "px-4 py-3 text-sm font-medium border-b-2 transition-colors",
-                @active_tab == :output && "border-primary text-primary",
-                @active_tab != :output && "border-transparent text-base-content/60 hover:text-base-content"
-              ]}
-              phx-click="switch_tab"
-              phx-value-tab="output"
-              phx-target={@myself}
-            >
-              <.icon name="hero-arrow-up-on-square" class="size-4 inline mr-1.5" />
-              Output
-              <%= if @node_output do %>
-                <span class="badge badge-success badge-xs ml-1">Available</span>
-              <% end %>
-            </button>
-            <button
-              type="button"
-              class={[
-                "px-4 py-3 text-sm font-medium border-b-2 transition-colors",
-                @active_tab == :pinned && "border-primary text-primary",
-                @active_tab != :pinned && "border-transparent text-base-content/60 hover:text-base-content"
-              ]}
-              phx-click="switch_tab"
-              phx-value-tab="pinned"
-              phx-target={@myself}
-            >
-              <.icon name="hero-bookmark" class="size-4 inline mr-1.5" />
-              Pinned Data
-              <%= if @pinned_data do %>
-                <span class="badge badge-primary badge-xs ml-1">Pinned</span>
-              <% end %>
-            </button>
-          </div>
-        </div>
+          <div class="flex items-center gap-2">
+            <div class="flex bg-base-300/50 p-1 rounded-xl">
+              <button
+                type="button"
+                class={[
+                  "px-4 py-2 text-xs font-bold rounded-lg transition-all",
+                  @active_tab == :config && "bg-base-100 text-primary shadow-sm",
+                  @active_tab != :config && "text-base-content/60 hover:text-base-content"
+                ]}
+                phx-click="switch_tab"
+                phx-value-tab="config"
+                phx-target={@myself}
+              >
+                Parameters
+              </button>
+              <button
+                type="button"
+                class={[
+                  "px-4 py-2 text-xs font-bold rounded-lg transition-all",
+                  @active_tab == :output && "bg-base-100 text-primary shadow-sm",
+                  @active_tab != :output && "text-base-content/60 hover:text-base-content"
+                ]}
+                phx-click="switch_tab"
+                phx-value-tab="output"
+                phx-target={@myself}
+              >
+                Output
+              </button>
+              <button
+                type="button"
+                class={[
+                  "px-4 py-2 text-xs font-bold rounded-lg transition-all",
+                  @active_tab == :pinned && "bg-base-100 text-primary shadow-sm",
+                  @active_tab != :pinned && "text-base-content/60 hover:text-base-content"
+                ]}
+                phx-click="switch_tab"
+                phx-value-tab="pinned"
+                phx-target={@myself}
+              >
+                Pinned
+              </button>
+            </div>
 
-        <%!-- Body --%>
-        <div class="flex-1 overflow-y-auto p-6">
-          <%= case @active_tab do %>
-            <% :config -> %>
-              <.config_tab
-                node={@node}
-                field_modes={@field_modes}
-                field_values={@field_values}
-                expression_previews={@expression_previews}
-                expression_errors={@expression_errors}
-                has_context={not is_nil(@execution_context)}
-                myself={@myself}
-              />
-            <% :output -> %>
-              <.output_tab
-                node_output={@node_output}
-                show_pin_form={@show_pin_form}
-                pin_label={@pin_label}
-                myself={@myself}
-              />
-            <% :pinned -> %>
-              <.pinned_tab
-                pinned_data={@pinned_data}
-                node_id={@node.id}
-              />
-          <% end %>
-        </div>
-
-        <%!-- Footer --%>
-        <div class="px-6 py-4 border-t border-base-200 flex items-center justify-between bg-base-200/20">
-          <div class="flex items-center gap-2 text-xs text-base-content/60">
-            <%= if @execution_context do %>
-              <span class="flex items-center gap-1 text-success">
-                <.icon name="hero-check-circle" class="size-4" />
-                Context available for previews
-              </span>
-            <% else %>
-              <span class="flex items-center gap-1 text-warning">
-                <.icon name="hero-exclamation-triangle" class="size-4" />
-                Run workflow to enable expression previews
-              </span>
-            <% end %>
-          </div>
-          <div class="flex items-center gap-3">
             <button
               type="button"
-              class="btn btn-ghost"
+              class="btn btn-ghost btn-sm btn-circle hover:bg-error/10 hover:text-error transition-colors ml-4"
               phx-click="close"
               phx-target={@myself}
             >
-              Cancel
+              <.icon name="hero-x-mark" class="size-5" />
+            </button>
+          </div>
+        </div>
+
+        <%!-- Main content: Split Layout --%>
+        <div class="flex-1 flex overflow-hidden bg-base-200/20">
+          <%!-- Left: Variable Explorer (Context) --%>
+          <div class="w-80 border-r border-base-200 bg-base-100/50 flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-base-200 bg-base-200/10">
+              <div class="relative">
+                <.icon name="hero-magnifying-glass" class="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
+                <input
+                  type="text"
+                  placeholder="Search variables..."
+                  class="input input-sm input-bordered w-full pl-9 bg-base-100 border-base-300 focus:border-primary text-xs font-medium"
+                  phx-keyup="search_variables"
+                  phx-target={@myself}
+                  value={@variable_search}
+                />
+              </div>
+            </div>
+            <div class="flex-1 overflow-y-auto custom-scrollbar">
+              <.variable_explorer
+                context={@execution_context}
+                search={@variable_search}
+                expanded={@explorer_expanded}
+                myself={@myself}
+              />
+            </div>
+            <div class="p-4 border-t border-base-200 bg-base-200/5">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-base-content/40 mb-2">Expression Tip</div>
+              <p class="text-[11px] text-base-content/60 leading-relaxed">
+                Click any variable to copy its Liquid expression to your clipboard.
+              </p>
+            </div>
+          </div>
+
+          <%!-- Right: Tab Content (Config / Output) --%>
+          <div class="flex-1 overflow-y-auto p-8 custom-scrollbar relative">
+            <%= case @active_tab do %>
+              <% :config -> %>
+                <.config_tab
+                  node={@node}
+                  field_modes={@field_modes}
+                  field_values={@field_values}
+                  expression_previews={@expression_previews}
+                  expression_errors={@expression_errors}
+                  has_context={not is_nil(@execution_context)}
+                  myself={@myself}
+                />
+              <% :output -> %>
+                <.output_tab
+                  node_output={@node_output}
+                  show_pin_form={@show_pin_form}
+                  pin_label={@pin_label}
+                  myself={@myself}
+                />
+              <% :pinned -> %>
+                <.pinned_tab
+                  pinned_data={@pinned_data}
+                  node_id={@node.id}
+                />
+            <% end %>
+          </div>
+        </div>
+
+        <%!-- Footer --%>
+        <div class="px-8 py-5 border-t border-base-200 flex items-center justify-between bg-base-100">
+          <div class="flex items-center gap-6">
+            <div class="flex items-center gap-2">
+              <div class={[
+                "size-2 rounded-full",
+                if(@execution_context, do: "bg-success animate-pulse", else: "bg-warning")
+              ]}></div>
+              <span class="text-xs font-bold text-base-content/70">
+                {if @execution_context, do: "Live Preview Active", else: "Static Mode"}
+              </span>
+            </div>
+            <%= if !@execution_context do %>
+              <div class="flex items-center gap-1.5 text-xs text-base-content/40 font-medium">
+                <.icon name="hero-information-circle" class="size-4" />
+                Run workflow to enable expression previews
+              </div>
+            <% end %>
+          </div>
+
+          <div class="flex items-center gap-4">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm font-bold text-base-content/60 hover:text-base-content"
+              phx-click="close"
+              phx-target={@myself}
+            >
+              Discard Changes
             </button>
             <button
               type="button"
-              class="btn btn-primary gap-2"
+              class="btn btn-primary px-8 rounded-xl font-bold shadow-lg shadow-primary/20 hover:shadow-primary/30 active:scale-95 transition-all"
               phx-click="save_config"
               phx-target={@myself}
             >
-              <.icon name="hero-check" class="size-4" />
               Save Configuration
             </button>
           </div>
@@ -409,6 +455,163 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   # ============================================================================
   # Sub-components
   # ============================================================================
+
+  attr :context, :map, required: true
+  attr :search, :string, default: ""
+  attr :expanded, :map, required: true
+  attr :myself, :any, required: true
+
+  defp variable_explorer(assigns) do
+    # Transform execution context struct to map with string keys for explorer
+    context_map =
+      if assigns.context do
+        Imgd.Runtime.Expression.Context.build(assigns.context)
+      else
+        nil
+      end
+
+    sections = [
+      %{id: "json", label: "Current Input", icon: "hero-arrow-right-on-rectangle", data: context_map && context_map["json"]},
+      %{id: "nodes", label: "Upstream Nodes", icon: "hero-cpu-chip", data: context_map && context_map["nodes"]},
+      %{id: "variables", label: "Workflow Variables", icon: "hero-variable", data: context_map && context_map["variables"]},
+      %{id: "execution", label: "Execution Metadata", icon: "hero-identification", data: context_map && context_map["execution"]},
+      %{id: "system", label: "System", icon: "hero-globe-alt", data: context_map && %{
+        "now" => context_map["now"],
+        "today" => context_map["today"],
+        "env" => context_map["env"]
+      }}
+    ]
+    assigns = assigns |> assign(:sections, sections) |> assign(:context_map, context_map)
+
+    ~H"""
+    <div class="p-2 space-y-1">
+      <%= for section <- @sections do %>
+        <div class="overflow-hidden">
+          <button
+            type="button"
+            class={[
+              "w-full flex items-center justify-between p-2 rounded-xl text-xs font-bold transition-all",
+              "hover:bg-primary/5 group",
+              @expanded[section.id] && "text-primary bg-primary/5",
+              !@expanded[section.id] && "text-base-content/60"
+            ]}
+            phx-click="toggle_explorer_section"
+            phx-value-section={section.id}
+            phx-target={@myself}
+          >
+            <div class="flex items-center gap-2">
+              <.icon name={section.icon} class="size-4 opacity-70 group-hover:opacity-100" />
+              {section.label}
+            </div>
+            <.icon
+              name={if @expanded[section.id], do: "hero-chevron-down", else: "hero-chevron-right"}
+              class="size-3 opacity-40"
+            />
+          </button>
+
+          <%= if @expanded[section.id] do %>
+            <div class="mt-1 ml-4 pl-2 border-l border-base-200 py-1 space-y-0.5">
+              <%= if is_nil(section.data) or section.data == %{} do %>
+                <div class="p-2 text-[10px] text-base-content/40 italic">No data available</div>
+              <% else %>
+                <.tree_node
+                  data={section.data}
+                  path={if section.id == "system", do: "", else: section.id}
+                  search={@search}
+                  level={0}
+                />
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp tree_node(assigns) do
+    data = assigns.data
+    search = assigns.search |> String.downcase()
+
+    # Filter data if search is present
+    filtered_data =
+      if search == "" do
+        data
+      else
+        filter_tree(data, search)
+      end
+
+    assigns = assign(assigns, :filtered_data, filtered_data)
+
+    ~H"""
+    <div class="space-y-0.5">
+      <%= for {key, value} <- sort_keys(@filtered_data) do %>
+        <% current_path = if @path == "", do: key, else: "#{@path}.#{key}" %>
+        <% full_expr = "{{ #{current_path} }}" %>
+
+        <%= if is_map(value) and value != %{} do %>
+          <details class="group/node">
+            <summary class="flex items-center gap-1.5 p-1.5 rounded-lg hover:bg-base-200 cursor-pointer transition-colors list-none">
+              <.icon name="hero-chevron-right" class="size-3 opacity-30 group-open/node:rotate-90 transition-transform" />
+              <span class="text-[11px] font-mono text-base-content/70">{key}</span>
+              <span class="text-[9px] text-base-content/30 italic">Map</span>
+            </summary>
+            <div class="ml-3 pl-2 border-l border-base-200/50 mt-0.5">
+              <.tree_node data={value} path={current_path} search={@search} level={@level + 1} />
+            </div>
+          </details>
+        <% else %>
+          <div
+            class="group/item flex items-center justify-between p-1.5 rounded-lg hover:bg-primary/10 hover:text-primary cursor-pointer transition-all"
+            title={"Click to copy: #{full_expr}"}
+            data-expr={full_expr}
+            onclick={"navigator.clipboard.writeText(this.getAttribute('data-expr'))"}
+          >
+            <div class="flex items-center gap-2 overflow-hidden">
+              <.icon name="hero-variable" class="size-3 opacity-30 group-hover/item:opacity-100" />
+              <span class="text-[11px] font-mono truncate">{key}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] text-base-content/40 truncate max-w-[100px] font-medium">
+                {format_short_value(value)}
+              </span>
+              <.icon name="hero-square-2-stack" class="size-3 opacity-0 group-hover/item:opacity-50" />
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp filter_tree(data, search) when is_map(data) do
+    Enum.reduce(data, %{}, fn {k, v}, acc ->
+      k_str = to_string(k) |> String.downcase()
+
+      cond do
+        String.contains?(k_str, search) ->
+          Map.put(acc, k, v)
+
+        is_map(v) ->
+          filtered_v = filter_tree(v, search)
+          if filtered_v != %{}, do: Map.put(acc, k, filtered_v), else: acc
+
+        true ->
+          acc
+      end
+    end)
+  end
+
+  defp filter_tree(data, _), do: data
+
+  defp sort_keys(data) when is_map(data), do: Enum.sort_by(data, fn {k, _} -> to_string(k) end)
+  defp sort_keys(data), do: data
+
+  defp format_short_value(nil), do: "null"
+  defp format_short_value(v) when is_binary(v), do: "\"#{String.slice(v, 0, 20)}#{if byte_size(v) > 20, do: "...", else: ""}\""
+  defp format_short_value(v) when is_boolean(v), do: to_string(v)
+  defp format_short_value(v) when is_number(v), do: to_string(v)
+  defp format_short_value(_), do: "..."
 
   attr :node, :map, required: true
   attr :field_modes, :map, required: true
@@ -423,37 +626,22 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
     assigns = assign(assigns, :fields, fields)
 
     ~H"""
-    <div class="space-y-6">
-      <%!-- Context indicator --%>
-      <div class={[
-        "rounded-xl p-4 flex items-start gap-3",
-        @has_context && "bg-success/10 border border-success/20",
-        not @has_context && "bg-warning/10 border border-warning/20"
-      ]}>
-        <.icon
-          name={if @has_context, do: "hero-check-circle", else: "hero-information-circle"}
-          class={["size-5 mt-0.5", @has_context && "text-success", not @has_context && "text-warning"]}
-        />
-        <div>
-          <p class={["font-medium text-sm", @has_context && "text-success", not @has_context && "text-warning"]}>
-            {if @has_context, do: "Expression Preview Available", else: "Expression Preview Unavailable"}
-          </p>
-          <p class="text-xs text-base-content/60 mt-1">
-            {if @has_context,
-              do: "Upstream node outputs are available. Expression results will be previewed in real-time.",
-              else: "Run the workflow first to populate upstream node outputs for expression previews."}
-          </p>
-        </div>
+    <div class="max-w-3xl mx-auto space-y-12 pb-20">
+      <div class="space-y-1">
+        <h3 class="text-lg font-semibold text-base-content tracking-tight">Node Configuration</h3>
+        <p class="text-xs text-base-content/50 font-medium">Configure the parameters for this {@node.type_id} operation.</p>
       </div>
 
       <%!-- Fields --%>
       <%= if @fields == [] do %>
-        <div class="text-center py-12 text-base-content/60">
-          <.icon name="hero-cog-6-tooth" class="size-12 mx-auto mb-3 opacity-30" />
-          <p class="text-sm">This node has no configurable fields</p>
+        <div class="flex flex-col items-center justify-center py-20 bg-base-300/10 rounded-3xl border-2 border-dashed border-base-300">
+          <div class="size-16 rounded-2xl bg-base-300/30 flex items-center justify-center mb-4">
+            <.icon name="hero-cog-6-tooth" class="size-8 text-base-content/20" />
+          </div>
+          <p class="text-xs font-bold text-base-content/40">No configurable fields available</p>
         </div>
       <% else %>
-        <div class="space-y-4">
+        <div class="space-y-6">
           <%= for field <- @fields do %>
             <.config_field
               field={field}
@@ -468,35 +656,20 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
         </div>
       <% end %>
 
-      <%!-- Expression Help --%>
-      <details class="collapse collapse-arrow bg-base-200/50 rounded-xl">
-        <summary class="collapse-title text-sm font-medium">
-          <.icon name="hero-light-bulb" class="size-4 inline mr-2 text-warning" />
-          Expression Syntax Help
-        </summary>
-        <div class="collapse-content text-sm">
-          <div class="grid grid-cols-2 gap-4 pt-2">
-            <div>
-              <p class="font-semibold text-base-content mb-2">Available Variables</p>
-              <ul class="space-y-1 text-base-content/70 text-xs font-mono">
-                <li><code class="bg-base-300 px-1 rounded">{"{{ json }}"}</code> - Current input</li>
-                <li><code class="bg-base-300 px-1 rounded">{"{{ nodes.NodeName.json }}"}</code> - Node output</li>
-                <li><code class="bg-base-300 px-1 rounded">{"{{ execution.id }}"}</code> - Execution ID</li>
-                <li><code class="bg-base-300 px-1 rounded">{"{{ variables.name }}"}</code> - Workflow var</li>
-              </ul>
-            </div>
-            <div>
-              <p class="font-semibold text-base-content mb-2">Common Filters</p>
-              <ul class="space-y-1 text-base-content/70 text-xs font-mono">
-                <li><code class="bg-base-300 px-1 rounded">| json</code> - Encode as JSON</li>
-                <li><code class="bg-base-300 px-1 rounded">| dig: "a.b.c"</code> - Deep access</li>
-                <li><code class="bg-base-300 px-1 rounded">| default: "val"</code> - Default value</li>
-                <li><code class="bg-base-300 px-1 rounded">| upcase</code> - Uppercase</li>
-              </ul>
-            </div>
+      <%!-- Help --%>
+      <div class="p-5 rounded-2xl bg-primary/5 border border-primary/10">
+        <div class="flex items-start gap-3">
+          <div class="size-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <.icon name="hero-light-bulb" class="size-4 text-primary" />
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-primary mb-1">Using Expressions</h4>
+            <p class="text-[11px] text-base-content/60 leading-relaxed">
+              Switch any field to <span class="font-bold text-secondary">Expression Mode</span> to use dynamic data from upstream nodes. Use the sidebar to find and copy variable paths.
+            </p>
           </div>
         </div>
-      </details>
+      </div>
     </div>
     """
   end
@@ -511,16 +684,21 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
 
   defp config_field(assigns) do
     ~H"""
-    <div class="rounded-xl border border-base-300 bg-base-100 overflow-hidden">
-      <%!-- Field Header --%>
-      <div class="px-4 py-3 bg-base-200/30 flex items-center justify-between">
-        <div>
-          <label class="font-medium text-sm text-base-content">{@field.label}</label>
-          <p :if={@field.description} class="text-xs text-base-content/60 mt-0.5">
-            {@field.description}
-          </p>
-        </div>
-        <div class="flex items-center gap-2">
+    <div class="group relative">
+      <div class={[
+        "rounded-2xl border transition-all duration-300",
+        @mode == :literal && "border-base-300 bg-base-100 shadow-sm",
+        @mode == :expression && "border-secondary/20 bg-secondary/[0.02] shadow-inner"
+      ]}>
+        <%!-- Field Header --%>
+        <div class="px-5 py-3 border-b border-base-200/50 flex items-center justify-between">
+          <div>
+            <label class="block text-sm font-medium text-base-content tracking-tight">{@field.label}</label>
+            <p :if={@field.description} class="text-[10px] text-base-content/40 font-medium mt-0.5">
+              {@field.description}
+            </p>
+          </div>
+
           <%!-- Mode Toggle --%>
           <div class="join">
             <button
@@ -535,7 +713,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
               phx-target={@myself}
             >
               <.icon name="hero-pencil" class="size-3" />
-              Value
+              Fixed
             </button>
             <button
               type="button"
@@ -553,22 +731,22 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
             </button>
           </div>
         </div>
-      </div>
 
-      <%!-- Field Input --%>
-      <div class="p-4 space-y-3">
-        <%= if @mode == :literal do %>
-          <.literal_input field={@field} value={@value} myself={@myself} />
-        <% else %>
-          <.expression_input
-            field={@field}
-            value={@value}
-            preview={@preview}
-            error={@error}
-            has_context={@has_context}
-            myself={@myself}
-          />
-        <% end %>
+        <%!-- Field Input --%>
+        <div class="p-5">
+          <%= if @mode == :literal do %>
+            <.literal_input field={@field} value={@value} myself={@myself} />
+          <% else %>
+            <.expression_input
+              field={@field}
+              value={@value}
+              preview={@preview}
+              error={@error}
+              has_context={@has_context}
+              myself={@myself}
+            />
+          <% end %>
+        </div>
       </div>
     </div>
     """
@@ -580,25 +758,27 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
 
   defp literal_input(assigns) do
     ~H"""
-    <div>
+    <div class="w-full">
       <%= case @field.type do %>
         <% :boolean -> %>
-          <label class="flex items-center gap-3 cursor-pointer">
+          <div class="flex items-center justify-between bg-base-200/20 p-3 rounded-xl border border-base-200/50">
+            <span class="text-xs font-medium text-base-content/60">
+              {if @value == true or @value == "true", do: "Enabled", else: "Disabled"}
+            </span>
             <input
               type="checkbox"
-              class="toggle toggle-primary"
+              class="toggle toggle-primary toggle-md"
               checked={@value == true or @value == "true"}
               phx-click="update_field"
               phx-value-field={@field.key}
               phx-value-value={if @value, do: "false", else: "true"}
               phx-target={@myself}
             />
-            <span class="text-sm">{if @value, do: "Enabled", else: "Disabled"}</span>
-          </label>
+          </div>
         <% :integer -> %>
           <input
             type="number"
-            class="input input-bordered w-full"
+            class="input input-md w-full bg-base-200/20 border-base-300 focus:border-primary font-medium text-sm rounded-xl"
             value={@value}
             phx-blur="update_field"
             phx-value-field={@field.key}
@@ -608,7 +788,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
           <input
             type="number"
             step="any"
-            class="input input-bordered w-full"
+            class="input input-md w-full bg-base-200/20 border-base-300 focus:border-primary font-medium text-sm rounded-xl"
             value={@value}
             phx-blur="update_field"
             phx-value-field={@field.key}
@@ -616,25 +796,25 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
           />
         <% :textarea -> %>
           <textarea
-            class="textarea textarea-bordered w-full font-mono text-sm"
-            rows="4"
+            class="textarea textarea-bordered w-full font-mono text-xs bg-base-200/10 border-base-300 focus:border-primary min-h-[100px] leading-relaxed rounded-xl"
             phx-blur="update_field"
             phx-value-field={@field.key}
             phx-target={@myself}
           >{@value}</textarea>
         <% :json -> %>
-          <textarea
-            class="textarea textarea-bordered w-full font-mono text-sm"
-            rows="6"
-            spellcheck="false"
-            phx-blur="update_field"
-            phx-value-field={@field.key}
-            phx-target={@myself}
-          >{format_json(@value)}</textarea>
+          <div class="relative group/json">
+            <textarea
+              class="textarea textarea-bordered w-full font-mono text-[11px] bg-base-200/10 border-base-300 focus:border-primary min-h-[180px] leading-relaxed scrollbar-hide rounded-xl"
+              spellcheck="false"
+              phx-blur="update_field"
+              phx-value-field={@field.key}
+              phx-target={@myself}
+            >{format_json(@value)}</textarea>
+          </div>
         <% _ -> %>
           <input
             type="text"
-            class="input input-bordered w-full"
+            class="input input-md w-full bg-base-200/20 border-base-300 focus:border-primary font-medium text-sm rounded-xl"
             value={@value}
             phx-blur="update_field"
             phx-value-field={@field.key}
@@ -656,69 +836,60 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
     ~H"""
     <div class="space-y-3">
       <%!-- Expression Editor --%>
-      <div class="relative">
-        <div class="absolute top-2 left-3 text-secondary/60">
-          <.icon name="hero-code-bracket" class="size-4" />
+      <div class="relative group/expr">
+        <div class="absolute left-4 top-3 text-secondary/30 group-focus-within/expr:text-secondary group-focus-within/expr:scale-110 transition-all duration-300">
+          <.icon name="hero-code-bracket" class="size-5" />
         </div>
         <textarea
           class={[
-            "textarea w-full font-mono text-sm pl-10 bg-secondary/5 border-secondary/30",
-            "focus:border-secondary focus:ring-secondary/20",
-            @error && "border-error"
+            "textarea w-full font-mono text-[13px] pl-12 pr-10 py-3 bg-base-100 border-2 transition-all duration-300 min-h-[80px] leading-relaxed rounded-xl",
+            "border-secondary/10 focus:border-secondary/40 focus:ring-4 focus:ring-secondary/5",
+            @error && "border-error/30 focus:border-error/60 focus:ring-error/5"
           ]}
-          rows="3"
           spellcheck="false"
           placeholder='{{ nodes.PreviousNode.json.field }}'
+          phx-keyup="update_field"
           phx-blur="update_field"
+          phx-debounce="300"
           phx-value-field={@field.key}
           phx-target={@myself}
         >{@value}</textarea>
       </div>
 
-      <%!-- Preview/Error Section --%>
-      <%= cond do %>
-        <% @error -> %>
-          <div class="rounded-lg bg-error/10 border border-error/20 p-3">
-            <div class="flex items-start gap-2">
-              <.icon name="hero-exclamation-triangle" class="size-4 text-error mt-0.5" />
-              <div>
-                <p class="text-sm font-medium text-error">Expression Error</p>
-                <p class="text-xs text-error/80 mt-1 font-mono">{@error}</p>
+      <%!-- Preview Result --%>
+      <div class="overflow-hidden rounded-xl border border-base-200/60 bg-base-200/20">
+        <div class="flex items-center justify-between px-4 py-1.5 border-b border-base-200/40 bg-base-200/30">
+          <span class="text-[9px] font-bold uppercase tracking-widest text-base-content/30">Live Preview</span>
+          <%= cond do %>
+            <% @error -> %>
+              <span class="text-[9px] font-bold text-error uppercase">Error</span>
+            <% @has_context and @preview != nil -> %>
+              <span class="text-[9px] font-bold text-success uppercase">Success</span>
+            <% @has_context -> %>
+              <span class="text-[9px] font-bold text-base-content/20 uppercase">Empty</span>
+            <% true -> %>
+              <span class="text-[9px] font-bold text-warning uppercase tracking-tighter">Context Missing</span>
+          <% end %>
+        </div>
+
+        <div class="p-3">
+          <%= cond do %>
+            <% @error -> %>
+              <div class="flex gap-2 text-error/80">
+                <.icon name="hero-exclamation-circle" class="size-3.5 shrink-0 mt-0.5" />
+                <p class="text-[10px] font-mono leading-relaxed">{@error}</p>
               </div>
-            </div>
-          </div>
-        <% @has_context and @preview != nil -> %>
-          <div class="rounded-lg bg-success/10 border border-success/20 p-3">
-            <div class="flex items-start justify-between gap-2">
-              <div class="flex items-start gap-2 min-w-0 flex-1">
-                <.icon name="hero-check-circle" class="size-4 text-success mt-0.5 flex-shrink-0" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium text-success">Preview Result</p>
-                  <pre class="text-xs text-base-content/80 mt-2 font-mono bg-base-200/50 p-2 rounded overflow-auto max-h-32">{format_preview(@preview)}</pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        <% @has_context -> %>
-          <div class="rounded-lg bg-base-200/50 border border-base-300 p-3">
-            <div class="flex items-center gap-2 text-base-content/60">
-              <.icon name="hero-clock" class="size-4" />
-              <p class="text-sm">Evaluating expression...</p>
-            </div>
-          </div>
-        <% true -> %>
-          <div class="rounded-lg bg-warning/10 border border-warning/20 p-3">
-            <div class="flex items-start gap-2">
-              <.icon name="hero-information-circle" class="size-4 text-warning mt-0.5" />
-              <div>
-                <p class="text-sm font-medium text-warning">Preview Unavailable</p>
-                <p class="text-xs text-base-content/60 mt-1">
-                  Run the workflow to see expression results
-                </p>
-              </div>
-            </div>
-          </div>
-      <% end %>
+            <% @has_context and @preview != nil -> %>
+              <pre class="text-[11px] text-base-content/70 font-mono overflow-auto max-h-32 leading-relaxed custom-scrollbar">{format_preview(@preview)}</pre>
+            <% @has_context -> %>
+              <p class="text-[10px] text-base-content/20 italic font-medium">No output generated.</p>
+            <% true -> %>
+              <p class="text-[10px] text-base-content/40 font-medium leading-relaxed">
+                Run workflow to see live preview.
+              </p>
+          <% end %>
+        </div>
+      </div>
     </div>
     """
   end
@@ -730,67 +901,76 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
 
   defp output_tab(assigns) do
     ~H"""
-    <div class="space-y-6">
+    <div class="max-w-4xl mx-auto space-y-8 pb-20">
+      <div class="flex items-center justify-between">
+        <div class="space-y-1">
+          <h3 class="text-xl font-bold text-base-content tracking-tight">Execution Output</h3>
+          <p class="text-sm text-base-content/50 font-medium">Data captured from the last time this node was executed.</p>
+        </div>
+        <%= if @node_output do %>
+          <button
+            type="button"
+            class={[
+              "btn gap-2 rounded-xl transition-all font-bold shadow-sm",
+              @show_pin_form && "btn-ghost text-base-content/40",
+              !@show_pin_form && "btn-outline btn-primary shadow-primary/5"
+            ]}
+            phx-click="toggle_pin_form"
+            phx-target={@myself}
+          >
+            <.icon name={if @show_pin_form, do: "hero-x-mark", else: "hero-bookmark"} class="size-4" />
+            {if @show_pin_form, do: "Cancel Pinning", else: "Pin this result"}
+          </button>
+        <% end %>
+      </div>
+
       <%= if @node_output do %>
-        <%!-- Output Data --%>
-        <div>
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="font-medium text-base-content flex items-center gap-2">
-              <.icon name="hero-arrow-up-on-square" class="size-4 text-success" />
-              Last Execution Output
-            </h3>
+        <%!-- Pin Form --%>
+        <div :if={@show_pin_form} class="rounded-3xl bg-primary/5 border-2 border-primary/10 p-8 shadow-inner animate-in fade-in slide-in-from-top-4">
+          <div class="flex flex-col sm:flex-row items-end gap-4">
+            <div class="flex-1 w-full">
+              <label class="block text-xs font-bold uppercase tracking-widest text-primary/60 mb-2 ml-1">Pin Label (Optional)</label>
+              <input
+                type="text"
+                class="input input-bordered w-full bg-base-100 border-primary/20 focus:border-primary font-bold rounded-xl"
+                placeholder="e.g., Sample API Success Response"
+                value={@pin_label}
+                phx-blur="update_pin_label"
+                phx-target={@myself}
+              />
+            </div>
             <button
               type="button"
-              class="btn btn-sm btn-outline btn-primary gap-2"
-              phx-click="toggle_pin_form"
+              class="btn btn-primary px-8 rounded-xl font-bold shadow-lg shadow-primary/20 w-full sm:w-auto"
+              phx-click="pin_output"
               phx-target={@myself}
             >
-              <.icon name="hero-bookmark" class="size-4" />
-              {if @show_pin_form, do: "Cancel", else: "Pin This Output"}
+              Confirm Pin
             </button>
           </div>
+          <p class="text-[11px] text-primary/40 font-bold uppercase tracking-wider mt-4 text-center">
+            Pinned data will be used instead of re-executing this node during tests.
+          </p>
+        </div>
 
-          <%!-- Pin Form --%>
-          <%= if @show_pin_form do %>
-            <div class="rounded-xl bg-primary/5 border border-primary/20 p-4 mb-4">
-              <div class="flex items-end gap-3">
-                <div class="flex-1">
-                  <label class="label">
-                    <span class="label-text text-sm font-medium">Pin Label (optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    class="input input-bordered w-full"
-                    placeholder="e.g., Sample API response"
-                    value={@pin_label}
-                    phx-blur="update_pin_label"
-                    phx-value-label={@pin_label}
-                    phx-target={@myself}
-                  />
-                </div>
-                <button
-                  type="button"
-                  class="btn btn-primary gap-2"
-                  phx-click="pin_output"
-                  phx-target={@myself}
-                >
-                  <.icon name="hero-bookmark-solid" class="size-4" />
-                  Confirm Pin
-                </button>
-              </div>
-              <p class="text-xs text-base-content/60 mt-2">
-                Pinned data will be used instead of re-executing this node during testing.
-              </p>
-            </div>
-          <% end %>
-
-          <pre class="text-sm bg-base-200/50 p-4 rounded-xl overflow-auto max-h-96 border border-base-300 font-mono">{format_json(@node_output)}</pre>
+        <div class="relative group">
+          <div class="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              class="btn btn-xs btn-neutral font-bold rounded-lg"
+              onclick={"navigator.clipboard.writeText(document.getElementById('output-code').innerText)"}
+            >
+              Copy JSON
+            </button>
+          </div>
+          <pre id="output-code" class="text-xs font-mono bg-base-300/20 p-8 rounded-3xl overflow-auto max-h-[500px] border border-base-200 leading-relaxed scrollbar-hide">{format_json(@node_output)}</pre>
         </div>
       <% else %>
-        <div class="text-center py-16 text-base-content/60">
-          <.icon name="hero-arrow-up-on-square" class="size-12 mx-auto mb-3 opacity-30" />
-          <p class="font-medium">No Output Available</p>
-          <p class="text-sm mt-1">Run the workflow to capture this node's output</p>
+        <div class="flex flex-col items-center justify-center py-32 bg-base-200/20 rounded-[40px] border-2 border-dashed border-base-300">
+          <div class="size-20 rounded-3xl bg-base-300/30 flex items-center justify-center mb-6">
+            <.icon name="hero-arrow-path" class="size-10 text-base-content/10" />
+          </div>
+          <h4 class="text-lg font-bold text-base-content/40">No Output Available</h4>
+          <p class="text-sm text-base-content/30 font-medium mt-1">Run the workflow to capture this node's output.</p>
         </div>
       <% end %>
     </div>
@@ -802,64 +982,65 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
 
   defp pinned_tab(assigns) do
     ~H"""
-    <div class="space-y-6">
+    <div class="max-w-4xl mx-auto space-y-8 pb-20">
+      <div class="space-y-1">
+        <h3 class="text-xl font-bold text-base-content tracking-tight">Pinned Data</h3>
+        <p class="text-sm text-base-content/50 font-medium">Reusable snapshots for consistent testing and development.</p>
+      </div>
+
       <%= if @pinned_data do %>
-        <%!-- Pin Info --%>
-        <div class="rounded-xl bg-primary/5 border border-primary/20 p-4">
-          <div class="flex items-start justify-between">
-            <div class="flex items-start gap-3">
-              <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10 text-primary">
-                <.icon name="hero-bookmark-solid" class="size-5" />
-              </div>
-              <div>
-                <p class="font-medium text-base-content">
-                  {@pinned_data["label"] || "Pinned Output"}
-                </p>
-                <p class="text-sm text-base-content/60 mt-0.5">
-                  Pinned {format_relative_time(@pinned_data["pinned_at"])}
-                </p>
-              </div>
-            </div>
+        <%!-- Pin Info Card --%>
+        <div class="relative overflow-hidden rounded-[32px] bg-primary/5 border-2 border-primary/10 p-8 shadow-sm">
+          <div class="absolute top-0 right-0 p-4">
             <button
               type="button"
-              class="btn btn-ghost btn-sm text-error"
+              class="btn btn-ghost btn-sm text-error font-bold hover:bg-error/10 rounded-xl"
               phx-click="clear_pin"
               phx-value-node-id={@node_id}
             >
               <.icon name="hero-trash" class="size-4" />
-              Remove
+              Remove Pin
             </button>
           </div>
 
+          <div class="flex items-start gap-6">
+            <div class="size-16 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0 shadow-inner">
+              <.icon name="hero-bookmark-solid" class="size-8 text-primary" />
+            </div>
+            <div>
+              <h4 class="text-lg font-bold text-primary mb-1 leading-none">
+                {@pinned_data["label"] || "Untitled Pin"}
+              </h4>
+              <p class="text-xs text-primary/40 font-bold uppercase tracking-widest mt-2">
+                Created {format_relative_time(@pinned_data["pinned_at"])}
+              </p>
+            </div>
+          </div>
+
           <%= if @pinned_data["stale"] do %>
-            <div class="mt-3 rounded-lg bg-warning/10 border border-warning/20 p-3 flex items-start gap-2">
-              <.icon name="hero-exclamation-triangle" class="size-4 text-warning mt-0.5" />
-              <div>
-                <p class="text-sm font-medium text-warning">Pin is Stale</p>
-                <p class="text-xs text-base-content/60">
-                  Node configuration has changed since this data was pinned.
-                </p>
+            <div class="mt-8 p-4 rounded-2xl bg-warning/10 border border-warning/20 flex items-center gap-3">
+              <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
+              <div class="text-xs font-bold text-warning/80">
+                This pin is stale. The node configuration has changed since it was created.
               </div>
             </div>
           <% end %>
         </div>
 
-        <%!-- Pinned Data Preview --%>
-        <div>
-          <h3 class="font-medium text-base-content mb-3 flex items-center gap-2">
-            <.icon name="hero-document-text" class="size-4 opacity-70" />
-            Pinned Data
-          </h3>
-          <pre class="text-sm bg-base-200/50 p-4 rounded-xl overflow-auto max-h-96 border border-base-300 font-mono">{format_json(@pinned_data["data"])}</pre>
+        <div class="space-y-4">
+          <div class="flex items-center gap-2 px-1">
+            <.icon name="hero-document-text" class="size-4 text-base-content/40" />
+            <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-base-content/40">Data Snapshot</span>
+          </div>
+          <pre class="text-xs font-mono bg-base-300/20 p-8 rounded-[32px] overflow-auto max-h-[500px] border border-base-200 leading-relaxed scrollbar-hide">{format_json(@pinned_data["data"])}</pre>
         </div>
       <% else %>
-        <div class="text-center py-16 text-base-content/60">
-          <.icon name="hero-bookmark" class="size-12 mx-auto mb-3 opacity-30" />
-          <p class="font-medium">No Pinned Data</p>
-          <p class="text-sm mt-1">Pin node output to reuse it during testing</p>
-          <p class="text-xs mt-4 max-w-sm mx-auto">
-            Pinned data lets you skip re-executing upstream nodes and test with consistent data.
-          </p>
+        <div class="flex flex-col items-center justify-center py-32 bg-base-200/20 rounded-[40px] border-2 border-dashed border-base-300">
+          <div class="size-20 rounded-3xl bg-base-300/30 flex items-center justify-center mb-6">
+            <.icon name="hero-bookmark" class="size-10 text-base-content/10" />
+          </div>
+          <h4 class="text-lg font-bold text-base-content/40">No Pinned Data</h4>
+          <p class="text-sm text-base-content/30 font-medium mt-1">Pin an output to use it as a persistent mock for testing.</p>
         </div>
       <% end %>
     </div>

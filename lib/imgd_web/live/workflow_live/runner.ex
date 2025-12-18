@@ -111,6 +111,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   # ============================================================================
 
   defp build_execution_context(nil, _), do: nil
+
   defp build_execution_context(%Execution{} = execution, node_states) do
     # Build node outputs from node_states
     node_outputs =
