@@ -19,6 +19,8 @@ defmodule Imgd.Workflows.DagLayout do
       # }
   """
 
+  alias Imgd.Graph
+
   @type node_id :: String.t()
   @type position :: %{
           x: number(),
@@ -58,18 +60,17 @@ defmodule Imgd.Workflows.DagLayout do
   def compute(nodes, connections, opts) do
     opts = Keyword.merge(@default_opts, opts)
 
-    # Build adjacency structures
-    {forward_adj, reverse_adj} = build_adjacency(nodes, connections)
-    node_ids = Enum.map(nodes, & &1.id)
+    # Build graph using the unified Graph module
+    graph = Graph.from_workflow!(nodes, connections, validate: false)
 
     # Assign layers via longest-path layering
-    layers = assign_layers(node_ids, forward_adj, reverse_adj)
+    layers = assign_layers(graph)
 
     # Group nodes by layer
     nodes_by_layer = group_by_layer(layers)
 
     # Order nodes within layers (simple: by number of connections)
-    ordered_layers = order_within_layers(nodes_by_layer, forward_adj, reverse_adj)
+    ordered_layers = order_within_layers(nodes_by_layer, graph)
 
     # Compute final positions
     compute_positions(ordered_layers, opts)
@@ -151,63 +152,31 @@ defmodule Imgd.Workflows.DagLayout do
   end
 
   # ============================================================================
-  # Private: Adjacency Building
-  # ============================================================================
-
-  defp build_adjacency(nodes, connections) do
-    node_ids = MapSet.new(nodes, & &1.id)
-
-    # Filter connections to only include valid node references
-    valid_connections =
-      Enum.filter(connections, fn conn ->
-        MapSet.member?(node_ids, conn.source_node_id) &&
-          MapSet.member?(node_ids, conn.target_node_id)
-      end)
-
-    # Forward adjacency: source -> [targets]
-    forward =
-      Enum.reduce(valid_connections, %{}, fn conn, acc ->
-        Map.update(acc, conn.source_node_id, [conn.target_node_id], &[conn.target_node_id | &1])
-      end)
-
-    # Reverse adjacency: target -> [sources]
-    reverse =
-      Enum.reduce(valid_connections, %{}, fn conn, acc ->
-        Map.update(acc, conn.target_node_id, [conn.source_node_id], &[conn.source_node_id | &1])
-      end)
-
-    {forward, reverse}
-  end
-
-  # ============================================================================
   # Private: Layer Assignment (Longest Path)
   # ============================================================================
 
-  defp assign_layers(node_ids, forward_adj, reverse_adj) do
+  defp assign_layers(%Graph{} = graph) do
     # Find root nodes (no incoming edges)
-    roots =
-      Enum.filter(node_ids, fn id ->
-        Map.get(reverse_adj, id, []) == []
-      end)
+    roots = Graph.roots(graph)
 
-    # If no roots found (cycle or empty), use first node
-    roots = if roots == [], do: Enum.take(node_ids, 1), else: roots
+    # If no roots found (cycle or empty), use first vertex
+    roots = if roots == [], do: Enum.take(Graph.vertex_ids(graph), 1), else: roots
 
     # BFS to assign layers
     initial_layers = Map.new(roots, &{&1, 0})
     queue = :queue.from_list(roots)
 
-    assign_layers_bfs(queue, forward_adj, initial_layers)
+    assign_layers_bfs(queue, graph, initial_layers)
   end
 
-  defp assign_layers_bfs(queue, forward_adj, layers) do
+  defp assign_layers_bfs(queue, graph, layers) do
     case :queue.out(queue) do
       {:empty, _} ->
         layers
 
       {{:value, node_id}, rest_queue} ->
         current_layer = Map.get(layers, node_id, 0)
-        children = Map.get(forward_adj, node_id, [])
+        children = Graph.children(graph, node_id)
 
         {new_layers, new_queue} =
           Enum.reduce(children, {layers, rest_queue}, fn child_id, {l_acc, q_acc} ->
@@ -221,7 +190,7 @@ defmodule Imgd.Workflows.DagLayout do
             end
           end)
 
-        assign_layers_bfs(new_queue, forward_adj, new_layers)
+        assign_layers_bfs(new_queue, graph, new_layers)
     end
   end
 
@@ -236,13 +205,13 @@ defmodule Imgd.Workflows.DagLayout do
     |> Enum.map(fn {layer, nodes} -> {layer, nodes} end)
   end
 
-  defp order_within_layers(nodes_by_layer, forward_adj, reverse_adj) do
+  defp order_within_layers(nodes_by_layer, graph) do
     # Simple ordering: sort by number of connections (more connected = center)
     Enum.map(nodes_by_layer, fn {layer, node_ids} ->
       sorted =
         Enum.sort_by(node_ids, fn id ->
-          out_degree = length(Map.get(forward_adj, id, []))
-          in_degree = length(Map.get(reverse_adj, id, []))
+          out_degree = Graph.out_degree(graph, id)
+          in_degree = Graph.in_degree(graph, id)
           -(out_degree + in_degree)
         end)
 

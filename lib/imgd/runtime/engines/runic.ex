@@ -8,7 +8,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   ## Architecture
 
   The engine converts a WorkflowVersion into a Runic.Workflow:
-  1. Parse nodes and connections into a DAG structure
+  1. Parse nodes and connections into a Graph structure
   2. Topologically sort nodes to determine execution order
   3. Create Runic steps that wrap NodeExecutor.execute/3 calls
   4. Wire up data flow via Runic's parent/child dependencies
@@ -31,9 +31,9 @@ defmodule Imgd.Runtime.Engines.Runic do
 
   alias Runic.Workflow
   alias Runic.Workflow.{Components, Step}
+  alias Imgd.Graph
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Workflows.Embeds.Node
-  alias Imgd.Workflows.DagUtils
   alias Ecto.Changeset
   alias Imgd.Executions.{Context, Execution, NodeExecution, NodeExecutionBuffer}
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
@@ -46,13 +46,25 @@ defmodule Imgd.Runtime.Engines.Runic do
 
   @impl true
   def build(%WorkflowVersion{} = version, %Context{} = context, execution) do
-    with {:ok, graph} <- build_dag(version.nodes, version.connections),
-         {:ok, sorted_nodes} <- topological_sort(graph, version.nodes) do
+    with {:ok, graph} <- Graph.from_workflow(version.nodes, version.connections),
+         {:ok, sorted_ids} <- Graph.topological_sort(graph) do
+      node_map = Map.new(version.nodes, &{&1.id, &1})
+      sorted_nodes = Enum.map(sorted_ids, &Map.fetch!(node_map, &1))
+
       if execution do
         build_with_hooks(sorted_nodes, graph, context, version, execution)
       else
         build_simple(sorted_nodes, graph, context, version)
       end
+    else
+      {:error, {:invalid_edges, edges}} ->
+        {:error, {:invalid_connections, edges}}
+
+      {:error, {:cycle_detected, ids}} ->
+        {:error, {:cycle_detected, ids}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -101,49 +113,48 @@ defmodule Imgd.Runtime.Engines.Runic do
     pinned_outputs = Keyword.get(opts, :pinned_outputs, %{})
     include_targets = Keyword.get(opts, :include_targets, true)
 
-    pinned_ids = Map.keys(pinned_outputs)
+    with {:ok, graph} <- Graph.from_workflow(version.nodes, version.connections) do
+      pinned_ids = Map.keys(pinned_outputs)
 
-    nodes_to_run =
-      DagUtils.compute_execution_set(
-        target_node_ids,
-        version.nodes,
-        version.connections,
-        pinned_ids
-      )
+      # Get execution subgraph
+      exec_subgraph =
+        Graph.execution_subgraph(graph, target_node_ids,
+          exclude: pinned_ids,
+          include_targets: include_targets
+        )
 
-    nodes_to_run =
-      if include_targets do
-        Enum.uniq(nodes_to_run ++ target_node_ids) -- pinned_ids
+      nodes_to_run = Graph.vertex_ids(exec_subgraph)
+
+      if nodes_to_run == [] do
+        {:ok, build_empty_workflow(version)}
       else
-        nodes_to_run -- target_node_ids
+        # Build partial version with filtered nodes/connections
+        filtered_nodes = Enum.filter(version.nodes, &(&1.id in nodes_to_run))
+
+        # Include connections where source is either in the run set OR pinned
+        filtered_connections =
+          Enum.filter(version.connections, fn c ->
+            source_in_set = c.source_node_id in nodes_to_run
+            target_in_set = c.target_node_id in nodes_to_run
+            source_is_pinned = c.source_node_id in pinned_ids
+
+            (source_in_set or source_is_pinned) and target_in_set
+          end)
+
+        partial_version = %{version | nodes: filtered_nodes, connections: filtered_connections}
+
+        # Merge pinned outputs into context
+        context_with_pins = %{
+          context
+          | node_outputs: Map.merge(context.node_outputs, pinned_outputs)
+        }
+
+        for {node_id, output} <- pinned_outputs do
+          ExecutionState.record_output(context.execution_id, node_id, output)
+        end
+
+        build(partial_version, context_with_pins, execution)
       end
-
-    if nodes_to_run == [] do
-      {:ok, build_empty_workflow(version)}
-    else
-      filtered_nodes = Enum.filter(version.nodes, &(&1.id in nodes_to_run))
-
-      filtered_connections =
-        Enum.filter(version.connections, fn c ->
-          source_in_set = c.source_node_id in nodes_to_run
-          target_in_set = c.target_node_id in nodes_to_run
-          source_is_pinned = c.source_node_id in pinned_ids
-
-          (source_in_set or source_is_pinned) and target_in_set
-        end)
-
-      partial_version = %{version | nodes: filtered_nodes, connections: filtered_connections}
-
-      context_with_pins = %{
-        context
-        | node_outputs: Map.merge(context.node_outputs, pinned_outputs)
-      }
-
-      for {node_id, output} <- pinned_outputs do
-        ExecutionState.record_output(context.execution_id, node_id, output)
-      end
-
-      build(partial_version, context_with_pins, execution)
     end
   end
 
@@ -157,14 +168,15 @@ defmodule Imgd.Runtime.Engines.Runic do
     from_node_id = Keyword.fetch!(opts, :from_node)
     pinned_outputs = Keyword.get(opts, :pinned_outputs, %{})
 
-    downstream_ids =
-      DagUtils.downstream_closure(from_node_id, version.nodes, version.connections)
+    with {:ok, graph} <- Graph.from_workflow(version.nodes, version.connections) do
+      downstream_ids = Graph.downstream(graph, from_node_id)
 
-    build_partial(version, context, execution,
-      target_nodes: downstream_ids,
-      pinned_outputs: pinned_outputs,
-      include_targets: true
-    )
+      build_partial(version, context, execution,
+        target_nodes: downstream_ids,
+        pinned_outputs: pinned_outputs,
+        include_targets: true
+      )
+    end
   end
 
   @impl true
@@ -192,101 +204,6 @@ defmodule Imgd.Runtime.Engines.Runic do
   end
 
   # ===========================================================================
-  # DAG Construction
-  # ===========================================================================
-
-  @doc false
-  def build_dag(nodes, connections) do
-    node_ids = MapSet.new(nodes, & &1.id)
-
-    invalid_connections =
-      Enum.filter(connections, fn conn ->
-        not MapSet.member?(node_ids, conn.source_node_id) or
-          not MapSet.member?(node_ids, conn.target_node_id)
-      end)
-
-    if invalid_connections != [] do
-      {:error, {:invalid_connections, invalid_connections}}
-    else
-      adjacency =
-        Enum.reduce(connections, %{}, fn conn, acc ->
-          Map.update(acc, conn.source_node_id, [conn.target_node_id], &[conn.target_node_id | &1])
-        end)
-
-      reverse_adjacency =
-        Enum.reduce(connections, %{}, fn conn, acc ->
-          Map.update(acc, conn.target_node_id, [conn.source_node_id], &[conn.source_node_id | &1])
-        end)
-
-      connections_by_source = Enum.group_by(connections, & &1.source_node_id)
-
-      {:ok,
-       %{
-         adjacency: adjacency,
-         reverse_adjacency: reverse_adjacency,
-         connections: connections,
-         connections_by_source: connections_by_source,
-         node_ids: node_ids
-       }}
-    end
-  end
-
-  @doc false
-  def topological_sort(graph, nodes) do
-    node_map = Map.new(nodes, &{&1.id, &1})
-
-    in_degrees =
-      Enum.reduce(nodes, %{}, fn node, acc ->
-        parents = Map.get(graph.reverse_adjacency, node.id, [])
-        Map.put(acc, node.id, length(parents))
-      end)
-
-    queue =
-      in_degrees
-      |> Enum.filter(fn {_id, degree} -> degree == 0 end)
-      |> Enum.map(fn {id, _} -> id end)
-
-    do_topological_sort(queue, in_degrees, graph.adjacency, node_map, [])
-  end
-
-  defp do_topological_sort([], in_degrees, _adjacency, _node_map, sorted) do
-    remaining = Enum.filter(in_degrees, fn {_id, degree} -> degree > 0 end)
-
-    if remaining == [] do
-      {:ok, Enum.reverse(sorted)}
-    else
-      {:error, {:cycle_detected, Enum.map(remaining, fn {id, _} -> id end)}}
-    end
-  end
-
-  defp do_topological_sort([node_id | rest], in_degrees, adjacency, node_map, sorted) do
-    node = Map.fetch!(node_map, node_id)
-    children = Map.get(adjacency, node_id, [])
-
-    {new_in_degrees, new_queue_additions} =
-      Enum.reduce(children, {in_degrees, []}, fn child_id, {degrees, additions} ->
-        new_degree = Map.get(degrees, child_id, 0) - 1
-        new_degrees = Map.put(degrees, child_id, new_degree)
-
-        if new_degree == 0 do
-          {new_degrees, [child_id | additions]}
-        else
-          {new_degrees, additions}
-        end
-      end)
-
-    new_in_degrees = Map.delete(new_in_degrees, node_id)
-
-    do_topological_sort(
-      rest ++ new_queue_additions,
-      new_in_degrees,
-      adjacency,
-      node_map,
-      [node | sorted]
-    )
-  end
-
-  # ===========================================================================
   # Workflow Building
   # ===========================================================================
 
@@ -299,7 +216,7 @@ defmodule Imgd.Runtime.Engines.Runic do
     {workflow, step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
         step = create_step(node, context)
-        parents = Map.get(graph.reverse_adjacency, node.id, [])
+        parents = Graph.parents(graph, node.id)
 
         wf =
           case parents do
@@ -333,7 +250,7 @@ defmodule Imgd.Runtime.Engines.Runic do
     {workflow, _step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
         step = create_step(node, context)
-        parents = Map.get(graph.reverse_adjacency, node.id, [])
+        parents = Graph.parents(graph, node.id)
 
         wf =
           case parents do

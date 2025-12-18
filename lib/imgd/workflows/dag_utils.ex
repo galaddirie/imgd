@@ -16,6 +16,7 @@ defmodule Imgd.Workflows.DagUtils do
       to_run = DagUtils.compute_execution_set(["output"], nodes, connections, ["http_request"])
   """
 
+  alias Imgd.Graph
   alias Imgd.Workflows.Embeds.{Node, Connection}
 
   @type node_id :: String.t()
@@ -40,12 +41,9 @@ defmodule Imgd.Workflows.DagUtils do
       ["a", "b"]  # order may vary
   """
   @spec upstream_closure(node_id(), node_list(), connection_list()) :: [node_id()]
-  def upstream_closure(node_id, _nodes, connections) do
-    reverse_adj = build_reverse_adjacency(connections)
-
-    traverse_closure(node_id, reverse_adj, MapSet.new())
-    |> MapSet.delete(node_id)
-    |> MapSet.to_list()
+  def upstream_closure(node_id, nodes, connections) do
+    graph = build_graph!(nodes, connections)
+    Graph.upstream(graph, node_id)
   end
 
   @doc """
@@ -64,12 +62,9 @@ defmodule Imgd.Workflows.DagUtils do
       ["b", "c"]  # order may vary
   """
   @spec downstream_closure(node_id(), node_list(), connection_list()) :: [node_id()]
-  def downstream_closure(node_id, _nodes, connections) do
-    forward_adj = build_forward_adjacency(connections)
-
-    traverse_closure(node_id, forward_adj, MapSet.new())
-    |> MapSet.delete(node_id)
-    |> MapSet.to_list()
+  def downstream_closure(node_id, nodes, connections) do
+    graph = build_graph!(nodes, connections)
+    Graph.downstream(graph, node_id)
   end
 
   @doc """
@@ -101,20 +96,15 @@ defmodule Imgd.Workflows.DagUtils do
   @spec compute_execution_set([node_id()], node_list(), connection_list(), [node_id()]) ::
           [node_id()]
   def compute_execution_set(target_node_ids, nodes, connections, pinned_node_ids) do
-    pinned_set = MapSet.new(pinned_node_ids)
+    graph = build_graph!(nodes, connections)
 
-    # Get all nodes needed for targets (targets + their upstream)
-    all_needed =
-      target_node_ids
-      |> Enum.flat_map(fn id -> [id | upstream_closure(id, nodes, connections)] end)
-      |> MapSet.new()
+    subgraph =
+      Graph.execution_subgraph(graph, target_node_ids,
+        exclude: pinned_node_ids,
+        include_targets: true
+      )
 
-    # Remove pinned nodes - they don't need to execute
-    nodes_to_run = MapSet.difference(all_needed, pinned_set)
-
-    # But we also need to remove nodes that are ONLY needed to feed pinned nodes
-    # (i.e., if all downstream paths go through a pinned node)
-    prune_unnecessary_upstream(nodes_to_run, pinned_set, nodes, connections)
+    Graph.vertex_ids(subgraph)
   end
 
   @doc """
@@ -136,22 +126,17 @@ defmodule Imgd.Workflows.DagUtils do
   @spec sort_subset([node_id()], node_list(), connection_list()) ::
           {:ok, [Node.t()]} | {:error, term()}
   def sort_subset(node_ids, nodes, connections) do
-    node_set = MapSet.new(node_ids)
+    graph = build_graph!(nodes, connections)
+    subgraph = Graph.subgraph(graph, node_ids)
 
-    # Filter to only relevant nodes and connections
-    filtered_nodes = Enum.filter(nodes, &MapSet.member?(node_set, &1.id))
+    case Graph.topological_sort(subgraph) do
+      {:ok, sorted_ids} ->
+        node_map = Map.new(nodes, &{&1.id, &1})
+        sorted_nodes = Enum.map(sorted_ids, &Map.fetch!(node_map, &1))
+        {:ok, sorted_nodes}
 
-    filtered_connections =
-      Enum.filter(connections, fn c ->
-        MapSet.member?(node_set, c.source_node_id) and
-          MapSet.member?(node_set, c.target_node_id)
-      end)
-
-    # Use the existing WorkflowBuilder logic
-    with {:ok, graph} <-
-           Imgd.Runtime.WorkflowBuilder.build_dag(filtered_nodes, filtered_connections),
-         {:ok, sorted} <- Imgd.Runtime.WorkflowBuilder.topological_sort(graph, filtered_nodes) do
-      {:ok, sorted}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -182,8 +167,8 @@ defmodule Imgd.Workflows.DagUtils do
   """
   @spec depends_on?(node_id(), node_id(), node_list(), connection_list()) :: boolean()
   def depends_on?(target_node_id, dependency_node_id, nodes, connections) do
-    upstream = upstream_closure(target_node_id, nodes, connections)
-    dependency_node_id in upstream
+    graph = build_graph!(nodes, connections)
+    Graph.depends_on?(graph, target_node_id, dependency_node_id)
   end
 
   @doc """
@@ -191,11 +176,8 @@ defmodule Imgd.Workflows.DagUtils do
   """
   @spec root_nodes(node_list(), connection_list()) :: [node_id()]
   def root_nodes(nodes, connections) do
-    targets = MapSet.new(connections, & &1.target_node_id)
-
-    nodes
-    |> Enum.map(& &1.id)
-    |> Enum.reject(&MapSet.member?(targets, &1))
+    graph = build_graph!(nodes, connections)
+    Graph.roots(graph)
   end
 
   @doc """
@@ -203,82 +185,30 @@ defmodule Imgd.Workflows.DagUtils do
   """
   @spec leaf_nodes(node_list(), connection_list()) :: [node_id()]
   def leaf_nodes(nodes, connections) do
-    sources = MapSet.new(connections, & &1.source_node_id)
-
-    nodes
-    |> Enum.map(& &1.id)
-    |> Enum.reject(&MapSet.member?(sources, &1))
+    graph = build_graph!(nodes, connections)
+    Graph.leaves(graph)
   end
 
   # ============================================================================
-  # Private Helpers
+  # Graph-based API (for callers that already have a graph)
   # ============================================================================
 
-  defp build_reverse_adjacency(connections) do
-    Enum.reduce(connections, %{}, fn c, acc ->
-      Map.update(acc, c.target_node_id, [c.source_node_id], &[c.source_node_id | &1])
-    end)
+  @doc """
+  Builds a Graph from nodes and connections.
+
+  Useful when you need to perform multiple graph operations
+  without rebuilding the graph each time.
+  """
+  @spec build_graph(node_list(), connection_list()) :: {:ok, Graph.t()} | {:error, term()}
+  def build_graph(nodes, connections) do
+    Graph.from_workflow(nodes, connections)
   end
 
-  defp build_forward_adjacency(connections) do
-    Enum.reduce(connections, %{}, fn c, acc ->
-      Map.update(acc, c.source_node_id, [c.target_node_id], &[c.target_node_id | &1])
-    end)
-  end
-
-  defp traverse_closure(node_id, adjacency, visited) do
-    if MapSet.member?(visited, node_id) do
-      visited
-    else
-      visited = MapSet.put(visited, node_id)
-      neighbors = Map.get(adjacency, node_id, [])
-      Enum.reduce(neighbors, visited, &traverse_closure(&1, adjacency, &2))
-    end
-  end
-
-  # Remove upstream nodes that are only needed to feed pinned nodes
-  # (optimization: if a node's only purpose is to feed a pinned node, skip it)
-  defp prune_unnecessary_upstream(nodes_to_run, pinned_set, _nodes, connections) do
-    forward_adj = build_forward_adjacency(connections)
-
-    # A node is unnecessary if ALL its downstream paths eventually hit only pinned nodes
-    # before reaching any node in nodes_to_run
-    Enum.filter(nodes_to_run, fn node_id ->
-      # Check if this node has at least one downstream path to a non-pinned node
-      # that we actually want to execute
-      has_path_to_execution?(node_id, nodes_to_run, pinned_set, forward_adj, MapSet.new())
-    end)
-    |> MapSet.new()
-    |> MapSet.to_list()
-  end
-
-  defp has_path_to_execution?(node_id, nodes_to_run, pinned_set, forward_adj, visited) do
-    cond do
-      # If we've already visited this node, avoid cycles
-      MapSet.member?(visited, node_id) ->
-        false
-
-      # If this node is pinned, this path is blocked
-      MapSet.member?(pinned_set, node_id) ->
-        false
-
-      # If this node is in nodes_to_run and not the starting point, we found a valid path
-      # (The node itself counts as reaching execution)
-      true ->
-        children = Map.get(forward_adj, node_id, [])
-
-        # If no children, this is a leaf - it's needed if it's in nodes_to_run
-        if children == [] do
-          MapSet.member?(nodes_to_run, node_id)
-        else
-          # Check if any child leads to execution
-          visited = MapSet.put(visited, node_id)
-
-          Enum.any?(children, fn child ->
-            MapSet.member?(nodes_to_run, child) or
-              has_path_to_execution?(child, nodes_to_run, pinned_set, forward_adj, visited)
-          end)
-        end
-    end
+  @doc """
+  Builds a Graph from nodes and connections, raising on error.
+  """
+  @spec build_graph!(node_list(), connection_list()) :: Graph.t()
+  def build_graph!(nodes, connections) do
+    Graph.from_workflow!(nodes, connections)
   end
 end
