@@ -2,7 +2,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   @moduledoc """
   Runic-based workflow execution engine.
 
-  This module implements the `ExecutionEngine` behavior using the Runic library
+  This module implements the `Imgd.Runtime.Engine.Behaviour` behavior using the Runic library
   for DAG-based workflow execution.
 
   ## Architecture
@@ -24,7 +24,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   - Store timing information for duration calculations
   """
 
-  @behaviour Imgd.Runtime.ExecutionEngine
+  @behaviour Imgd.Runtime.Engine.Behaviour
 
   require Runic
   require Logger
@@ -41,7 +41,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   alias Imgd.Runtime.Expression.Evaluator
 
   # ===========================================================================
-  # ExecutionEngine Callbacks
+  # Engine Behaviour Callbacks
   # ===========================================================================
 
   @impl true

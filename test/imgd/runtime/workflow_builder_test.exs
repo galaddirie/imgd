@@ -1,19 +1,19 @@
-defmodule Imgd.Runtime.ExecutionEngineTest do
+defmodule Imgd.Runtime.WorkflowBuilderTest do
   use Imgd.DataCase, async: true
 
-  alias Imgd.Runtime.ExecutionEngine
+  alias Imgd.Runtime.WorkflowBuilder
   alias Imgd.Runtime.Engines.Runic, as: RunicEngine
   alias Imgd.Executions.Context
 
   describe "engine/0" do
     test "returns configured engine" do
-      assert ExecutionEngine.engine() == RunicEngine
+      assert WorkflowBuilder.engine() == RunicEngine
     end
 
     test "can be configured" do
       # This would be set in config/test.exs
       # config :imgd, :execution_engine, MyCustomEngine
-      assert is_atom(ExecutionEngine.engine())
+      assert is_atom(WorkflowBuilder.engine())
     end
   end
 
@@ -63,11 +63,11 @@ defmodule Imgd.Runtime.ExecutionEngineTest do
       context: context,
       execution: execution
     } do
-      assert {:ok, _executable} = ExecutionEngine.build(version, context, execution)
+      assert {:ok, _executable} = WorkflowBuilder.build(version, context, execution)
     end
 
     test "builds without execution for preview mode", %{version: version, context: context} do
-      assert {:ok, _executable} = ExecutionEngine.build(version, context, nil)
+      assert {:ok, _executable} = WorkflowBuilder.build(version, context, nil)
     end
 
     test "returns error for invalid workflow", %{context: context, execution: execution} do
@@ -86,7 +86,7 @@ defmodule Imgd.Runtime.ExecutionEngineTest do
       }
 
       assert {:error, {:cycle_detected, _}} =
-               ExecutionEngine.build(invalid_version, context, execution)
+               WorkflowBuilder.build(invalid_version, context, execution)
     end
   end
 
@@ -137,10 +137,10 @@ defmodule Imgd.Runtime.ExecutionEngineTest do
       context: context,
       execution: execution
     } do
-      {:ok, executable} = ExecutionEngine.build(version, context, execution)
+      {:ok, executable} = WorkflowBuilder.build(version, context, execution)
       input = %{"test" => "data"}
 
-      assert {:ok, result} = ExecutionEngine.execute(executable, input, context)
+      assert {:ok, result} = WorkflowBuilder.execute(executable, input, context)
       assert is_map(result.output)
       assert is_map(result.node_outputs)
       assert is_map(result.engine_logs)

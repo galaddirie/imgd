@@ -7,21 +7,22 @@ defmodule Imgd.Runtime.WorkflowRunner do
   This is the **execution orchestrator** that manages workflow lifecycle:
 
   - Manages execution state transitions (pending → running → completed/failed/timeout)
-  - Delegates workflow building and execution to the configured ExecutionEngine
+  - Delegates workflow building to WorkflowBuilder and execution to the configured engine
   - Handles timeout via Task.yield/Task.shutdown
   - Updates execution records in the database
   - Broadcasts PubSub events for real-time UI updates
 
   ## Engine Abstraction
 
-  The actual workflow execution is delegated to the configured `ExecutionEngine`.
-  By default, this is `Imgd.Runtime.Engines.Runic`, but can be swapped by
-  configuring `:imgd, :execution_engine` in your application config.
+  The actual workflow execution is delegated to the configured engine module
+  (see `Imgd.Runtime.Engine.Behaviour`). By default, this is
+  `Imgd.Runtime.Engines.Runic`, but can be swapped by configuring
+  `:imgd, :execution_engine` in your application config.
 
   ## Separation of Concerns
 
-  | Concern | ExecutionWorker | WorkflowRunner | ExecutionEngine |
-  |---------|-----------------|----------------|-----------------|
+  | Concern | ExecutionWorker | WorkflowRunner | Engine |
+  |---------|-----------------|----------------|--------|
   | Job queuing/retries | ✓ | | |
   | Trace context propagation | ✓ | | |
   | Loading records from DB | ✓ | | |
@@ -38,7 +39,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   ↓
   Oban picks up job → ExecutionWorker.perform/1
   ↓
-  WorkflowRunner.run/1 → ExecutionEngine.build/3 + ExecutionEngine.execute/3
+  WorkflowRunner.run/1 → WorkflowBuilder.build/3 + WorkflowBuilder.execute/3
   ```
   """
 
@@ -47,7 +48,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   alias Imgd.Repo
   alias Imgd.Executions.{Execution, Context}
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
-  alias Imgd.Runtime.{ExecutionEngine, ExecutionState, Serializer}
+  alias Imgd.Runtime.{ExecutionState, Serializer, WorkflowBuilder}
   alias Imgd.Observability.Instrumentation
 
   @default_timeout_ms 300_000
@@ -108,7 +109,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   defp build_workflow(execution, context) do
-    case ExecutionEngine.build(execution.workflow_version, context, execution) do
+    case WorkflowBuilder.build(execution.workflow_version, context, execution) do
       {:ok, executable} ->
         {:ok, executable}
 
@@ -296,7 +297,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
       trigger_input: inspect(initial_input)
     )
 
-    case ExecutionEngine.execute(executable, initial_input, context) do
+    case WorkflowBuilder.execute(executable, initial_input, context) do
       {:ok, result} ->
         Logger.debug("Workflow execution completed",
           execution_id: context.execution_id

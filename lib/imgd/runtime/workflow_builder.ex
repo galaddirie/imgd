@@ -2,8 +2,8 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   @moduledoc """
   Facade for building executable workflows from WorkflowVersions.
 
-  This module delegates to the configured `ExecutionEngine` for actual
-  workflow construction. It provides a stable API that doesn't change
+  This module delegates to the configured engine module for actual workflow
+  construction and execution. It provides a stable API that doesn't change
   when the underlying engine is swapped.
 
   ## Usage
@@ -17,14 +17,23 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
       config :imgd, :execution_engine, Imgd.Runtime.Engines.Runic
 
-  See `Imgd.Runtime.ExecutionEngine` for implementing custom engines.
+  See `Imgd.Runtime.Engine.Behaviour` for implementing custom engines.
   """
 
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Executions.{Context, Execution}
-  alias Imgd.Runtime.ExecutionEngine
+  alias Imgd.Runtime.Engine.Behaviour
 
-  @type build_result :: {:ok, term()} | {:error, term()}
+  @type executable :: Behaviour.executable()
+  @type build_result :: {:ok, executable()} | {:error, Behaviour.build_error()}
+  @type execute_result ::
+          {:ok, Behaviour.execution_result()} | {:error, Behaviour.execution_error()}
+
+  @doc """
+  Returns the configured execution engine module.
+  """
+  @spec engine() :: module()
+  def engine, do: Behaviour.engine()
 
   @doc """
   Builds an executable workflow from a WorkflowVersion.
@@ -40,9 +49,13 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   - `{:ok, executable}` - Successfully built workflow
   - `{:error, reason}` - Failed to build workflow
   """
-  @spec build(WorkflowVersion.t(), Context.t(), Execution.t()) :: build_result()
+  @spec build(WorkflowVersion.t(), Context.t(), Execution.t() | nil) :: build_result()
   def build(%WorkflowVersion{} = version, %Context{} = context, %Execution{} = execution) do
-    ExecutionEngine.build(version, context, execution)
+    engine().build(version, context, execution)
+  end
+
+  def build(%WorkflowVersion{} = version, %Context{} = context, nil) do
+    engine().build(version, context, nil)
   end
 
   @doc """
@@ -53,7 +66,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   """
   @spec build(WorkflowVersion.t(), Context.t()) :: build_result()
   def build(%WorkflowVersion{} = version, %Context{} = context) do
-    ExecutionEngine.build(version, context, nil)
+    engine().build(version, context, nil)
   end
 
   @doc """
@@ -92,7 +105,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         %Execution{} = execution,
         opts \\ []
       ) do
-    ExecutionEngine.build_partial(version, context, execution, opts)
+    engine().build_partial(version, context, execution, opts)
   end
 
   @doc """
@@ -122,7 +135,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         %Execution{} = execution,
         opts \\ []
       ) do
-    ExecutionEngine.build_downstream(version, context, execution, opts)
+    engine().build_downstream(version, context, execution, opts)
   end
 
   @doc """
@@ -140,6 +153,14 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         node_id,
         input_data
       ) do
-    ExecutionEngine.build_single_node(version, context, execution, node_id, input_data)
+    engine().build_single_node(version, context, execution, node_id, input_data)
+  end
+
+  @doc """
+  Executes a workflow using the configured engine.
+  """
+  @spec execute(executable(), term(), Context.t()) :: execute_result()
+  def execute(executable, input, %Context{} = context) do
+    engine().execute(executable, input, context)
   end
 end
