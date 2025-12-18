@@ -404,6 +404,159 @@ _wf_wait =
   })
 
 # =============================================================================
+# 5. Basic Format Workflow
+# =============================================================================
+IO.puts("  → Basic Format (active)")
+
+format_start = SeedHelpers.node_id("format_start")
+format_msg = SeedHelpers.node_id("format_msg")
+format_output = SeedHelpers.node_id("format_output")
+
+_wf_format =
+  WorkflowSeeder.seed_workflow(scope, %{
+    name: "5. Basic Format",
+    description: "Simple string formatting with placeholders",
+    nodes: [
+      %{
+        id: format_start,
+        type_id: "debug",
+        name: "User Input",
+        config: %{"label" => "Input Data", "level" => "info"},
+        position: %{"x" => 100, "y" => 100}
+      },
+      %{
+        id: format_msg,
+        type_id: "format",
+        name: "Format Message",
+        config: %{"template" => "Hello {{user.name}}! Welcome to {{app.name}}. Your ID is {{user.id}}."},
+        position: %{"x" => 100, "y" => 250}
+      },
+      %{
+        id: format_output,
+        type_id: "debug",
+        name: "Formatted Message",
+        config: %{"label" => "Result", "level" => "info"},
+        position: %{"x" => 100, "y" => 400}
+      }
+    ],
+    connections: [
+      %{id: SeedHelpers.conn_id(), source_node_id: format_start, target_node_id: format_msg},
+      %{id: SeedHelpers.conn_id(), source_node_id: format_msg, target_node_id: format_output}
+    ],
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "John Doe",
+          description: "Basic user greeting",
+          data: %{
+            "user" => %{"name" => "John Doe", "id" => "12345"},
+            "app" => %{"name" => "MyApp"}
+          }
+        },
+        %{
+          label: "Jane Smith",
+          description: "Different user data",
+          data: %{
+            "user" => %{"name" => "Jane Smith", "id" => "67890"},
+            "app" => %{"name" => "Dashboard"}
+          }
+        }
+      ]
+    }
+  })
+
+# =============================================================================
+# 6. String Manipulation Workflow
+# =============================================================================
+IO.puts("  → String Manipulation (active)")
+
+string_input = SeedHelpers.node_id("string_input")
+string_concat = SeedHelpers.node_id("string_concat")
+string_case = SeedHelpers.node_id("string_case")
+string_trim = SeedHelpers.node_id("string_trim")
+string_replace = SeedHelpers.node_id("string_replace")
+string_final = SeedHelpers.node_id("string_final")
+
+_wf_string =
+  WorkflowSeeder.seed_workflow(scope, %{
+    name: "6. String Manipulation",
+    description: "Complete string processing pipeline: concat, case conversion, trim, replace",
+    nodes: [
+      %{
+        id: string_input,
+        type_id: "debug",
+        name: "Input Text",
+        config: %{"label" => "Raw Input", "level" => "info"},
+        position: %{"x" => 100, "y" => 50}
+      },
+      %{
+        id: string_concat,
+        type_id: "string_concatenate",
+        name: "Build Full Name",
+        config: %{"separator" => " ", "input_field" => "name_parts"},
+        position: %{"x" => 100, "y" => 200}
+      },
+      %{
+        id: string_case,
+        type_id: "string_case",
+        name: "Title Case",
+        config: %{"operation" => "title"},
+        position: %{"x" => 100, "y" => 350}
+      },
+      %{
+        id: string_trim,
+        type_id: "string_trim",
+        name: "Clean Spaces",
+        config: %{"side" => "both"},
+        position: %{"x" => 100, "y" => 500}
+      },
+      %{
+        id: string_replace,
+        type_id: "string_replace",
+        name: "Fix Typos",
+        config: %{"pattern" => "jonh", "replacement" => "john", "global" => true},
+        position: %{"x" => 100, "y" => 650}
+      },
+      %{
+        id: string_final,
+        type_id: "debug",
+        name: "Final Result",
+        config: %{"label" => "Processed Text", "level" => "info"},
+        position: %{"x" => 100, "y" => 800}
+      }
+    ],
+    connections: [
+      %{id: SeedHelpers.conn_id(), source_node_id: string_input, target_node_id: string_concat},
+      %{id: SeedHelpers.conn_id(), source_node_id: string_concat, target_node_id: string_case},
+      %{id: SeedHelpers.conn_id(), source_node_id: string_case, target_node_id: string_trim},
+      %{id: SeedHelpers.conn_id(), source_node_id: string_trim, target_node_id: string_replace},
+      %{id: SeedHelpers.conn_id(), source_node_id: string_replace, target_node_id: string_final}
+    ],
+    triggers: [%{type: :manual, config: %{}}],
+    settings: %{
+      demo_inputs: [
+        %{
+          label: "Name with Typo",
+          description: "Process name parts with typo correction",
+          data: %{
+            "name_parts" => ["  jonh", "doe  "],
+            "extra_spaces" => "   messy   "
+          }
+        },
+        %{
+          label: "Full Name",
+          description: "Build and clean full name from parts",
+          data: %{
+            "name_parts" => ["mary", "jane", "smith"],
+            "title" => "dr."
+          }
+        }
+      ]
+    }
+  })
+
+# =============================================================================
 # Summary
 # =============================================================================
 IO.puts("\n" <> String.duplicate("=", 60))
