@@ -428,7 +428,9 @@ _wf_format =
         id: format_msg,
         type_id: "format",
         name: "Format Message",
-        config: %{"template" => "Hello {{user.name}}! Welcome to {{app.name}}. Your ID is {{user.id}}."},
+        config: %{
+          "template" => "Hello {{user.name}}! Welcome to {{app.name}}. Your ID is {{user.id}}."
+        },
         position: %{"x" => 100, "y" => 250}
       },
       %{
