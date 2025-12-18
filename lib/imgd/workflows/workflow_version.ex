@@ -104,9 +104,22 @@ defmodule Imgd.Workflows.WorkflowVersion do
   defp normalize_for_hash(items) when is_list(items) do
     items
     |> Enum.map(fn
-      %_struct{} = item -> Map.from_struct(item)
-      item when is_map(item) -> item
+      %Node{} = node ->
+        # Position is excluded as it doesn't affect behavior
+        Map.take(node, [:id, :type_id, :name, :config, :notes])
+
+      %Connection{} = conn ->
+        Map.take(conn, [:id, :source_node_id, :source_output, :target_node_id, :target_input])
+
+      %Trigger{} = trigger ->
+        Map.take(trigger, [:type, :config])
+
+      item when is_map(item) ->
+        Map.drop(item, [:position, :__struct__, :__meta__])
     end)
-    |> Enum.sort_by(& &1.id)
+    |> Enum.sort_by(fn item ->
+      # Stable sort by ID, falling back to type or encoded content
+      Map.get(item, :id) || Map.get(item, :type) || Jason.encode!(item)
+    end)
   end
 end
