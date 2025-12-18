@@ -24,6 +24,7 @@ defmodule Imgd.DataCase do
       import Ecto.Changeset
       import Ecto.Query
       import Imgd.DataCase
+      import Imgd.Factory
     end
   end
 
@@ -37,6 +38,11 @@ defmodule Imgd.DataCase do
   """
   def setup_sandbox(tags) do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Imgd.Repo, shared: not tags[:async])
+
+    if tags[:async] do
+      Ecto.Adapters.SQL.Sandbox.allow(Imgd.Repo, pid, Process.whereis(Imgd.Executions.NodeExecutionBuffer))
+    end
+
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
   end
 

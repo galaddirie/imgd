@@ -103,7 +103,10 @@ defmodule Imgd.Workflows.WorkflowVersion do
 
   defp normalize_for_hash(items) when is_list(items) do
     items
-    |> Enum.map(&Map.from_struct/1)
+    |> Enum.map(fn
+      %_struct{} = item -> Map.from_struct(item)
+      item when is_map(item) -> item
+    end)
     |> Enum.sort_by(& &1.id)
   end
 end

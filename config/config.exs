@@ -47,6 +47,8 @@ config :imgd, Imgd.Runtime.Expression.Cache,
   max_entries: 10_000,
   ttl_seconds: 3600
 
+config :imgd, :execution_engine, Imgd.Runtime.Engines.Runic
+
 # Allowed environment variables (security)
 config :imgd, :allowed_env_vars, ~w(
   MIX_ENV
