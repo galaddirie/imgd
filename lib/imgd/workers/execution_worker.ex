@@ -122,7 +122,10 @@ defmodule Imgd.Workers.ExecutionWorker do
       )
     end
 
-    handle_runner_result(execution, WorkflowRunner.run_with_builder(execution, context, builder_fun))
+    handle_runner_result(
+      execution,
+      WorkflowRunner.run_with_builder(execution, context, builder_fun)
+    )
   end
 
   defp run_execution(%Execution{} = execution, "partial", args) do
@@ -139,7 +142,10 @@ defmodule Imgd.Workers.ExecutionWorker do
       )
     end
 
-    handle_runner_result(execution, WorkflowRunner.run_with_builder(execution, context, builder_fun))
+    handle_runner_result(
+      execution,
+      WorkflowRunner.run_with_builder(execution, context, builder_fun)
+    )
   end
 
   defp handle_runner_result(execution, result) do

@@ -6,9 +6,22 @@ defmodule Imgd.Workflows.WorkflowVersionTest do
   describe "compute_source_hash/3" do
     test "produces the same hash even if node positions change" do
       nodes = [
-        %Node{id: "n1", type_id: "t1", name: "Node 1", config: %{}, position: %{"x" => 10, "y" => 20}},
-        %Node{id: "n2", type_id: "t2", name: "Node 2", config: %{}, position: %{"x" => 100, "y" => 200}}
+        %Node{
+          id: "n1",
+          type_id: "t1",
+          name: "Node 1",
+          config: %{},
+          position: %{"x" => 10, "y" => 20}
+        },
+        %Node{
+          id: "n2",
+          type_id: "t2",
+          name: "Node 2",
+          config: %{},
+          position: %{"x" => 100, "y" => 200}
+        }
       ]
+
       connections = [%Connection{id: "c1", source_node_id: "n1", target_node_id: "n2"}]
       triggers = [%Trigger{type: :manual}]
 
@@ -16,8 +29,20 @@ defmodule Imgd.Workflows.WorkflowVersionTest do
 
       # Change positions
       nodes2 = [
-        %Node{id: "n1", type_id: "t1", name: "Node 1", config: %{}, position: %{"x" => 50, "y" => 60}},
-        %Node{id: "n2", type_id: "t2", name: "Node 2", config: %{}, position: %{"x" => 500, "y" => 600}}
+        %Node{
+          id: "n1",
+          type_id: "t1",
+          name: "Node 1",
+          config: %{},
+          position: %{"x" => 50, "y" => 60}
+        },
+        %Node{
+          id: "n2",
+          type_id: "t2",
+          name: "Node 2",
+          config: %{},
+          position: %{"x" => 500, "y" => 600}
+        }
       ]
 
       hash2 = WorkflowVersion.compute_source_hash(nodes2, connections, triggers)
