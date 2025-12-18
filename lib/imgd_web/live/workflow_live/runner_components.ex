@@ -90,7 +90,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               placeholder='{"user_id": 1}'
             />
             <div class="flex items-center justify-between text-xs text-base-content/60">
-              <span>Blank value sends an empty map.</span>
+              <span>Blank value sends an empty map. Scalars are supported (e.g. 42, "hello").</span>
               <span :if={@run_form_error} class="text-error font-medium">
                 {@run_form_error}
               </span>
@@ -141,7 +141,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <div class="flex items-center gap-2 text-xs text-base-content/70">
             <.icon name="hero-light-bulb" class="size-4" />
             <span>
-              Double-click any node to configure its inputs. Right-click for more options.
+              Payload is passed to the first node as trigger input. Use numbers, strings, objects, or arrays.
             </span>
           </div>
           <div class="flex items-center gap-2">
@@ -180,9 +180,9 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   attr :node_map, :map, required: true
   attr :node_states, :map, required: true
   attr :selected_node_id, :string, default: nil
-  attr :pins_with_status, :map, default: %{}
 
   def dag_panel(assigns) do
+    # Compute edge states based on connected nodes
     edge_states = compute_edge_states(assigns.edges, assigns.node_states)
     assigns = assign(assigns, :edge_states, edge_states)
 
@@ -216,7 +216,9 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             class="mx-auto"
             style="min-width: 100%;"
           >
+            <%!-- Gradient definitions for edges --%>
             <defs>
+              <%!-- Arrow markers for each status --%>
               <marker
                 id="arrowhead-default"
                 markerWidth="10"
@@ -268,6 +270,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
                 <polygon points="0 0, 10 3.5, 0 7" class="fill-error" />
               </marker>
 
+              <%!-- Animated dash pattern for running edges --%>
               <style>
                 @keyframes dash-flow {
                   to { stroke-dashoffset: -20; }
@@ -278,6 +281,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               </style>
             </defs>
 
+            <%!-- Edges with status-based coloring --%>
             <g class="edges">
               <%= for edge <- @edges do %>
                 <% edge_status = Map.get(@edge_states, edge.id, :default) %>
@@ -285,18 +289,16 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               <% end %>
             </g>
 
+            <%!-- Nodes --%>
             <g class="nodes">
               <%= for node <- @workflow.nodes || [] do %>
                 <% pos = Map.get(@layout, node.id, %{x: 0, y: 0}) %>
                 <% state = Map.get(@node_states, node.id, %{}) %>
-                <% pin_info = Map.get(@pins_with_status, node.id) %>
                 <.dag_node
                   node={node}
                   position={pos}
                   state={state}
                   selected={@selected_node_id == node.id}
-                  pinned={pin_info != nil}
-                  pin_stale={pin_info && pin_info["stale"]}
                 />
               <% end %>
             </g>
@@ -305,52 +307,6 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       </div>
     </div>
     """
-  end
-
-  # ============================================================================
-  # Component: DAG Edge
-  # ============================================================================
-
-  attr :edge, :map, required: true
-  attr :status, :atom, required: true
-
-  defp dag_edge(assigns) do
-    ~H"""
-    <g class="edge-group">
-      <path
-        d={@edge.path}
-        fill="none"
-        stroke-width={if @status == :running, do: "3", else: "2"}
-        class={[
-          edge_stroke_class(@status),
-          @status == :running && "edge-running"
-        ]}
-        stroke-dasharray={if @status == :running, do: "5,5", else: "none"}
-        marker-end={"url(#arrowhead-#{@status})"}
-      />
-
-      <%= if @status == :running do %>
-        <circle r="4" class="fill-info">
-          <animateMotion dur="1s" repeatCount="indefinite" path={@edge.path} />
-        </circle>
-      <% end %>
-    </g>
-    """
-  end
-
-  defp edge_stroke_class(:default), do: "stroke-base-300"
-  defp edge_stroke_class(:pending), do: "stroke-warning"
-  defp edge_stroke_class(:running), do: "stroke-info"
-  defp edge_stroke_class(:completed), do: "stroke-success"
-  defp edge_stroke_class(:failed), do: "stroke-error"
-  defp edge_stroke_class(_), do: "stroke-base-300"
-
-  defp compute_edge_states(edges, node_states) do
-    Map.new(edges, fn edge ->
-      source_status = get_in(node_states, [edge.source_node_id, :status])
-      edge_status = source_status || :default
-      {edge.id, edge_status}
-    end)
   end
 
   # ============================================================================
@@ -389,7 +345,59 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   end
 
   # ============================================================================
-  # Component: DAG Node (with double-click support)
+  # Component: DAG Edge
+  # ============================================================================
+
+  attr :edge, :map, required: true
+  attr :status, :atom, required: true
+
+  defp dag_edge(assigns) do
+    ~H"""
+    <g class="edge-group">
+      <%!-- Main edge path --%>
+      <path
+        d={@edge.path}
+        fill="none"
+        stroke-width={if @status == :running, do: "3", else: "2"}
+        class={[
+          edge_stroke_class(@status),
+          @status == :running && "edge-running"
+        ]}
+        stroke-dasharray={if @status == :running, do: "5,5", else: "none"}
+        marker-end={"url(#arrowhead-#{@status})"}
+      />
+
+      <%!-- Animated pulse for running edges --%>
+      <%= if @status == :running do %>
+        <circle r="4" class="fill-info">
+          <animateMotion dur="1s" repeatCount="indefinite" path={@edge.path} />
+        </circle>
+      <% end %>
+    </g>
+    """
+  end
+
+  defp edge_stroke_class(:default), do: "stroke-base-300"
+  defp edge_stroke_class(:pending), do: "stroke-warning"
+  defp edge_stroke_class(:running), do: "stroke-info"
+  defp edge_stroke_class(:completed), do: "stroke-success"
+  defp edge_stroke_class(:failed), do: "stroke-error"
+  defp edge_stroke_class(_), do: "stroke-base-300"
+
+  # Compute edge states based on source node status
+  defp compute_edge_states(edges, node_states) do
+    Map.new(edges, fn edge ->
+      source_status = get_in(node_states, [edge.source_node_id, :status])
+
+      # Edge status matches the source node's status
+      edge_status = source_status || :default
+
+      {edge.id, edge_status}
+    end)
+  end
+
+  # ============================================================================
+  # Component: DAG Node
   # ============================================================================
 
   attr :node, :map, required: true
@@ -407,19 +415,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       phx-value-node-id={@node.id}
       class="cursor-pointer group"
     >
-      <%!-- Invisible larger hit area for context menu --%>
-      <rect
-        width="220"
-        height="100"
-        x="-10"
-        y="-10"
-        fill="transparent"
-        phx-hook=".NodeContextMenu"
-        id={"node-hitarea-#{@node.id}"}
-        data-node-id={@node.id}
-      />
-
-      <%!-- Glow effect --%>
+      <%!-- Glow effect for running/selected nodes --%>
       <%= if @state[:status] == :running or @selected do %>
         <rect
           width="200"
@@ -462,7 +458,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         stroke-width={if @selected, do: "3", else: "2"}
       />
 
-      <%!-- Pin indicator badge --%>
+      <%!-- Pin indicator badge (top right) --%>
       <%= if @pinned do %>
         <g transform="translate(176, -8)" class="pointer-events-none">
           <circle cx="12" cy="12" r="14" class={[(@pin_stale && "fill-warning") || "fill-primary"]} />
@@ -475,41 +471,36 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           >
             📌
           </text>
+          <%= if @pin_stale do %>
+            <title>Pin is stale - node config has changed</title>
+          <% end %>
         </g>
       <% end %>
 
-      <%!-- Hover action bar --%>
+      <%!-- Inline run controls (hover-revealed) --%>
       <foreignObject
         x="8"
-        y="-32"
+        y="-28"
         width="184"
-        height="32"
-        class="opacity-0 group-hover:opacity-100 transition duration-150 pointer-events-none group-hover:pointer-events-auto"
+        height="28"
+        class="opacity-0 group-hover:opacity-100 transition duration-150"
       >
-        <div class="w-full flex items-center justify-end gap-1.5">
-          <button
-            type="button"
-            phx-click="open_node_config"
-            phx-value-node-id={@node.id}
-            class="px-2 py-1 rounded-full text-xs font-medium shadow-sm bg-base-100 border border-base-300 hover:bg-base-200 transition flex items-center gap-1"
-            title="Configure node"
-          >
-            <.icon name="hero-cog-6-tooth" class="size-3" />
-            Configure
-          </button>
+        <div class="w-full flex items-center justify-end gap-2 pointer-events-auto">
           <button
             type="button"
             phx-click="execute_to_node"
             phx-value-node-id={@node.id}
-            class="px-2 py-1 rounded-full text-xs font-semibold shadow-sm bg-primary text-primary-content hover:bg-primary/90 transition"
-            title="Run to this node"
+            class={[
+              "px-2 py-1 rounded-full text-xs font-semibold shadow-sm",
+              "bg-primary text-primary-content hover:bg-primary/90 transition"
+            ]}
           >
             Run to Here
           </button>
         </div>
       </foreignObject>
 
-      <%!-- Status indicator --%>
+      <%!-- Status indicator with animation --%>
       <g transform="translate(16, 16)">
         <%= if @state[:status] == :running do %>
           <circle cx="0" cy="0" r="8" class="fill-info/20" />
@@ -522,6 +513,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           </circle>
         <% else %>
           <%= if @pinned and not @state[:status] do %>
+            <%!-- Pinned but not executed this run - show pin indicator --%>
             <circle cx="0" cy="0" r="6" class={[(@pin_stale && "fill-warning") || "fill-primary/60"]} />
           <% else %>
             <circle cx="0" cy="0" r="6" class={node_status_indicator_class(@state[:status])} />
@@ -597,31 +589,6 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         </g>
       <% end %>
     </g>
-
-    <%!-- Colocated hook for context menu --%>
-    <script :type={Phoenix.LiveView.ColocatedHook} name=".NodeContextMenu">
-      export default {
-        mounted() {
-          this.el.addEventListener("dblclick", (e) => {
-            e.stopPropagation();
-            const nodeId = this.el.dataset.nodeId;
-            this.pushEvent("open_node_config", { "node-id": nodeId });
-          });
-
-          this.el.addEventListener("contextmenu", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const nodeId = this.el.dataset.nodeId;
-            const rect = this.el.getBoundingClientRect();
-            this.pushEvent("open_context_menu", {
-              "node-id": nodeId,
-              x: e.clientX,
-              y: e.clientY
-            });
-          });
-        }
-      }
-    </script>
     """
   end
 
@@ -634,13 +601,14 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   attr :pinned, :boolean, default: false
   attr :pin_stale, :boolean, default: false
   attr :has_output, :boolean, default: false
+  # {x, y} for menu positioning
   attr :position, :map, required: true
 
   def node_context_menu(assigns) do
     ~H"""
     <div
       id={"context-menu-#{@node_id}"}
-      class="fixed z-50 bg-base-100 border border-base-300 rounded-xl shadow-xl py-2 min-w-[220px]"
+      class="absolute z-50 bg-base-100 border border-base-300 rounded-xl shadow-xl py-2 min-w-[200px]"
       style={"left: #{@position.x}px; top: #{@position.y}px;"}
       phx-click-away="close_context_menu"
     >
@@ -648,19 +616,8 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         <p class="text-sm font-medium text-base-content truncate">{@node_name}</p>
       </div>
 
-      <%!-- Primary Actions --%>
+      <%!-- Execute Actions --%>
       <div class="px-1">
-        <button
-          type="button"
-          class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
-          phx-click="open_node_config"
-          phx-value-node-id={@node_id}
-        >
-          <.icon name="hero-cog-6-tooth" class="size-4 text-base-content/70" />
-          <span>Configure Node</span>
-          <span class="ml-auto text-xs text-base-content/50">Double-click</span>
-        </button>
-
         <button
           type="button"
           class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
@@ -681,7 +638,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <button
             type="button"
             class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
-            phx-click="open_node_config"
+            phx-click="view_pin"
             phx-value-node-id={@node_id}
           >
             <.icon name="hero-eye" class="size-4 text-base-content/70" />
@@ -689,6 +646,15 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             <%= if @pin_stale do %>
               <span class="ml-auto badge badge-warning badge-xs">stale</span>
             <% end %>
+          </button>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
+            phx-click="update_pin"
+            phx-value-node-id={@node_id}
+          >
+            <.icon name="hero-arrow-path" class="size-4 text-base-content/70" />
+            <span>Update Pin Data</span>
           </button>
           <button
             type="button"
@@ -703,14 +669,175 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <button
             type="button"
             class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
-            phx-click="open_node_config"
+            phx-click="pin_node"
             phx-value-node-id={@node_id}
           >
             <.icon name="hero-bookmark" class="size-4 text-primary" />
             <span>Pin Output...</span>
-            <span class="ml-auto text-xs text-base-content/50">in modal</span>
           </button>
+          <%= if @has_output do %>
+            <button
+              type="button"
+              class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
+              phx-click="pin_from_execution"
+              phx-value-node-id={@node_id}
+            >
+              <.icon name="hero-bookmark-square" class="size-4 text-primary" />
+              <span>Pin from Last Run</span>
+            </button>
+          <% end %>
         <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  # ============================================================================
+  # Component: Pin Modal
+  # ============================================================================
+
+  attr :node_id, :string, required: true
+  attr :node_name, :string, required: true
+  attr :current_data, :any, default: nil
+  attr :existing_pin, :map, default: nil
+  attr :show, :boolean, default: false
+
+  def pin_modal(assigns) do
+    # Encode data for display
+    encoded_data =
+      case assigns.current_data do
+        nil -> "{}"
+        data -> Jason.encode!(data, pretty: true)
+      end
+
+    assigns = assign(assigns, :encoded_data, encoded_data)
+
+    ~H"""
+    <div
+      :if={@show}
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      phx-click="close_pin_modal"
+    >
+      <div
+        class="bg-base-100 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden"
+        phx-click-away="close_pin_modal"
+        phx-window-keydown="close_pin_modal"
+        phx-key="escape"
+      >
+        <%!-- Header --%>
+        <div class="px-6 py-4 border-b border-base-200 flex items-center justify-between">
+          <div>
+            <h3 class="text-lg font-semibold text-base-content">
+              Pin Output: {@node_name}
+            </h3>
+            <p class="text-sm text-base-content/60 mt-0.5">
+              Freeze this node's output for iterative development
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm btn-circle"
+            phx-click="close_pin_modal"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        <%!-- Body --%>
+        <form phx-submit="confirm_pin" class="p-6 space-y-4 overflow-y-auto max-h-[60vh]">
+          <input type="hidden" name="node_id" value={@node_id} />
+
+          <%!-- Label field --%>
+          <div>
+            <label class="label">
+              <span class="label-text font-medium">Label (optional)</span>
+            </label>
+            <input
+              type="text"
+              name="label"
+              class="input input-bordered w-full"
+              placeholder="e.g., Successful API response"
+              value={@existing_pin && @existing_pin["label"]}
+            />
+          </div>
+
+          <%!-- Data field --%>
+          <div>
+            <label class="label">
+              <span class="label-text font-medium">Output Data (JSON)</span>
+            </label>
+            <textarea
+              name="data"
+              class="textarea textarea-bordered w-full font-mono text-sm"
+              rows="12"
+              placeholder='{"status": 200, "body": {...}}'
+              spellcheck="false"
+            >{@encoded_data}</textarea>
+            <label class="label">
+              <span class="label-text-alt text-base-content/60">
+                Edit the JSON above or paste new data
+              </span>
+            </label>
+          </div>
+
+          <%!-- Source options --%>
+          <%= if @current_data do %>
+            <div class="flex items-center gap-4 p-3 bg-base-200/50 rounded-lg">
+              <div class="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="source"
+                  value="last_run"
+                  id="source-last-run"
+                  class="radio radio-primary radio-sm"
+                  checked
+                />
+                <label for="source-last-run" class="text-sm cursor-pointer">
+                  Use output from last execution
+                </label>
+              </div>
+              <div class="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="source"
+                  value="custom"
+                  id="source-custom"
+                  class="radio radio-primary radio-sm"
+                />
+                <label for="source-custom" class="text-sm cursor-pointer">
+                  Enter custom data
+                </label>
+              </div>
+            </div>
+          <% end %>
+
+          <%!-- Existing pin info --%>
+          <%= if @existing_pin do %>
+            <div class="alert alert-info">
+              <.icon name="hero-information-circle" class="size-5" />
+              <div>
+                <p class="font-medium">This node already has a pin</p>
+                <p class="text-sm opacity-80">
+                  Pinned {format_relative_time(@existing_pin["pinned_at"])}
+                  <%= if @existing_pin["label"] do %>
+                    — "{@existing_pin["label"]}"
+                  <% end %>
+                </p>
+              </div>
+            </div>
+          <% end %>
+        </form>
+
+        <%!-- Footer --%>
+        <div class="px-6 py-4 border-t border-base-200 flex items-center justify-end gap-3">
+          <button type="button" class="btn btn-ghost" phx-click="close_pin_modal">
+            Cancel
+          </button>
+          <button type="submit" form="pin-form" class="btn btn-primary gap-2">
+            <.icon name="hero-bookmark" class="size-4" />
+            {if @existing_pin, do: "Update Pin", else: "Pin Output"}
+          </button>
+        </div>
       </div>
     </div>
     """
@@ -725,7 +852,9 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
 
   def pins_summary_panel(assigns) do
     pin_count = map_size(assigns.pins_with_status)
+
     stale_count = Enum.count(assigns.pins_with_status, fn {_, p} -> p["stale"] end)
+
     orphan_count = Enum.count(assigns.pins_with_status, fn {_, p} -> not p["node_exists"] end)
 
     assigns =
@@ -797,7 +926,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               <button
                 type="button"
                 class="btn btn-ghost btn-xs"
-                phx-click="open_node_config"
+                phx-click="view_pin"
                 phx-value-node-id={node_id}
                 title="View pinned data"
               >
@@ -819,6 +948,53 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
     </div>
     """
   end
+
+  defp duration_bar_width(us) when us < 1000, do: 20
+  defp duration_bar_width(us) when us < 10_000, do: 40
+  defp duration_bar_width(us) when us < 100_000, do: 60
+  defp duration_bar_width(us) when us < 1_000_000, do: 80
+  defp duration_bar_width(_), do: 100
+
+  defp node_bg_class(nil, false), do: "fill-base-100 stroke-base-300"
+  defp node_bg_class(nil, true), do: "fill-base-100 stroke-primary"
+  defp node_bg_class(:pending, false), do: "fill-warning/5 stroke-warning/50"
+  defp node_bg_class(:pending, true), do: "fill-warning/10 stroke-primary"
+  defp node_bg_class(:queued, false), do: "fill-warning/5 stroke-warning/50"
+  defp node_bg_class(:queued, true), do: "fill-warning/10 stroke-primary"
+  defp node_bg_class(:running, _), do: "fill-info/10 stroke-info"
+  defp node_bg_class(:completed, false), do: "fill-success/10 stroke-success"
+  defp node_bg_class(:completed, true), do: "fill-success/15 stroke-primary"
+  defp node_bg_class(:failed, false), do: "fill-error/10 stroke-error"
+  defp node_bg_class(:failed, true), do: "fill-error/15 stroke-primary"
+  defp node_bg_class(_, false), do: "fill-base-100 stroke-base-300"
+  defp node_bg_class(_, true), do: "fill-base-100 stroke-primary"
+
+  defp node_status_indicator_class(nil), do: "fill-base-300"
+  defp node_status_indicator_class(:pending), do: "fill-warning"
+  defp node_status_indicator_class(:queued), do: "fill-warning"
+  defp node_status_indicator_class(:running), do: "fill-info"
+  defp node_status_indicator_class(:completed), do: "fill-success"
+  defp node_status_indicator_class(:failed), do: "fill-error"
+  defp node_status_indicator_class(_), do: "fill-base-300"
+
+  defp node_type_label(type_id) do
+    type_id
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map(&String.capitalize/1)
+    |> Enum.join(" ")
+  end
+
+  defp truncate_text(text, max_len) when byte_size(text) > max_len do
+    String.slice(text, 0, max_len - 1) <> "…"
+  end
+
+  defp truncate_text(text, _), do: text
+
+  defp format_duration(nil), do: ""
+  defp format_duration(us) when us < 1000, do: "#{us}μs"
+  defp format_duration(us) when us < 1_000_000, do: "#{Float.round(us / 1000, 2)}ms"
+  defp format_duration(us), do: "#{Float.round(us / 1_000_000, 2)}s"
 
   # ============================================================================
   # Component: Node Details Panel
@@ -852,6 +1028,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <% state = Map.get(@node_states, @selected_node_id, %{}) %>
 
           <div class="space-y-4">
+            <%!-- Node Info --%>
             <div>
               <div class="flex items-start justify-between">
                 <div>
@@ -860,28 +1037,18 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
                     Type: {node_type_label(node.type_id)}
                   </p>
                 </div>
-                <div class="flex items-center gap-2">
-                  <%= if state[:status] do %>
-                    <span class={["badge badge-sm", node_status_badge_class(state[:status])]}>
-                      {state[:status]}
-                    </span>
-                  <% end %>
-                  <button
-                    type="button"
-                    class="btn btn-ghost btn-xs"
-                    phx-click="open_node_config"
-                    phx-value-node-id={@selected_node_id}
-                    title="Configure node"
-                  >
-                    <.icon name="hero-cog-6-tooth" class="size-4" />
-                  </button>
-                </div>
+                <%= if state[:status] do %>
+                  <span class={["badge badge-sm", node_status_badge_class(state[:status])]}>
+                    {state[:status]}
+                  </span>
+                <% end %>
               </div>
               <p class="text-xs font-mono text-base-content/40 mt-2">
                 ID: {node.id}
               </p>
             </div>
 
+            <%!-- Timing Info --%>
             <%= if state[:started_at] || state[:duration_us] do %>
               <div class="flex items-center gap-4 py-2 px-3 bg-base-200/50 rounded-lg">
                 <%= if state[:duration_us] do %>
@@ -898,18 +1065,21 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               </div>
             <% end %>
 
+            <%!-- Input Data --%>
             <.data_section
               title="Input Data"
               data={state[:input_data]}
               empty_message="No input data captured"
             />
 
+            <%!-- Output Data --%>
             <.data_section
               title="Output Data"
               data={state[:output_data]}
               empty_message="No output data yet"
             />
 
+            <%!-- Error --%>
             <%= if state[:error] do %>
               <div>
                 <p class="text-xs font-semibold uppercase tracking-wide text-error mb-2 flex items-center gap-1">
@@ -921,6 +1091,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               </div>
             <% end %>
 
+            <%!-- Node Configuration (collapsible) --%>
             <details class="collapse collapse-arrow bg-base-200/30 rounded-lg">
               <summary class="collapse-title text-xs font-semibold uppercase tracking-wide text-base-content/60 min-h-0 py-2 px-3">
                 Configuration
@@ -936,13 +1107,67 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <div class="text-center py-8 text-base-content/60">
             <.icon name="hero-cursor-arrow-rays" class="size-8 mx-auto mb-2 opacity-50" />
             <p class="text-sm">Click a node to view details</p>
-            <p class="text-xs mt-1 opacity-70">Double-click to configure</p>
+            <p class="text-xs mt-1 opacity-70">See input, output, and execution info</p>
           </div>
         <% end %>
       </div>
     </div>
     """
   end
+
+  defp format_time(nil), do: "-"
+  defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
+
+  defp node_status_badge_class(:pending), do: "badge-warning"
+  defp node_status_badge_class(:queued), do: "badge-warning"
+  defp node_status_badge_class(:running), do: "badge-info"
+  defp node_status_badge_class(:completed), do: "badge-success"
+  defp node_status_badge_class(:failed), do: "badge-error"
+  defp node_status_badge_class(_), do: "badge-ghost"
+
+  attr :title, :string, required: true
+  attr :data, :any, default: nil
+  attr :empty_message, :string, default: "No data"
+
+  defp data_section(assigns) do
+    has_data = assigns.data && assigns.data != %{} && assigns.data != nil
+    assigns = assign(assigns, :has_data, has_data)
+
+    ~H"""
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60 mb-2 flex items-center gap-1">
+        <%= if @title == "Input Data" do %>
+          <.icon name="hero-arrow-down-on-square" class="size-3" />
+        <% else %>
+          <.icon name="hero-arrow-up-on-square" class="size-3" />
+        <% end %>
+        {@title}
+      </p>
+      <%= if @has_data do %>
+        <pre class="text-xs bg-base-200/60 p-3 rounded-lg overflow-auto max-h-48 border border-base-200"><%=
+          format_json_preview(@data)
+        %></pre>
+      <% else %>
+        <p class="text-xs text-base-content/40 italic py-2">{@empty_message}</p>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp format_json_preview(data) when is_map(data) or is_list(data) do
+    case Jason.encode(data, pretty: true) do
+      {:ok, json} -> truncate_json(json, 800)
+      _ -> inspect(data, pretty: true, limit: 20)
+    end
+  end
+
+  defp format_json_preview(data), do: inspect(data, pretty: true, limit: 20)
+
+  defp truncate_json(json, max_len) when byte_size(json) > max_len do
+    String.slice(json, 0, max_len) <> "\n... (truncated)"
+  end
+
+  defp truncate_json(json, _), do: json
 
   # ============================================================================
   # Component: Trace Log Panel
@@ -1028,6 +1253,41 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
     """
   end
 
+  defp trace_log_entry_class(:error), do: "bg-error/10 border-l-2 border-error"
+  defp trace_log_entry_class(:success), do: "bg-success/10 border-l-2 border-success"
+  defp trace_log_entry_class(:warning), do: "bg-warning/10 border-l-2 border-warning"
+  defp trace_log_entry_class(_), do: "hover:bg-base-200/50 border-l-2 border-transparent"
+
+  defp trace_log_level_class(:error), do: "text-error font-semibold"
+  defp trace_log_level_class(:success), do: "text-success font-semibold"
+  defp trace_log_level_class(:warning), do: "text-warning"
+  defp trace_log_level_class(_), do: "text-info"
+
+  defp format_log_timestamp(nil), do: "--:--:--"
+
+  defp format_log_timestamp(dt),
+    do:
+      Calendar.strftime(dt, "%H:%M:%S.") <>
+        String.pad_leading("#{dt.microsecond |> elem(0) |> div(1000)}", 3, "0")
+
+  defp format_log_data(data) when is_map(data) and map_size(data) == 0, do: ""
+
+  defp format_log_data(data) when is_map(data) do
+    data
+    |> Enum.take(3)
+    |> Enum.map(fn {k, v} -> "#{k}=#{format_log_value(v)}" end)
+    |> Enum.join(" ")
+  end
+
+  defp format_log_data(_), do: ""
+
+  defp format_log_value(v) when is_binary(v) and byte_size(v) > 30,
+    do: String.slice(v, 0, 30) <> "..."
+
+  defp format_log_value(v) when is_map(v), do: "{...}"
+  defp format_log_value(v) when is_list(v), do: "[#{length(v)} items]"
+  defp format_log_value(v), do: inspect(v, limit: 3)
+
   # ============================================================================
   # Component: Execution Metadata Panel
   # ============================================================================
@@ -1099,150 +1359,6 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
     </div>
     """
   end
-
-  # ============================================================================
-  # Helper Components
-  # ============================================================================
-
-  attr :title, :string, required: true
-  attr :data, :any, default: nil
-  attr :empty_message, :string, default: "No data"
-
-  defp data_section(assigns) do
-    has_data = assigns.data && assigns.data != %{} && assigns.data != nil
-    assigns = assign(assigns, :has_data, has_data)
-
-    ~H"""
-    <div>
-      <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60 mb-2 flex items-center gap-1">
-        <%= if @title == "Input Data" do %>
-          <.icon name="hero-arrow-down-on-square" class="size-3" />
-        <% else %>
-          <.icon name="hero-arrow-up-on-square" class="size-3" />
-        <% end %>
-        {@title}
-      </p>
-      <%= if @has_data do %>
-        <pre class="text-xs bg-base-200/60 p-3 rounded-lg overflow-auto max-h-48 border border-base-200"><%=
-          format_json_preview(@data)
-        %></pre>
-      <% else %>
-        <p class="text-xs text-base-content/40 italic py-2">{@empty_message}</p>
-      <% end %>
-    </div>
-    """
-  end
-
-  # ============================================================================
-  # Helper Functions
-  # ============================================================================
-
-  defp node_bg_class(nil, false), do: "fill-base-100 stroke-base-300"
-  defp node_bg_class(nil, true), do: "fill-base-100 stroke-primary"
-  defp node_bg_class(:pending, false), do: "fill-warning/5 stroke-warning/50"
-  defp node_bg_class(:pending, true), do: "fill-warning/10 stroke-primary"
-  defp node_bg_class(:queued, false), do: "fill-warning/5 stroke-warning/50"
-  defp node_bg_class(:queued, true), do: "fill-warning/10 stroke-primary"
-  defp node_bg_class(:running, _), do: "fill-info/10 stroke-info"
-  defp node_bg_class(:completed, false), do: "fill-success/10 stroke-success"
-  defp node_bg_class(:completed, true), do: "fill-success/15 stroke-primary"
-  defp node_bg_class(:failed, false), do: "fill-error/10 stroke-error"
-  defp node_bg_class(:failed, true), do: "fill-error/15 stroke-primary"
-  defp node_bg_class(_, false), do: "fill-base-100 stroke-base-300"
-  defp node_bg_class(_, true), do: "fill-base-100 stroke-primary"
-
-  defp node_status_indicator_class(nil), do: "fill-base-300"
-  defp node_status_indicator_class(:pending), do: "fill-warning"
-  defp node_status_indicator_class(:queued), do: "fill-warning"
-  defp node_status_indicator_class(:running), do: "fill-info"
-  defp node_status_indicator_class(:completed), do: "fill-success"
-  defp node_status_indicator_class(:failed), do: "fill-error"
-  defp node_status_indicator_class(_), do: "fill-base-300"
-
-  defp node_status_badge_class(:pending), do: "badge-warning"
-  defp node_status_badge_class(:queued), do: "badge-warning"
-  defp node_status_badge_class(:running), do: "badge-info"
-  defp node_status_badge_class(:completed), do: "badge-success"
-  defp node_status_badge_class(:failed), do: "badge-error"
-  defp node_status_badge_class(_), do: "badge-ghost"
-
-  defp node_type_label(type_id) do
-    type_id
-    |> String.replace("_", " ")
-    |> String.split()
-    |> Enum.map(&String.capitalize/1)
-    |> Enum.join(" ")
-  end
-
-  defp truncate_text(text, max_len) when byte_size(text) > max_len do
-    String.slice(text, 0, max_len - 1) <> "…"
-  end
-
-  defp truncate_text(text, _), do: text
-
-  defp duration_bar_width(us) when us < 1000, do: 20
-  defp duration_bar_width(us) when us < 10_000, do: 40
-  defp duration_bar_width(us) when us < 100_000, do: 60
-  defp duration_bar_width(us) when us < 1_000_000, do: 80
-  defp duration_bar_width(_), do: 100
-
-  defp format_duration(nil), do: ""
-  defp format_duration(us) when us < 1000, do: "#{us}μs"
-  defp format_duration(us) when us < 1_000_000, do: "#{Float.round(us / 1000, 2)}ms"
-  defp format_duration(us), do: "#{Float.round(us / 1_000_000, 2)}s"
-
-  defp format_time(nil), do: "-"
-  defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
-
-  defp format_json_preview(data) when is_map(data) or is_list(data) do
-    case Jason.encode(data, pretty: true) do
-      {:ok, json} -> truncate_json(json, 800)
-      _ -> inspect(data, pretty: true, limit: 20)
-    end
-  end
-
-  defp format_json_preview(data), do: inspect(data, pretty: true, limit: 20)
-
-  defp truncate_json(json, max_len) when byte_size(json) > max_len do
-    String.slice(json, 0, max_len) <> "\n... (truncated)"
-  end
-
-  defp truncate_json(json, _), do: json
-
-  defp trace_log_entry_class(:error), do: "bg-error/10 border-l-2 border-error"
-  defp trace_log_entry_class(:success), do: "bg-success/10 border-l-2 border-success"
-  defp trace_log_entry_class(:warning), do: "bg-warning/10 border-l-2 border-warning"
-  defp trace_log_entry_class(_), do: "hover:bg-base-200/50 border-l-2 border-transparent"
-
-  defp trace_log_level_class(:error), do: "text-error font-semibold"
-  defp trace_log_level_class(:success), do: "text-success font-semibold"
-  defp trace_log_level_class(:warning), do: "text-warning"
-  defp trace_log_level_class(_), do: "text-info"
-
-  defp format_log_timestamp(nil), do: "--:--:--"
-
-  defp format_log_timestamp(dt),
-    do:
-      Calendar.strftime(dt, "%H:%M:%S.") <>
-        String.pad_leading("#{dt.microsecond |> elem(0) |> div(1000)}", 3, "0")
-
-  defp format_log_data(data) when is_map(data) and map_size(data) == 0, do: ""
-
-  defp format_log_data(data) when is_map(data) do
-    data
-    |> Enum.take(3)
-    |> Enum.map(fn {k, v} -> "#{k}=#{format_log_value(v)}" end)
-    |> Enum.join(" ")
-  end
-
-  defp format_log_data(_), do: ""
-
-  defp format_log_value(v) when is_binary(v) and byte_size(v) > 30,
-    do: String.slice(v, 0, 30) <> "..."
-
-  defp format_log_value(v) when is_map(v), do: "{...}"
-  defp format_log_value(v) when is_list(v), do: "[#{length(v)} items]"
-  defp format_log_value(v), do: inspect(v, limit: 3)
 
   defp format_relative_time(nil), do: "unknown time"
 
