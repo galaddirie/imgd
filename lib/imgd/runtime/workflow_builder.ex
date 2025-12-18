@@ -22,12 +22,14 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Executions.{Context, Execution}
+  alias Imgd.Runtime.ExecutionState
   alias Imgd.Runtime.Engine.Behaviour
 
   @type executable :: Behaviour.executable()
   @type build_result :: {:ok, executable()} | {:error, Behaviour.build_error()}
   @type execute_result ::
           {:ok, Behaviour.execution_result()} | {:error, Behaviour.execution_error()}
+  @type state_store :: Behaviour.state_store()
 
   @doc """
   Returns the configured execution engine module.
@@ -49,13 +51,28 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   - `{:ok, executable}` - Successfully built workflow
   - `{:error, reason}` - Failed to build workflow
   """
+  @spec build(WorkflowVersion.t(), Context.t(), Execution.t() | nil, state_store()) ::
+          build_result()
+  def build(
+        %WorkflowVersion{} = version,
+        %Context{} = context,
+        %Execution{} = execution,
+        state_store
+      ) do
+    engine().build(version, context, execution, state_store)
+  end
+
+  def build(%WorkflowVersion{} = version, %Context{} = context, nil, state_store) do
+    engine().build(version, context, nil, state_store)
+  end
+
   @spec build(WorkflowVersion.t(), Context.t(), Execution.t() | nil) :: build_result()
   def build(%WorkflowVersion{} = version, %Context{} = context, %Execution{} = execution) do
-    engine().build(version, context, execution)
+    build(version, context, execution, ExecutionState)
   end
 
   def build(%WorkflowVersion{} = version, %Context{} = context, nil) do
-    engine().build(version, context, nil)
+    build(version, context, nil, ExecutionState)
   end
 
   @doc """
@@ -66,7 +83,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   """
   @spec build(WorkflowVersion.t(), Context.t()) :: build_result()
   def build(%WorkflowVersion{} = version, %Context{} = context) do
-    engine().build(version, context, nil)
+    build(version, context, nil, ExecutionState)
   end
 
   @doc """
@@ -97,6 +114,18 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         pinned_outputs: %{"http_request" => %{"status" => 200}}
       )
   """
+  @spec build_partial(WorkflowVersion.t(), Context.t(), Execution.t(), keyword(), state_store()) ::
+          build_result()
+  def build_partial(
+        %WorkflowVersion{} = version,
+        %Context{} = context,
+        %Execution{} = execution,
+        opts,
+        state_store
+      ) do
+    engine().build_partial(version, context, execution, opts, state_store)
+  end
+
   @spec build_partial(WorkflowVersion.t(), Context.t(), Execution.t(), keyword()) ::
           build_result()
   def build_partial(
@@ -105,7 +134,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         %Execution{} = execution,
         opts \\ []
       ) do
-    engine().build_partial(version, context, execution, opts)
+    build_partial(version, context, execution, opts, ExecutionState)
   end
 
   @doc """
@@ -127,6 +156,23 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         pinned_outputs: %{"http_request" => %{"status" => 200, ...}}
       )
   """
+  @spec build_downstream(
+          WorkflowVersion.t(),
+          Context.t(),
+          Execution.t(),
+          keyword(),
+          state_store()
+        ) :: build_result()
+  def build_downstream(
+        %WorkflowVersion{} = version,
+        %Context{} = context,
+        %Execution{} = execution,
+        opts,
+        state_store
+      ) do
+    engine().build_downstream(version, context, execution, opts, state_store)
+  end
+
   @spec build_downstream(WorkflowVersion.t(), Context.t(), Execution.t(), keyword()) ::
           build_result()
   def build_downstream(
@@ -135,7 +181,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         %Execution{} = execution,
         opts \\ []
       ) do
-    engine().build_downstream(version, context, execution, opts)
+    build_downstream(version, context, execution, opts, ExecutionState)
   end
 
   @doc """
@@ -144,6 +190,26 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   Assumes all upstream dependencies are satisfied (via pins or prior execution).
   Useful for re-running a single node during debugging.
   """
+  @spec build_single_node(
+          WorkflowVersion.t(),
+          Context.t(),
+          Execution.t(),
+          String.t(),
+          map(),
+          state_store()
+        ) ::
+          build_result()
+  def build_single_node(
+        %WorkflowVersion{} = version,
+        %Context{} = context,
+        %Execution{} = execution,
+        node_id,
+        input_data,
+        state_store
+      ) do
+    engine().build_single_node(version, context, execution, node_id, input_data, state_store)
+  end
+
   @spec build_single_node(WorkflowVersion.t(), Context.t(), Execution.t(), String.t(), map()) ::
           build_result()
   def build_single_node(
@@ -153,14 +219,19 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         node_id,
         input_data
       ) do
-    engine().build_single_node(version, context, execution, node_id, input_data)
+    build_single_node(version, context, execution, node_id, input_data, ExecutionState)
   end
 
   @doc """
   Executes a workflow using the configured engine.
   """
+  @spec execute(executable(), term(), Context.t(), state_store()) :: execute_result()
+  def execute(executable, input, %Context{} = context, state_store) do
+    engine().execute(executable, input, context, state_store)
+  end
+
   @spec execute(executable(), term(), Context.t()) :: execute_result()
   def execute(executable, input, %Context{} = context) do
-    engine().execute(executable, input, context)
+    execute(executable, input, context, ExecutionState)
   end
 end

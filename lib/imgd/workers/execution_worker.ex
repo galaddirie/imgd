@@ -51,7 +51,7 @@ defmodule Imgd.Workers.ExecutionWorker do
 
   alias Imgd.Repo
   alias Imgd.Executions.{Execution, Context}
-  alias Imgd.Runtime.{WorkflowRunner, WorkflowBuilder}
+  alias Imgd.Runtime.{ExecutionState, WorkflowRunner, WorkflowBuilder}
   alias Imgd.Observability.Instrumentation
 
   @impl Oban.Worker
@@ -104,7 +104,7 @@ defmodule Imgd.Workers.ExecutionWorker do
   end
 
   defp run_execution(%Execution{} = execution, "full", _args) do
-    handle_runner_result(execution, WorkflowRunner.run(execution))
+    handle_runner_result(execution, WorkflowRunner.run(execution, ExecutionState))
   end
 
   defp run_execution(%Execution{} = execution, "single_node", args) do
@@ -118,13 +118,14 @@ defmodule Imgd.Workers.ExecutionWorker do
         context,
         execution,
         node_id,
-        input_data
+        input_data,
+        ExecutionState
       )
     end
 
     handle_runner_result(
       execution,
-      WorkflowRunner.run_with_builder(execution, context, builder_fun)
+      WorkflowRunner.run_with_builder(execution, context, builder_fun, ExecutionState)
     )
   end
 
@@ -136,15 +137,21 @@ defmodule Imgd.Workers.ExecutionWorker do
     context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
 
     builder_fun = fn ->
-      WorkflowBuilder.build_partial(execution.workflow_version, context, execution,
-        target_nodes: target_nodes,
-        pinned_outputs: pinned_outputs
+      WorkflowBuilder.build_partial(
+        execution.workflow_version,
+        context,
+        execution,
+        [
+          target_nodes: target_nodes,
+          pinned_outputs: pinned_outputs
+        ],
+        ExecutionState
       )
     end
 
     handle_runner_result(
       execution,
-      WorkflowRunner.run_with_builder(execution, context, builder_fun)
+      WorkflowRunner.run_with_builder(execution, context, builder_fun, ExecutionState)
     )
   end
 

@@ -19,7 +19,7 @@ defmodule Imgd.Executions do
   alias Imgd.Executions.{Execution, NodeExecution, Context}
   alias Imgd.Workflows.{Workflow, WorkflowVersion}
   alias Imgd.Graph
-  alias Imgd.Runtime.{WorkflowBuilder, WorkflowRunner}
+  alias Imgd.Runtime.{ExecutionState, WorkflowBuilder, WorkflowRunner}
   alias Imgd.Repo
 
   require Logger
@@ -540,11 +540,12 @@ defmodule Imgd.Executions do
         context,
         execution,
         node_id,
-        input_data
+        input_data,
+        ExecutionState
       )
     end
 
-    WorkflowRunner.run_with_builder(execution, context, builder_fun)
+    WorkflowRunner.run_with_builder(execution, context, builder_fun, ExecutionState)
   end
 
   defp run_sync(execution, :partial, %{target_nodes: target_nodes, pinned_outputs: pinned_outputs}) do
@@ -552,13 +553,19 @@ defmodule Imgd.Executions do
     context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
 
     builder_fun = fn ->
-      WorkflowBuilder.build_partial(execution.workflow_version, context, execution,
-        target_nodes: target_nodes,
-        pinned_outputs: pinned_outputs
+      WorkflowBuilder.build_partial(
+        execution.workflow_version,
+        context,
+        execution,
+        [
+          target_nodes: target_nodes,
+          pinned_outputs: pinned_outputs
+        ],
+        ExecutionState
       )
     end
 
-    WorkflowRunner.run_with_builder(execution, context, builder_fun)
+    WorkflowRunner.run_with_builder(execution, context, builder_fun, ExecutionState)
   end
 
   defp run_async(execution, mode, mode_args, opts) do

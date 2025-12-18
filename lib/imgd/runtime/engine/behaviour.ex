@@ -8,6 +8,7 @@ defmodule Imgd.Runtime.Engine.Behaviour do
 
   @type executable :: term()
   @type execution_result :: %{output: map() | nil, node_outputs: map(), engine_logs: map()}
+  @type state_store :: module()
 
   @type build_error ::
           {:cycle_detected, [String.t()]}
@@ -21,16 +22,28 @@ defmodule Imgd.Runtime.Engine.Behaviour do
           | {:unexpected_error, String.t()}
           | term()
 
-  @callback build(WorkflowVersion.t(), Context.t(), Execution.t() | nil) ::
+  @callback build(WorkflowVersion.t(), Context.t(), Execution.t() | nil, state_store()) ::
               {:ok, executable()} | {:error, build_error()}
 
-  @callback execute(executable(), term(), Context.t()) ::
+  @callback execute(executable(), term(), Context.t(), state_store()) ::
               {:ok, execution_result()} | {:error, execution_error()}
 
-  @callback build_partial(WorkflowVersion.t(), Context.t(), Execution.t(), keyword()) ::
+  @callback build_partial(
+              WorkflowVersion.t(),
+              Context.t(),
+              Execution.t(),
+              keyword(),
+              state_store()
+            ) ::
               {:ok, executable()} | {:error, build_error()}
 
-  @callback build_downstream(WorkflowVersion.t(), Context.t(), Execution.t(), keyword()) ::
+  @callback build_downstream(
+              WorkflowVersion.t(),
+              Context.t(),
+              Execution.t(),
+              keyword(),
+              state_store()
+            ) ::
               {:ok, executable()} | {:error, build_error()}
 
   @callback build_single_node(
@@ -38,11 +51,12 @@ defmodule Imgd.Runtime.Engine.Behaviour do
               Context.t(),
               Execution.t(),
               String.t(),
-              map()
+              map(),
+              state_store()
             ) ::
               {:ok, executable()} | {:error, build_error()}
 
-  @optional_callbacks [build_partial: 4, build_downstream: 4, build_single_node: 5]
+  @optional_callbacks [build_partial: 5, build_downstream: 5, build_single_node: 6]
 
   @doc "Returns the configured execution engine module."
   @spec engine() :: module()
