@@ -40,7 +40,8 @@ defmodule Imgd.Nodes.Executors.StringConcatenate do
       "input_field" => %{
         "type" => "string",
         "title" => "Input Field",
-        "description" => "Field name containing the list of strings (leave empty to concatenate all string values from input map)"
+        "description" =>
+          "Field name containing the list of strings (leave empty to concatenate all string values from input map)"
       }
     }
   }
