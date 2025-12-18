@@ -203,7 +203,12 @@ defmodule Imgd.Nodes.Registry do
       Imgd.Nodes.Executors.Format,
       Imgd.Nodes.Executors.Debug,
       Imgd.Nodes.Executors.Math,
-      Imgd.Nodes.Executors.Wait
+      Imgd.Nodes.Executors.Wait,
+      Imgd.Nodes.Executors.StringConcatenate,
+      Imgd.Nodes.Executors.StringSplit,
+      Imgd.Nodes.Executors.StringReplace,
+      Imgd.Nodes.Executors.StringCase,
+      Imgd.Nodes.Executors.StringTrim
     ]
   end
 
