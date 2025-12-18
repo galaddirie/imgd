@@ -328,7 +328,7 @@ defmodule Imgd.Runtime.Engines.Runic do
     work = fn input -> execute_node(node, input, context, state_store) end
 
     Step.new(
-      name: String.to_atom(node.id),
+      name: node.id,
       work: work,
       hash: Components.fact_hash({node.id, node.type_id})
     )
@@ -401,7 +401,7 @@ defmodule Imgd.Runtime.Engines.Runic do
 
   defp install_tracking_hooks(workflow, step_map, node_info_map, execution, state_store) do
     Enum.reduce(step_map, workflow, fn {node_id, _step}, wf ->
-      step_name = String.to_atom(node_id)
+      step_name = node_id
       node_info = Map.get(node_info_map, node_id, %{type_id: "unknown", name: node_id})
 
       wf

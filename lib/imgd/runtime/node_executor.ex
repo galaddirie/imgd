@@ -182,6 +182,5 @@ defmodule Imgd.Runtime.NodeExecutor do
     |> String.split("_")
     |> Enum.map(&String.capitalize/1)
     |> Enum.join()
-    |> String.to_atom()
   end
 end

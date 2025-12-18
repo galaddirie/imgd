@@ -191,7 +191,7 @@ defmodule Imgd.Runtime.Expression.Filters do
   defp get_nested(nil, _), do: nil
 
   defp get_nested(value, [key | rest]) when is_map(value) do
-    next = Map.get(value, key) || Map.get(value, String.to_atom(key))
+    next = get_map_value(value, key)
     get_nested(next, rest)
   end
 
@@ -204,10 +204,31 @@ defmodule Imgd.Runtime.Expression.Filters do
 
   defp get_nested(_, _), do: nil
 
+  defp get_map_value(map, key) when is_map(map) and is_binary(key) do
+    Map.get(map, key) || get_map_value_by_atom(map, key)
+  end
+
+  defp get_map_value_by_atom(map, key) do
+    case safe_existing_atom(key) do
+      {:ok, atom} -> Map.get(map, atom)
+      :error -> nil
+    end
+  end
+
+  defp safe_existing_atom(key) when is_binary(key) do
+    try do
+      {:ok, String.to_existing_atom(key)}
+    rescue
+      ArgumentError -> :error
+    end
+  end
+
+  defp safe_existing_atom(_), do: :error
+
   @doc "Extract field from list of maps: {{ items | pluck: 'name' }}"
   def pluck(list, field) when is_list(list) and is_binary(field) do
     Enum.map(list, fn item ->
-      if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: nil
+      if is_map(item), do: get_map_value(item, field), else: nil
     end)
   end
 
@@ -216,7 +237,7 @@ defmodule Imgd.Runtime.Expression.Filters do
   @doc "Group list by field: {{ items | group_by: 'category' }}"
   def group_by(list, field) when is_list(list) and is_binary(field) do
     Enum.group_by(list, fn item ->
-      if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: nil
+      if is_map(item), do: get_map_value(item, field), else: nil
     end)
   end
 
@@ -225,7 +246,7 @@ defmodule Imgd.Runtime.Expression.Filters do
   @doc "Sort list by field: {{ items | sort_by: 'name' }}"
   def sort_by(list, field) when is_list(list) and is_binary(field) do
     Enum.sort_by(list, fn item ->
-      if is_map(item), do: Map.get(item, field) || Map.get(item, String.to_atom(field)), else: nil
+      if is_map(item), do: get_map_value(item, field), else: nil
     end)
   end
 
@@ -236,9 +257,7 @@ defmodule Imgd.Runtime.Expression.Filters do
     Enum.sort_by(
       list,
       fn item ->
-        if is_map(item),
-          do: Map.get(item, field) || Map.get(item, String.to_atom(field)),
-          else: nil
+        if is_map(item), do: get_map_value(item, field), else: nil
       end,
       :desc
     )
@@ -250,7 +269,7 @@ defmodule Imgd.Runtime.Expression.Filters do
   def where_eq(list, field, value) when is_list(list) and is_binary(field) do
     Enum.filter(list, fn item ->
       if is_map(item) do
-        item_value = Map.get(item, field) || Map.get(item, String.to_atom(field))
+        item_value = get_map_value(item, field)
         item_value == value
       else
         false
@@ -264,7 +283,7 @@ defmodule Imgd.Runtime.Expression.Filters do
   def where_ne(list, field, value) when is_list(list) and is_binary(field) do
     Enum.filter(list, fn item ->
       if is_map(item) do
-        item_value = Map.get(item, field) || Map.get(item, String.to_atom(field))
+        item_value = get_map_value(item, field)
         item_value != value
       else
         true
@@ -277,9 +296,7 @@ defmodule Imgd.Runtime.Expression.Filters do
   @doc "Unique by field: {{ items | unique_by: 'id' }}"
   def unique_by(list, field) when is_list(list) and is_binary(field) do
     Enum.uniq_by(list, fn item ->
-      if is_map(item),
-        do: Map.get(item, field) || Map.get(item, String.to_atom(field)),
-        else: item
+      if is_map(item), do: get_map_value(item, field), else: item
     end)
   end
 
@@ -289,9 +306,7 @@ defmodule Imgd.Runtime.Expression.Filters do
   def index_by(list, field) when is_list(list) and is_binary(field) do
     Map.new(list, fn item ->
       key =
-        if is_map(item),
-          do: Map.get(item, field) || Map.get(item, String.to_atom(field)),
-          else: nil
+        if is_map(item), do: get_map_value(item, field), else: nil
 
       {key, item}
     end)
