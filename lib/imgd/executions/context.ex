@@ -130,9 +130,5 @@ defmodule Imgd.Executions.Context do
     end
   end
 
-  defp get_in_metadata(%Execution{metadata: nil}, _key), do: nil
-
-  defp get_in_metadata(%Execution{metadata: meta}, key) do
-    Map.get(meta, key)
-  end
+  defp get_in_metadata(%Execution{metadata: meta}, key), do: meta && Map.get(meta, key)
 end

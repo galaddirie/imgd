@@ -77,26 +77,19 @@ defmodule Imgd.Runtime.ExecutionState do
   end
 
   defp ensure_table! do
-    case :ets.whereis(@table) do
-      :undefined ->
-        try do
-          :ets.new(@table, [
-            :set,
-            :named_table,
-            :public,
-            read_concurrency: true,
-            write_concurrency: true
-          ])
-
-          :ok
-        rescue
-          ArgumentError ->
-            :ok
-        end
-
-      _table ->
-        :ok
+    if :ets.whereis(@table) == :undefined do
+      :ets.new(@table, [
+        :set,
+        :named_table,
+        :public,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
     end
+
+    :ok
+  catch
+    :error, :badarg -> :ok
   end
 
   defp table_created?, do: :ets.whereis(@table) != :undefined
