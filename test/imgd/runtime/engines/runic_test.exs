@@ -66,7 +66,9 @@ defmodule Imgd.Runtime.Engines.RunicTest do
       assert Enum.at(node_execs, 0).output_data == %{"output" => "result"}
     end
 
-    test "handle_node_completed creates a record if it doesn't exist (e.g. missed start)", %{execution: execution} do
+    test "handle_node_completed creates a record if it doesn't exist (e.g. missed start)", %{
+      execution: execution
+    } do
       node_id = "test_node"
       node_info = %{type_id: "debug", name: "Test Node"}
       fact_complete = %{value: %{"output" => "result"}}
