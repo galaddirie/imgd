@@ -37,7 +37,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   alias Ecto.Changeset
   alias Imgd.Executions.{Context, Execution, NodeExecution, NodeExecutionBuffer}
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
-  alias Imgd.Runtime.{ExecutionState, NodeExecutor}
+  alias Imgd.Runtime.{ExecutionState, NodeExecutor, Serializer}
   alias Imgd.Runtime.Expression.Evaluator
 
   # ===========================================================================
@@ -386,7 +386,7 @@ defmodule Imgd.Runtime.Engines.Runic do
     ExecutionState.record_start_time(execution.id, node_id, System.monotonic_time(:millisecond))
 
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    input_data = wrap_for_db(fact.value)
+    input_data = Serializer.wrap_for_db(fact.value)
 
     attrs = %{
       execution_id: execution.id,
@@ -445,7 +445,7 @@ defmodule Imgd.Runtime.Engines.Runic do
       end
 
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    output_data = wrap_for_db(fact.value)
+    output_data = Serializer.wrap_for_db(fact.value)
 
     node_exec =
       case ExecutionState.fetch_node_execution(execution.id, node_id) do
@@ -564,33 +564,8 @@ defmodule Imgd.Runtime.Engines.Runic do
   end
 
   defp serialize_event(event) do
-    event
-    |> Map.from_struct()
-    |> Map.new(fn {k, v} -> {to_string(k), serialize_value(v)} end)
+    Serializer.sanitize(event, :string)
   end
-
-  defp serialize_value(value) when is_atom(value), do: to_string(value)
-
-  defp serialize_value(value) when is_struct(value),
-    do: value |> Map.from_struct() |> serialize_value()
-
-  defp serialize_value(value) when is_tuple(value),
-    do: value |> Tuple.to_list() |> serialize_value()
-
-  defp serialize_value(value) when is_map(value),
-    do: Map.new(value, fn {k, v} -> {serialize_key(k), serialize_value(v)} end)
-
-  defp serialize_value(value) when is_list(value), do: Enum.map(value, &serialize_value/1)
-
-  defp serialize_value(value) when is_pid(value) or is_port(value) or is_reference(value),
-    do: inspect(value)
-
-  defp serialize_value(value) when is_function(value), do: inspect(value)
-  defp serialize_value(value), do: value
-
-  defp serialize_key(key) when is_atom(key), do: to_string(key)
-  defp serialize_key(key) when is_binary(key), do: key
-  defp serialize_key(key), do: inspect(key)
 
   # ===========================================================================
   # Output Helpers
@@ -603,53 +578,4 @@ defmodule Imgd.Runtime.Engines.Runic do
       multiple -> %{"results" => multiple}
     end
   end
-
-  # ===========================================================================
-  # Data Serialization
-  # ===========================================================================
-
-  defp wrap_for_db(value) when is_map(value) and not is_struct(value) do
-    sanitize_map_for_json(value)
-  end
-
-  defp wrap_for_db(value) when is_struct(value) do
-    value |> Map.from_struct() |> wrap_for_db()
-  end
-
-  defp wrap_for_db(nil), do: nil
-
-  defp wrap_for_db(value) do
-    %{"value" => sanitize_value_for_json(value)}
-  end
-
-  defp sanitize_map_for_json(map) when is_map(map) do
-    Map.new(map, fn {k, v} -> {sanitize_key(k), sanitize_value_for_json(v)} end)
-  end
-
-  defp sanitize_value_for_json(value) when is_struct(value),
-    do: value |> Map.from_struct() |> sanitize_map_for_json()
-
-  defp sanitize_value_for_json(value) when is_map(value),
-    do: sanitize_map_for_json(value)
-
-  defp sanitize_value_for_json(value) when is_list(value),
-    do: Enum.map(value, &sanitize_value_for_json/1)
-
-  defp sanitize_value_for_json(value) when is_tuple(value),
-    do: value |> Tuple.to_list() |> sanitize_value_for_json()
-
-  defp sanitize_value_for_json(value) when is_pid(value) or is_port(value) or is_reference(value),
-    do: inspect(value)
-
-  defp sanitize_value_for_json(value) when is_function(value), do: inspect(value)
-
-  defp sanitize_value_for_json(value)
-       when is_atom(value) and not is_boolean(value) and not is_nil(value),
-       do: to_string(value)
-
-  defp sanitize_value_for_json(value), do: value
-
-  defp sanitize_key(key) when is_atom(key), do: to_string(key)
-  defp sanitize_key(key) when is_binary(key), do: key
-  defp sanitize_key(key), do: inspect(key)
 end

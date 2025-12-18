@@ -47,7 +47,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   alias Imgd.Repo
   alias Imgd.Executions.{Execution, Context}
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
-  alias Imgd.Runtime.{ExecutionEngine, ExecutionState}
+  alias Imgd.Runtime.{ExecutionEngine, ExecutionState, Serializer}
   alias Imgd.Observability.Instrumentation
 
   @default_timeout_ms 300_000
@@ -153,8 +153,8 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp mark_completed(%Execution{} = execution, output, node_outputs, engine_logs) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    sanitized_output = sanitize_for_json(output)
-    sanitized_context = sanitize_for_json(node_outputs)
+    sanitized_output = Serializer.sanitize(output, :string)
+    sanitized_context = Serializer.sanitize(node_outputs, :string)
 
     update_attrs = %{
       status: :completed,
@@ -374,31 +374,4 @@ defmodule Imgd.Runtime.WorkflowRunner do
         %{"type" => "unknown", "reason" => inspect(other)}
     end
   end
-
-  # ===========================================================================
-  # JSON Serialization
-  # ===========================================================================
-
-  defp sanitize_for_json(value) when is_atom(value), do: to_string(value)
-
-  defp sanitize_for_json(value) when is_struct(value),
-    do: value |> Map.from_struct() |> sanitize_for_json()
-
-  defp sanitize_for_json(value) when is_tuple(value),
-    do: value |> Tuple.to_list() |> sanitize_for_json()
-
-  defp sanitize_for_json(value) when is_map(value),
-    do: Map.new(value, fn {k, v} -> {sanitize_key(k), sanitize_for_json(v)} end)
-
-  defp sanitize_for_json(value) when is_list(value), do: Enum.map(value, &sanitize_for_json/1)
-
-  defp sanitize_for_json(value) when is_pid(value) or is_port(value) or is_reference(value),
-    do: inspect(value)
-
-  defp sanitize_for_json(value) when is_function(value), do: inspect(value)
-  defp sanitize_for_json(value), do: value
-
-  defp sanitize_key(key) when is_atom(key), do: to_string(key)
-  defp sanitize_key(key) when is_binary(key), do: key
-  defp sanitize_key(key), do: inspect(key)
 end
