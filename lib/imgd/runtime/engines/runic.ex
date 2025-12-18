@@ -33,6 +33,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   alias Runic.Workflow.{Components, Step}
   alias Imgd.Graph
   alias Imgd.Workflows.WorkflowVersion
+  alias Imgd.Workflows.Workflow, as: ImgdWorkflow
   alias Imgd.Workflows.Embeds.Node
   alias Ecto.Changeset
   alias Imgd.Executions.{Context, Execution, NodeExecution, NodeExecutionBuffer}
@@ -45,16 +46,17 @@ defmodule Imgd.Runtime.Engines.Runic do
   # ===========================================================================
 
   @impl true
-  def build(%WorkflowVersion{} = version, %Context{} = context, execution, state_store) do
-    with {:ok, graph} <- Graph.from_workflow(version.nodes, version.connections),
+  def build(source, %Context{} = context, execution, state_store)
+      when is_struct(source, WorkflowVersion) or is_struct(source, ImgdWorkflow) do
+    with {:ok, graph} <- Graph.from_workflow(source.nodes, source.connections),
          {:ok, sorted_ids} <- Graph.topological_sort(graph) do
-      node_map = Map.new(version.nodes, &{&1.id, &1})
+      node_map = Map.new(source.nodes, &{&1.id, &1})
       sorted_nodes = Enum.map(sorted_ids, &Map.fetch!(node_map, &1))
 
       if execution do
-        build_with_hooks(sorted_nodes, graph, context, version, execution, state_store)
+        build_with_hooks(sorted_nodes, graph, context, source, execution, state_store)
       else
-        build_simple(sorted_nodes, graph, context, version, state_store)
+        build_simple(sorted_nodes, graph, context, source, state_store)
       end
     else
       {:error, {:invalid_edges, edges}} ->
@@ -68,8 +70,8 @@ defmodule Imgd.Runtime.Engines.Runic do
     end
   end
 
-  def build(%WorkflowVersion{} = version, %Context{} = context, execution) do
-    build(version, context, execution, ExecutionState)
+  def build(source, %Context{} = context, execution) do
+    build(source, context, execution, ExecutionState)
   end
 
   @impl true
@@ -112,17 +114,18 @@ defmodule Imgd.Runtime.Engines.Runic do
 
   @impl true
   def build_partial(
-        %WorkflowVersion{} = version,
+        source,
         %Context{} = context,
         %Execution{} = execution,
         opts,
         state_store
-      ) do
+      )
+      when is_struct(source, WorkflowVersion) or is_struct(source, ImgdWorkflow) do
     target_node_ids = Keyword.get(opts, :target_nodes, [])
     pinned_outputs = Keyword.get(opts, :pinned_outputs, %{})
     include_targets = Keyword.get(opts, :include_targets, true)
 
-    with {:ok, graph} <- Graph.from_workflow(version.nodes, version.connections) do
+    with {:ok, graph} <- Graph.from_workflow(source.nodes, source.connections) do
       pinned_ids = Map.keys(pinned_outputs)
 
       # Get execution subgraph
@@ -135,14 +138,14 @@ defmodule Imgd.Runtime.Engines.Runic do
       nodes_to_run = Graph.vertex_ids(exec_subgraph)
 
       if nodes_to_run == [] do
-        {:ok, build_empty_workflow(version)}
+        {:ok, build_empty_workflow(source)}
       else
-        # Build partial version with filtered nodes/connections
-        filtered_nodes = Enum.filter(version.nodes, &(&1.id in nodes_to_run))
+        # Build partial source with filtered nodes/connections
+        filtered_nodes = Enum.filter(source.nodes, &(&1.id in nodes_to_run))
 
         # Include connections where source is either in the run set OR pinned
         filtered_connections =
-          Enum.filter(version.connections, fn c ->
+          Enum.filter(source.connections, fn c ->
             source_in_set = c.source_node_id in nodes_to_run
             target_in_set = c.target_node_id in nodes_to_run
             source_is_pinned = c.source_node_id in pinned_ids
@@ -150,7 +153,7 @@ defmodule Imgd.Runtime.Engines.Runic do
             (source_in_set or source_is_pinned) and target_in_set
           end)
 
-        partial_version = %{version | nodes: filtered_nodes, connections: filtered_connections}
+        partial_source = %{source | nodes: filtered_nodes, connections: filtered_connections}
 
         # Merge pinned outputs into context
         context_with_pins = %{
@@ -162,27 +165,41 @@ defmodule Imgd.Runtime.Engines.Runic do
           state_store.record_output(context.execution_id, node_id, output)
         end
 
-        build(partial_version, context_with_pins, execution, state_store)
+        build(partial_source, context_with_pins, execution, state_store)
       end
     end
   end
 
   def build_partial(
-        %WorkflowVersion{} = version,
+        source,
         %Context{} = context,
         %Execution{} = execution,
         opts \\ []
       ) do
-    build_partial(version, context, execution, opts, ExecutionState)
+    build_partial(source, context, execution, opts, ExecutionState)
   end
 
   # ===========================================================================
   # Workflow Building
   # ===========================================================================
 
-  defp build_with_hooks(sorted_nodes, graph, context, version, execution, state_store) do
+  defp build_with_hooks(sorted_nodes, graph, context, source, execution, state_store) do
+    version_tag =
+      cond do
+        is_struct(source, WorkflowVersion) -> source.version_tag
+        is_struct(source, ImgdWorkflow) -> source.current_version_tag || "draft"
+        true -> "unknown"
+      end
+
+    workflow_id =
+      cond do
+        is_struct(source, WorkflowVersion) -> source.workflow_id
+        is_struct(source, ImgdWorkflow) -> source.id
+        true -> "unknown"
+      end
+
     base_workflow =
-      Runic.workflow(name: "workflow_#{version.workflow_id}_v#{version.version_tag}")
+      Runic.workflow(name: "workflow_#{workflow_id}_v#{version_tag}")
 
     node_info_map = Map.new(sorted_nodes, &{&1.id, %{type_id: &1.type_id, name: &1.name}})
 
@@ -216,9 +233,23 @@ defmodule Imgd.Runtime.Engines.Runic do
       {:error, {:build_failed, Exception.message(e)}}
   end
 
-  defp build_simple(sorted_nodes, graph, context, version, state_store) do
+  defp build_simple(sorted_nodes, graph, context, source, state_store) do
+    version_tag =
+      cond do
+        is_struct(source, WorkflowVersion) -> source.version_tag
+        is_struct(source, ImgdWorkflow) -> source.current_version_tag || "draft"
+        true -> "unknown"
+      end
+
+    workflow_id =
+      cond do
+        is_struct(source, WorkflowVersion) -> source.workflow_id
+        is_struct(source, ImgdWorkflow) -> source.id
+        true -> "unknown"
+      end
+
     base_workflow =
-      Runic.workflow(name: "workflow_#{version.workflow_id}_v#{version.version_tag}")
+      Runic.workflow(name: "workflow_#{workflow_id}_v#{version_tag}")
 
     {workflow, _step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
@@ -248,8 +279,15 @@ defmodule Imgd.Runtime.Engines.Runic do
       {:error, {:build_failed, Exception.message(e)}}
   end
 
-  defp build_empty_workflow(version) do
-    Runic.workflow(name: "empty_partial_#{version.workflow_id}")
+  defp build_empty_workflow(source) do
+    id =
+      cond do
+        is_struct(source, WorkflowVersion) -> source.workflow_id
+        is_struct(source, ImgdWorkflow) -> source.id
+        true -> "unknown"
+      end
+
+    Runic.workflow(name: "empty_partial_#{id}")
   end
 
   defp create_step(%Node{} = node, %Context{} = context, state_store) do

@@ -111,7 +111,7 @@ defmodule Imgd.Executions do
         attrs
         |> drop_protected_execution_keys()
         |> Map.put(:workflow_id, workflow.id)
-        |> Map.put(:workflow_version_id, version.id)
+        |> Map.put(:workflow_version_id, if(version, do: version.id, else: nil))
         |> Map.put_new(:triggered_by_user_id, scope.user.id)
 
       %Execution{}
@@ -350,12 +350,13 @@ defmodule Imgd.Executions do
   """
   def execute_node(%Scope{} = scope, %Workflow{} = workflow, node_id, opts \\ []) do
     with :ok <- authorize_workflow(scope, workflow),
-         {:ok, _node} <- find_workflow_node(workflow, node_id),
-         {:ok, version} <- resolve_execution_version(workflow) do
+         {:ok, _node} <- find_workflow_node(workflow, node_id) do
       pinned_outputs = Imgd.Workflows.extract_pinned_data(workflow)
       trigger_data = Keyword.get(opts, :trigger_data, %{})
+      version_id = Keyword.get(opts, :workflow_version_id)
 
       attrs = %{
+        workflow_version_id: version_id,
         trigger: %{type: :manual, data: trigger_data},
         metadata: %{
           extras: %{
@@ -366,7 +367,9 @@ defmodule Imgd.Executions do
         }
       }
 
-      execute_partial(scope, workflow, version, [node_id], pinned_outputs, attrs, opts)
+      # If no version_id provided, we try to resolve one for validation
+      # but execute_partial calls start_execution which does its own resolution
+      execute_partial(scope, workflow, nil, [node_id], pinned_outputs, attrs, opts)
     end
   end
 
@@ -413,7 +416,10 @@ defmodule Imgd.Executions do
     context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
 
     builder_fun = fn ->
-      WorkflowBuilder.build_partial(execution.workflow_version, context, execution,
+      WorkflowBuilder.build_partial(
+        execution.workflow_version || execution.workflow,
+        context,
+        execution,
         target_nodes: target_nodes,
         pinned_outputs: pinned_outputs
       )
@@ -441,31 +447,6 @@ defmodule Imgd.Executions do
     case Enum.find(nodes || [], &(&1.id == node_id)) do
       nil -> {:error, :node_not_found}
       node -> {:ok, node}
-    end
-  end
-
-  defp resolve_execution_version(%Workflow{} = workflow) do
-    cond do
-      workflow.published_version_id ->
-        case Repo.get(WorkflowVersion, workflow.published_version_id) do
-          nil -> {:error, :version_not_found}
-          v -> {:ok, v}
-        end
-
-      length(workflow.nodes || []) > 0 ->
-        {:ok,
-         %WorkflowVersion{
-           id: Ecto.UUID.generate(),
-           workflow_id: workflow.id,
-           nodes: workflow.nodes,
-           connections: workflow.connections,
-           triggers: workflow.triggers,
-           version_tag: "draft",
-           source_hash: "draft"
-         }}
-
-      true ->
-        {:error, :no_executable_version}
     end
   end
 
@@ -518,6 +499,9 @@ defmodule Imgd.Executions do
       Map.get(attrs, :workflow_version_id) || Map.get(attrs, "workflow_version_id")
 
     cond do
+      provided_version_id == "draft" ->
+        {:ok, nil}
+
       match?(%WorkflowVersion{}, provided_version) ->
         validate_version_belongs(workflow, provided_version)
 

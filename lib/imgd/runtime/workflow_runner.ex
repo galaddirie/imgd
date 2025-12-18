@@ -122,7 +122,9 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   defp build_workflow(execution, context, state_store) do
-    case WorkflowBuilder.build(execution.workflow_version, context, execution, state_store) do
+    source = execution.workflow_version || execution.workflow
+
+    case WorkflowBuilder.build(source, context, execution, state_store) do
       {:ok, executable} ->
         {:ok, executable}
 
@@ -304,13 +306,16 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   defp get_timeout_ms(%Execution{} = execution) do
-    case execution.workflow_version do
-      %{workflow: %{settings: settings}} when is_map(settings) ->
-        Map.get(settings, "timeout_ms") || Map.get(settings, :timeout_ms) || @default_timeout_ms
+    source = execution.workflow_version || execution.workflow
 
-      _ ->
-        @default_timeout_ms
-    end
+    settings =
+      case source do
+        %{workflow: %{settings: s}} when is_map(s) -> s
+        %{settings: s} when is_map(s) -> s
+        _ -> %{}
+      end
+
+    Map.get(settings, "timeout_ms") || Map.get(settings, :timeout_ms) || @default_timeout_ms
   end
 
   # ===========================================================================

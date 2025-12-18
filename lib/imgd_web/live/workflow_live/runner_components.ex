@@ -47,6 +47,8 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   attr :running?, :boolean, default: false
   attr :can_run?, :boolean, default: true
   attr :run_form_error, :string, default: nil
+  attr :versions, :list, default: []
+  attr :selected_version_id, :string, default: "draft"
 
   def run_panel(assigns) do
     ~H"""
@@ -63,9 +65,9 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             <.icon name="hero-rocket-launch" class="size-5" />
           </div>
           <div class="space-y-0.5">
-            <p class="text-sm font-semibold text-base-content">Manual Run Input</p>
+            <p class="text-sm font-semibold text-base-content">Execution Settings</p>
             <p class="text-xs text-base-content/60">
-              Provide JSON for your trigger payload or load one of the demo presets.
+              Choose source version and provide input payload.
             </p>
           </div>
         </div>
@@ -79,21 +81,39 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
 
       <div class="p-4 space-y-4">
         <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          <div class="xl:col-span-2 space-y-2">
-            <.input
-              field={@run_form[:data]}
-              type="textarea"
-              label="Initial data (JSON)"
-              rows="8"
-              spellcheck="false"
-              class="textarea w-full font-mono text-sm leading-relaxed"
-              placeholder='{"user_id": 1}'
-            />
-            <div class="flex items-center justify-between text-xs text-base-content/60">
-              <span>Blank value sends an empty map.</span>
-              <span :if={@run_form_error} class="text-error font-medium">
-                {@run_form_error}
-              </span>
+          <div class="xl:col-span-2 space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <.input
+                field={@run_form[:version_id]}
+                type="select"
+                label="Workflow Version"
+                options={[
+                  {"Draft (Current Changes)", "draft"}
+                  | Enum.map(
+                      @versions,
+                      &{"v#{&1.version_tag} - #{format_relative_time(&1.published_at)}", &1.id}
+                    )
+                ]}
+                class="select select-bordered w-full select-sm h-10"
+              />
+            </div>
+
+            <div class="space-y-2">
+              <.input
+                field={@run_form[:data]}
+                type="textarea"
+                label="Initial data (JSON)"
+                rows="8"
+                spellcheck="false"
+                class="textarea w-full font-mono text-sm leading-relaxed"
+                placeholder='{"user_id": 1}'
+              />
+              <div class="flex items-center justify-between text-xs text-base-content/60">
+                <span>Blank value sends an empty map.</span>
+                <span :if={@run_form_error} class="text-error font-medium">
+                  {@run_form_error}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -160,7 +180,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               <span>{if @running?, do: "Running...", else: "Run workflow"}</span>
             </button>
             <span :if={not @can_run?} class="text-xs text-warning">
-              Publish the workflow to enable runs.
+              Add nodes to the workflow to enable runs.
             </span>
           </div>
         </div>
@@ -173,7 +193,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   # Component: DAG Panel
   # ============================================================================
 
-  attr :workflow, :map, required: true
+  attr :nodes, :list, required: true
   attr :layout, :map, required: true
   attr :edges, :list, required: true
   attr :meta, :map, required: true
@@ -195,16 +215,16 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         <div class="flex items-center gap-3">
           <.execution_progress_indicator
             node_states={@node_states}
-            node_count={length(@workflow.nodes || [])}
+            node_count={length(@nodes)}
           />
           <span class="text-xs text-base-content/60">
-            {length(@workflow.nodes || [])} nodes
+            {length(@nodes)} nodes
           </span>
         </div>
       </div>
 
       <div class="p-4 overflow-auto bg-base-200/30" style="max-height: 600px;">
-        <%= if @workflow.nodes == [] or is_nil(@workflow.nodes) do %>
+        <%= if @nodes == [] or is_nil(@nodes) do %>
           <div class="flex flex-col items-center justify-center py-16 text-base-content/60">
             <.icon name="hero-cube-transparent" class="size-12 mb-3 opacity-50" />
             <p class="text-sm">No nodes in this workflow</p>
@@ -267,7 +287,6 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               >
                 <polygon points="0 0, 10 3.5, 0 7" class="fill-error" />
               </marker>
-
               <style>
                 @keyframes dash-flow {
                   to { stroke-dashoffset: -20; }
@@ -286,7 +305,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             </g>
 
             <g class="nodes">
-              <%= for node <- @workflow.nodes || [] do %>
+              <%= for node <- @nodes do %>
                 <% pos = Map.get(@layout, node.id, %{x: 0, y: 0}) %>
                 <% state = Map.get(@node_states, node.id, %{}) %>
                 <% pin_info = Map.get(@pins_with_status, node.id) %>

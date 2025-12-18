@@ -782,7 +782,7 @@ defmodule ImgdWeb.CoreComponents do
       @hover && "hover:shadow-lg hover:ring-base-200",
       @class
     ]}>
-
+      
     <!-- header -->
       <div
         :if={@header != []}
@@ -792,17 +792,17 @@ defmodule ImgdWeb.CoreComponents do
           {render_slot(@header)}
         </div>
       </div>
-
+      
     <!-- body -->
       <div class="card-body px-6 py-5 gap-3">
         {render_slot(@content)}
-
+        
     <!-- actions row (optional) -->
         <div :if={@actions != []} class="card-actions mt-1 justify-start">
           {render_slot(@actions)}
         </div>
       </div>
-
+      
     <!-- footer (optional) -->
       <div :if={@footer != []} class="border-t border-base-200 px-6 py-3">
         {render_slot(@footer)}

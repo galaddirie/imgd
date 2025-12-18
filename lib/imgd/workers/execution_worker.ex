@@ -116,7 +116,7 @@ defmodule Imgd.Workers.ExecutionWorker do
 
     builder_fun = fn ->
       WorkflowBuilder.build_partial(
-        execution.workflow_version,
+        execution.workflow_version || execution.workflow,
         context,
         execution,
         [

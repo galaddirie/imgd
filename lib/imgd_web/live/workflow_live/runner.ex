@@ -31,31 +31,28 @@ defmodule ImgdWeb.WorkflowLive.Runner do
          |> redirect(to: ~p"/workflows")}
 
       workflow ->
-        {layout, layout_meta} =
-          DagLayout.compute_with_metadata(workflow.nodes || [], workflow.connections || [])
-
-        edges = DagLayout.compute_edges(workflow.connections || [], layout)
-        node_map = Map.new(workflow.nodes || [], &{&1.id, &1})
+        {:ok, versions} = Workflows.list_workflow_versions(scope, workflow)
+        versions_map = Map.new(versions, &{&1.id, &1})
 
         demo_inputs = workflow_demo_inputs(workflow)
         initial_demo = List.first(demo_inputs)
         initial_payload = if(initial_demo, do: initial_demo.data, else: %{})
-        run_form = build_run_form(initial_payload)
+        run_form = build_run_form(initial_payload, version_id: "draft")
 
         socket =
           socket
           |> assign(:page_title, "Run: #{workflow.name}")
           |> assign(:workflow, workflow)
-          |> assign(:node_map, node_map)
-          |> assign(:dag_layout, layout)
-          |> assign(:dag_edges, edges)
-          |> assign(:dag_meta, layout_meta)
+          |> assign(:versions, versions)
+          |> assign(:versions_map, versions_map)
+          |> assign(:selected_version_id, "draft")
+          |> assign_source_graph(workflow)
           |> assign(:execution, nil)
           |> assign(:execution_context, nil)
           |> assign(:node_states, %{})
           |> assign(:selected_node_id, nil)
           |> assign(:running?, false)
-          |> assign(:can_run?, workflow.published_version_id != nil)
+          |> assign(:can_run?, length(workflow.nodes || []) > 0)
           |> assign(:trace_log_count, 0)
           |> assign(:demo_inputs, demo_inputs)
           |> assign(:selected_demo, initial_demo)
@@ -75,11 +72,31 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     end
   end
 
+  defp assign_source_graph(socket, source) do
+    nodes = source.nodes || []
+    connections = source.connections || []
+
+    {layout, layout_meta} =
+      DagLayout.compute_with_metadata(nodes, connections)
+
+    edges = DagLayout.compute_edges(connections, layout)
+    node_map = Map.new(nodes, &{&1.id, &1})
+
+    socket
+    |> assign(:graph_nodes, nodes)
+    |> assign(:dag_layout, layout)
+    |> assign(:dag_edges, edges)
+    |> assign(:dag_meta, layout_meta)
+    |> assign(:node_map, node_map)
+  end
+
   @impl true
   def handle_params(%{"execution_id" => execution_id}, _uri, socket) do
     scope = socket.assigns.current_scope
 
-    case Executions.get_execution(scope, execution_id, preload: [:node_executions]) do
+    case Executions.get_execution(scope, execution_id,
+           preload: [:node_executions, :workflow_version]
+         ) do
       nil ->
         {:noreply, put_flash(socket, :error, "Execution not found")}
 
@@ -90,12 +107,24 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         # Build execution context for expression preview
         exec_context = build_execution_context(execution, node_states)
 
+        # Source for graph rendering
+        source = execution.workflow_version || socket.assigns.workflow
+
+        version_id =
+          if execution.workflow_version, do: execution.workflow_version.id, else: "draft"
+
         socket =
           socket
           |> assign(:execution, execution)
           |> assign(:execution_context, exec_context)
           |> assign(:node_states, node_states)
           |> assign(:running?, Execution.active?(execution))
+          |> assign(:selected_version_id, version_id)
+          |> assign(
+            :run_form,
+            build_run_form(get_trigger_data_from_execution(execution), version_id: version_id)
+          )
+          |> assign_source_graph(source)
           |> maybe_stream_existing_logs(execution)
 
         {:noreply, socket}
@@ -106,11 +135,21 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     {:noreply, socket}
   end
 
+  defp get_trigger_data_from_execution(execution) do
+    data = Execution.trigger_data(execution)
+
+    case Jason.encode(data, pretty: true) do
+      {:ok, json} -> json
+      _ -> "{}"
+    end
+  end
+
   # ============================================================================
   # Build Execution Context for Expression Preview
   # ============================================================================
 
   defp build_execution_context(nil, _), do: nil
+
   defp build_execution_context(%Execution{} = execution, node_states) do
     # Build node outputs from node_states
     node_outputs =
@@ -174,12 +213,29 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   end
 
   @impl true
-  def handle_event("update_payload", %{"run" => %{"data" => data}}, socket) do
-    data = data || ""
+  def handle_event("update_payload", %{"run" => params}, socket) do
+    data = Map.get(params, "data", "")
+    version_id = Map.get(params, "version_id", "draft")
+
+    socket =
+      if version_id != socket.assigns.selected_version_id do
+        source =
+          if version_id == "draft" do
+            socket.assigns.workflow
+          else
+            Map.get(socket.assigns.versions_map, version_id)
+          end
+
+        socket
+        |> assign(:selected_version_id, version_id)
+        |> assign_source_graph(source)
+      else
+        socket
+      end
 
     socket =
       socket
-      |> assign(:run_form, build_run_form(data))
+      |> assign(:run_form, build_run_form(data, version_id: version_id))
       |> maybe_reset_selected_demo(data)
       |> assign(:run_form_error, nil)
 
@@ -283,17 +339,19 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     workflow = socket.assigns.workflow
     run_params = Map.get(params, "run", %{})
     input_string = Map.get(run_params, "data", "")
+    version_id = Map.get(run_params, "version_id", "draft")
 
     if socket.assigns.can_run? do
       with {:ok, parsed} <-
              parse_input_payload(input_string, socket.assigns.demo_inputs),
            {:ok, %{execution: execution}} <-
              Executions.start_and_enqueue_execution(scope, workflow, %{
+               workflow_version_id: version_id,
                trigger: %{type: :manual, data: parsed.trigger_data},
                metadata: build_manual_metadata(parsed.demo_label)
              }) do
         PubSub.subscribe_execution(execution.id)
-        run_form = build_run_form(input_string)
+        run_form = build_run_form(input_string, version_id: version_id)
 
         socket =
           socket
@@ -306,7 +364,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:run_form, run_form)
           |> assign(:run_form_error, nil)
           |> stream(:trace_log, [], reset: true)
-          |> append_trace_log(:info, "Execution started", %{execution_id: short_id(execution.id)})
+          |> append_trace_log(:info, "Execution started", %{
+            execution_id: short_id(execution.id),
+            version: version_id
+          })
           |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
 
         {:noreply, socket}
@@ -314,14 +375,17 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         {:error, :invalid_payload, message} ->
           {:noreply,
            socket
-           |> assign(:run_form, build_run_form(input_string, errors: [data: {message, []}]))
+           |> assign(
+             :run_form,
+             build_run_form(input_string, version_id: version_id, errors: [data: {message, []}])
+           )
            |> assign(:run_form_error, message)}
 
         {:error, reason} ->
           {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
       end
     else
-      {:noreply, put_flash(socket, :error, "Workflow must be published before running")}
+      {:noreply, put_flash(socket, :error, "Workflow must have nodes before running")}
     end
   end
 
@@ -329,8 +393,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
     trigger_data = get_trigger_data_from_form(socket)
+    version_id = socket.assigns.selected_version_id
 
     case Executions.execute_node(scope, workflow, node_id,
+           workflow_version_id: version_id,
            trigger_data: trigger_data,
            async: true,
            subscribe_fun: &PubSub.subscribe_execution/1
@@ -348,7 +414,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> stream(:trace_log, [], reset: true)
           |> append_trace_log(:info, "Partial execution started", %{
             partial: true,
-            target: node_id
+            target: node_id,
+            version: version_id
           })
           |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
           |> assign(:show_context_menu, false)
@@ -680,7 +747,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   defp build_run_form(payload, opts \\ [])
 
   defp build_run_form(payload, opts) when is_binary(payload) do
-    to_form(%{"data" => payload}, Keyword.merge([as: :run], opts))
+    version_id = Keyword.get(opts, :version_id, "draft")
+    to_form(%{"data" => payload, "version_id" => version_id}, Keyword.merge([as: :run], opts))
   end
 
   defp build_run_form(payload, opts), do: payload |> encode_payload() |> build_run_form(opts)
@@ -1028,13 +1096,15 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         running?={@running?}
         can_run?={@can_run?}
         run_form_error={@run_form_error}
+        versions={@versions}
+        selected_version_id={@selected_version_id}
       />
 
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <%!-- DAG Visualization --%>
         <div class="xl:col-span-2">
           <.dag_panel
-            workflow={@workflow}
+            nodes={@graph_nodes}
             layout={@dag_layout}
             edges={@dag_edges}
             meta={@dag_meta}

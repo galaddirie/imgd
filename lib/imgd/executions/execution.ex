@@ -154,7 +154,7 @@ defmodule Imgd.Executions.Execution do
     ])
     |> cast_embed(:trigger, required: true, with: &trigger_changeset/2)
     |> cast_embed(:metadata, with: &metadata_changeset/2)
-    |> validate_required([:workflow_version_id, :workflow_id, :status])
+    |> validate_required([:workflow_id, :status])
     |> validate_map_field(:context)
     |> validate_map_field(:output, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
