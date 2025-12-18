@@ -47,7 +47,6 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   alias Imgd.Repo
   alias Imgd.Executions.{Execution, Context}
-  alias Imgd.Executions.PubSub, as: ExecutionPubSub
   alias Imgd.Runtime.{ExecutionState, Serializer, WorkflowBuilder}
   alias Imgd.Observability.Instrumentation
 
@@ -158,7 +157,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
     case Repo.update(Execution.changeset(execution, %{status: :running, started_at: now})) do
       {:ok, execution} ->
-        ExecutionPubSub.broadcast_execution_started(execution)
+        Instrumentation.record_execution_started(execution)
         {:ok, execution}
 
       {:error, changeset} ->
@@ -168,6 +167,12 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp mark_completed(%Execution{} = execution, output, node_outputs, engine_logs) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    duration_ms =
+      case execution.started_at do
+        nil -> 0
+        started_at -> DateTime.diff(now, started_at, :millisecond)
+      end
+
     sanitized_output = Serializer.sanitize(output, :string)
     sanitized_context = Serializer.sanitize(node_outputs, :string)
 
@@ -183,7 +188,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
     case Repo.update(Execution.changeset(execution, update_attrs)) do
       {:ok, execution} ->
-        ExecutionPubSub.broadcast_execution_completed(execution)
+        Instrumentation.record_execution_completed(execution, duration_ms)
         {:ok, execution}
 
       {:error, changeset} ->
@@ -193,13 +198,19 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp mark_failed(%Execution{} = execution, reason) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    error = format_error(reason)
+    duration_ms =
+      case execution.started_at do
+        nil -> 0
+        started_at -> DateTime.diff(now, started_at, :millisecond)
+      end
+
+    error = Execution.format_error(reason)
 
     case Repo.update(
            Execution.changeset(execution, %{status: :failed, completed_at: now, error: error})
          ) do
       {:ok, execution} ->
-        ExecutionPubSub.broadcast_execution_failed(execution, error)
+        Instrumentation.record_execution_failed(execution, error, duration_ms)
         {:error, reason}
 
       {:error, changeset} ->
@@ -214,6 +225,11 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp mark_timeout(%Execution{} = execution) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    duration_ms =
+      case execution.started_at do
+        nil -> 0
+        started_at -> DateTime.diff(now, started_at, :millisecond)
+      end
 
     error = %{
       "type" => "timeout",
@@ -225,7 +241,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
            Execution.changeset(execution, %{status: :timeout, completed_at: now, error: error})
          ) do
       {:ok, execution} ->
-        ExecutionPubSub.broadcast_execution_failed(execution, error)
+        Instrumentation.record_execution_failed(execution, error, duration_ms)
         {:ok, execution}
 
       {:error, changeset} ->
@@ -344,42 +360,4 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   defp maybe_add_engine_logs(attrs, _), do: attrs
-
-  # ===========================================================================
-  # Error Formatting
-  # ===========================================================================
-
-  defp format_error(reason) do
-    case reason do
-      {:node_failed, node_id, node_reason} ->
-        %{"type" => "node_failure", "node_id" => node_id, "reason" => inspect(node_reason)}
-
-      {:workflow_build_failed, build_reason} ->
-        %{"type" => "workflow_build_failed", "reason" => inspect(build_reason)}
-
-      {:build_failed, message} ->
-        %{"type" => "build_failure", "message" => message}
-
-      {:cycle_detected, node_ids} ->
-        %{"type" => "cycle_detected", "node_ids" => node_ids}
-
-      {:invalid_connections, connections} ->
-        %{
-          "type" => "invalid_connections",
-          "connections" => Enum.map(connections, &Map.from_struct/1)
-        }
-
-      {:update_failed, changeset} ->
-        %{"type" => "update_failed", "errors" => inspect(changeset.errors)}
-
-      {:unexpected_error, message} ->
-        %{"type" => "unexpected_error", "message" => message}
-
-      {:caught_error, kind, caught_reason} ->
-        %{"type" => "caught_error", "kind" => inspect(kind), "reason" => inspect(caught_reason)}
-
-      other ->
-        %{"type" => "unknown", "reason" => inspect(other)}
-    end
-  end
 end

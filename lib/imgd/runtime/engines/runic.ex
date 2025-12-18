@@ -36,8 +36,8 @@ defmodule Imgd.Runtime.Engines.Runic do
   alias Imgd.Workflows.Embeds.Node
   alias Ecto.Changeset
   alias Imgd.Executions.{Context, Execution, NodeExecution, NodeExecutionBuffer}
-  alias Imgd.Executions.PubSub, as: ExecutionPubSub
   alias Imgd.Runtime.{ExecutionState, NodeExecutor, Serializer}
+  alias Imgd.Observability.Instrumentation
   alias Imgd.Runtime.Expression.Evaluator
 
   # ===========================================================================
@@ -384,7 +384,7 @@ defmodule Imgd.Runtime.Engines.Runic do
       {:ok, node_exec} ->
         state_store.put_node_execution(execution.id, node_id, node_exec)
         NodeExecutionBuffer.record(node_exec)
-        ExecutionPubSub.broadcast_node_started(execution, node_exec)
+        Instrumentation.record_node_started(execution, node_exec)
 
         Logger.info("Node started: #{node_name}",
           node_type: node_type_id,
@@ -398,19 +398,6 @@ defmodule Imgd.Runtime.Engines.Runic do
           errors: inspect(changeset.errors)
         )
     end
-
-    :telemetry.execute(
-      [:imgd, :engine, :node, :start],
-      %{system_time: System.system_time(), queue_time_ms: nil},
-      %{
-        execution_id: execution.id,
-        workflow_id: execution.workflow_id,
-        workflow_version_id: execution.workflow_version_id,
-        node_id: node_id,
-        node_type_id: node_type_id,
-        attempt: 1
-      }
-    )
   end
 
   defp handle_node_completed(execution, node_id, node_info, fact, state_store) do
@@ -445,7 +432,7 @@ defmodule Imgd.Runtime.Engines.Runic do
           {:ok, updated} ->
             state_store.put_node_execution(execution.id, node_id, updated)
             NodeExecutionBuffer.record(updated)
-            ExecutionPubSub.broadcast_node_completed(execution, updated)
+            Instrumentation.record_node_completed(execution, updated, duration_ms)
 
             Logger.info("Node completed: #{node_name}",
               duration_ms: duration_ms,
@@ -480,7 +467,7 @@ defmodule Imgd.Runtime.Engines.Runic do
           {:ok, node_exec} ->
             state_store.put_node_execution(execution.id, node_id, node_exec)
             NodeExecutionBuffer.record(node_exec)
-            ExecutionPubSub.broadcast_node_completed(execution, node_exec)
+            Instrumentation.record_node_completed(execution, node_exec, duration_ms)
 
             Logger.info("Node completed: #{node_name}",
               duration_ms: duration_ms,
@@ -491,20 +478,6 @@ defmodule Imgd.Runtime.Engines.Runic do
             :ok
         end
     end
-
-    :telemetry.execute(
-      [:imgd, :engine, :node, :stop],
-      %{duration_ms: duration_ms},
-      %{
-        execution_id: execution.id,
-        workflow_id: execution.workflow_id,
-        workflow_version_id: execution.workflow_version_id,
-        node_id: node_id,
-        node_type_id: node_type_id,
-        attempt: 1,
-        status: :completed
-      }
-    )
   end
 
   defp find_running_node_execution(execution_id, node_id) do

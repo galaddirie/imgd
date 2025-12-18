@@ -89,5 +89,6 @@ defmodule Imgd.Runtime.WorkflowBuilder do
     engine().execute(executable, trigger_data, context, state_store)
   end
 
-  defp engine, do: Imgd.Runtime.Engine.Behaviour.engine()
+  @doc false
+  def engine, do: Imgd.Runtime.Engine.Behaviour.engine()
 end

@@ -205,6 +205,50 @@ defmodule Imgd.Executions.Execution do
   def active?(%__MODULE__{status: status}) when status in [:pending, :running, :paused], do: true
   def active?(%__MODULE__{}), do: false
 
+  @doc """
+  Formats an execution error reason into a standard error map.
+  """
+  def format_error(reason) do
+    case reason do
+      %{"type" => _} = error ->
+        error
+
+      {:node_failed, node_id, node_reason} ->
+        %{"type" => "node_failure", "node_id" => node_id, "reason" => inspect(node_reason)}
+
+      {:workflow_build_failed, build_reason} ->
+        %{"type" => "workflow_build_failed", "reason" => inspect(build_reason)}
+
+      {:build_failed, message} ->
+        %{"type" => "build_failure", "message" => message}
+
+      {:cycle_detected, node_ids} ->
+        %{"type" => "cycle_detected", "node_ids" => node_ids}
+
+      {:invalid_connections, connections} ->
+        %{
+          "type" => "invalid_connections",
+          "connections" =>
+            Enum.map(connections, fn
+              c when is_struct(c) -> Map.from_struct(c)
+              c -> c
+            end)
+        }
+
+      {:update_failed, %Ecto.Changeset{} = changeset} ->
+        %{"type" => "update_failed", "errors" => inspect(changeset.errors)}
+
+      {:unexpected_error, message} ->
+        %{"type" => "unexpected_error", "message" => message}
+
+      {:caught_error, kind, caught_reason} ->
+        %{"type" => "caught_error", "kind" => inspect(kind), "reason" => inspect(caught_reason)}
+
+      other ->
+        %{"type" => "unknown", "reason" => inspect(other)}
+    end
+  end
+
   @doc "Computes duration in milliseconds, or nil if not yet complete."
   def duration_ms(%__MODULE__{started_at: nil}), do: nil
   def duration_ms(%__MODULE__{completed_at: nil}), do: nil

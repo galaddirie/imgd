@@ -18,7 +18,7 @@ defmodule Imgd.Executions do
   alias Imgd.Accounts.Scope
   alias Imgd.Executions.{Execution, NodeExecution, Context}
   alias Imgd.Workflows.{Workflow, WorkflowVersion}
-  alias Imgd.Runtime.WorkflowRunner
+  alias Imgd.Runtime.{WorkflowRunner, WorkflowBuilder}
   alias Imgd.Repo
 
   require Logger
@@ -413,7 +413,7 @@ defmodule Imgd.Executions do
     context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
 
     builder_fun = fn ->
-      ExecutionEngine.build_partial(execution.workflow_version, context, execution,
+      WorkflowBuilder.build_partial(execution.workflow_version, context, execution,
         target_nodes: target_nodes,
         pinned_outputs: pinned_outputs
       )

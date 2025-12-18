@@ -478,7 +478,13 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       <% end %>
 
       <%!-- Inline run controls (hover-revealed) --%>
-      <foreignObject x="8" y="-28" width="184" height="28" class="opacity-0 group-hover:opacity-100 transition duration-150">
+      <foreignObject
+        x="8"
+        y="-28"
+        width="184"
+        height="28"
+        class="opacity-0 group-hover:opacity-100 transition duration-150"
+      >
         <div class="w-full flex items-center justify-end gap-2 pointer-events-auto">
           <button
             type="button"

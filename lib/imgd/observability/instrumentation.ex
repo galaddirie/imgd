@@ -16,7 +16,7 @@ defmodule Imgd.Observability.Instrumentation do
 
   ## Node Tracing
 
-  Node-level tracing is handled via Runic hooks installed by WorkflowBuilder.
+  Node-level tracing is handled via Runic hooks installed by the execution engine.
   This ensures all node lifecycle events (start/complete/fail) are tracked
   consistently with proper timing, PubSub broadcasts, and telemetry.
 
@@ -34,6 +34,116 @@ defmodule Imgd.Observability.Instrumentation do
 
   alias OpenTelemetry.Ctx
   alias Imgd.Executions.Execution
+  alias Imgd.Executions.NodeExecution
+  alias Imgd.Executions.PubSub, as: ExecutionPubSub
+
+  # ============================================================================
+  # Execution Lifecycle
+  # ============================================================================
+
+  @doc """
+  Records that an execution has started.
+  """
+  def record_execution_started(%Execution{} = execution) do
+    emit_execution_start(execution)
+    ExecutionPubSub.broadcast_execution_started(execution)
+  end
+
+  @doc """
+  Records that an execution has completed successfully.
+  """
+  def record_execution_completed(%Execution{} = execution, duration_ms) do
+    emit_execution_stop(execution, :completed, duration_ms)
+    ExecutionPubSub.broadcast_execution_completed(execution)
+  end
+
+  @doc """
+  Records that an execution has failed.
+  """
+  def record_execution_failed(%Execution{} = execution, reason, duration_ms) do
+    error = Execution.format_error(reason)
+    record_span_error(error)
+    emit_execution_stop(execution, :failed, duration_ms)
+    ExecutionPubSub.broadcast_execution_failed(execution, error)
+  end
+
+  # ============================================================================
+  # Node Lifecycle
+  # ============================================================================
+
+  @doc """
+  Records that a node has started executing.
+  """
+  def record_node_started(%Execution{} = execution, %NodeExecution{} = node_execution) do
+    :telemetry.execute(
+      [:imgd, :engine, :node, :start],
+      %{system_time: System.system_time(), queue_time_ms: nil},
+      %{
+        execution_id: execution.id,
+        workflow_id: execution.workflow_id,
+        workflow_version_id: execution.workflow_version_id,
+        node_id: node_execution.node_id,
+        node_type_id: node_execution.node_type_id,
+        attempt: node_execution.attempt
+      }
+    )
+
+    ExecutionPubSub.broadcast_node_started(execution, node_execution)
+  end
+
+  @doc """
+  Records that a node has completed successfully.
+  """
+  def record_node_completed(
+        %Execution{} = execution,
+        %NodeExecution{} = node_execution,
+        duration_ms
+      ) do
+    :telemetry.execute(
+      [:imgd, :engine, :node, :stop],
+      %{duration_ms: duration_ms},
+      %{
+        execution_id: execution.id,
+        workflow_id: execution.workflow_id,
+        workflow_version_id: execution.workflow_version_id,
+        node_id: node_execution.node_id,
+        node_type_id: node_execution.node_type_id,
+        attempt: node_execution.attempt,
+        status: :completed
+      }
+    )
+
+    ExecutionPubSub.broadcast_node_completed(execution, node_execution)
+  end
+
+  @doc """
+  Records that a node has failed.
+  """
+  def record_node_failed(
+        %Execution{} = execution,
+        %NodeExecution{} = node_execution,
+        reason,
+        duration_ms
+      ) do
+    error = Execution.format_error(reason)
+
+    :telemetry.execute(
+      [:imgd, :engine, :node, :stop],
+      %{duration_ms: duration_ms},
+      %{
+        execution_id: execution.id,
+        workflow_id: execution.workflow_id,
+        workflow_version_id: execution.workflow_version_id,
+        node_id: node_execution.node_id,
+        node_type_id: node_execution.node_type_id,
+        attempt: node_execution.attempt,
+        status: :failed,
+        error: error
+      }
+    )
+
+    ExecutionPubSub.broadcast_node_failed(execution, node_execution, error)
+  end
 
   # ============================================================================
   # Execution Tracing
@@ -61,7 +171,7 @@ defmodule Imgd.Observability.Instrumentation do
       ctx = build_trace_context(execution)
       attach_logger_metadata(ctx)
 
-      # Only emit telemetry events here - PubSub and logging happens in WorkflowRunner
+      # PubSub and logging moved to separate functions called by WorkflowRunner/Engines
       emit_execution_start(execution)
 
       try do
@@ -69,12 +179,16 @@ defmodule Imgd.Observability.Instrumentation do
         duration_ms = monotonic_duration_ms(start_time)
 
         case result do
+          {:ok, updated_execution} when is_struct(updated_execution, Execution) ->
+            emit_execution_stop(updated_execution, :completed, duration_ms)
+            result
+
           {:ok, _} = success ->
             emit_execution_stop(execution, :completed, duration_ms)
             success
 
           {:error, reason} = error ->
-            record_span_error(reason)
+            record_span_error(Execution.format_error(reason))
             emit_execution_stop(execution, :failed, duration_ms)
             error
         end
