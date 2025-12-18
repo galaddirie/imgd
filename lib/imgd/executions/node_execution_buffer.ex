@@ -79,8 +79,8 @@ defmodule Imgd.Executions.NodeExecutionBuffer do
     {:noreply, %{state | timer_ref: schedule_flush()}}
   end
 
-  defp buffer_key(%{execution_id: execution_id, node_id: node_id, attempt: attempt}) do
-    {execution_id, node_id, attempt}
+  defp buffer_key(%{execution_id: execution_id, node_id: node_id, id: id}) do
+    {execution_id, node_id, id}
   end
 
   defp attrs_from_node_exec(%NodeExecution{} = node_exec) do
@@ -131,15 +131,17 @@ defmodule Imgd.Executions.NodeExecutionBuffer do
         on_conflict: {:replace, @updatable_fields},
         conflict_target: [:id]
       )
+
+      %{state | buffer: %{}}
     rescue
       e ->
         Logger.warning("Failed to flush node execution buffer",
           error: Exception.message(e),
           entries: length(entries)
         )
-    end
 
-    %{state | buffer: %{}}
+        state
+    end
   end
 
   defp schedule_flush do
