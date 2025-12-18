@@ -1,4 +1,6 @@
-Refactor dag utils - we need to have better single source of truth for dag operations and logic - important for Design a deterministic dependency-inference system for a workflow graph where expressions may reference other nodes
+Refactor dag utils - we need better graph primitives we can use as building blocks for creating features
+
+its also important to  have better single source of truth for dag operations and logic - important for Design a deterministic dependency-inference system for a workflow graph where expressions may reference other nodes
 
 Code style checks
 ability to edit and pin node data in the ui,
