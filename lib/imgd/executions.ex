@@ -17,9 +17,9 @@ defmodule Imgd.Executions do
 
   alias Imgd.Accounts.Scope
   alias Imgd.Executions.{Execution, NodeExecution, Context}
-  alias Imgd.Executions.PubSub, as: ExecutionPubSub
-  alias Imgd.Workflows.{Workflow, WorkflowVersion, DagUtils}
-  alias Imgd.Runtime.{WorkflowBuilder, WorkflowRunner, ExecutionState}
+  alias Imgd.Workflows.{Workflow, WorkflowVersion}
+  alias Imgd.Graph
+  alias Imgd.Runtime.{WorkflowBuilder, WorkflowRunner}
   alias Imgd.Repo
 
   require Logger
@@ -391,8 +391,8 @@ defmodule Imgd.Executions do
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, version} <- resolve_execution_version(workflow),
          :ok <- validate_node_pinned(workflow, from_node_id) do
-      downstream_ids =
-        DagUtils.downstream_closure(from_node_id, workflow.nodes, workflow.connections)
+      graph = Graph.from_workflow!(workflow.nodes, workflow.connections)
+      downstream_ids = Graph.downstream(graph, from_node_id)
 
       if downstream_ids == [] do
         {:error, :no_downstream_nodes}
@@ -440,10 +440,10 @@ defmodule Imgd.Executions do
 
       target_ids =
         if include_upstream do
+          graph = Graph.from_workflow!(workflow.nodes, workflow.connections)
+
           node_ids
-          |> Enum.flat_map(fn id ->
-            [id | DagUtils.upstream_closure(id, workflow.nodes, workflow.connections)]
-          end)
+          |> Enum.flat_map(fn id -> [id | Graph.upstream(graph, id)] end)
           |> Enum.uniq()
         else
           node_ids

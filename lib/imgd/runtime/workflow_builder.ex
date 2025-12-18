@@ -20,7 +20,6 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   See `Imgd.Runtime.ExecutionEngine` for implementing custom engines.
   """
 
-  alias Imgd.Graph
   alias Imgd.Workflows.WorkflowVersion
   alias Imgd.Executions.{Context, Execution}
   alias Imgd.Runtime.ExecutionEngine
@@ -142,48 +141,5 @@ defmodule Imgd.Runtime.WorkflowBuilder do
         input_data
       ) do
     ExecutionEngine.build_single_node(version, context, execution, node_id, input_data)
-  end
-
-  # ===========================================================================
-  # Graph Utilities (for testing and debugging)
-  # ===========================================================================
-
-  @doc """
-  Builds a Graph from nodes and connections.
-
-  This is exposed for testing and debugging purposes.
-  """
-  @spec build_graph([map()], [map()]) :: {:ok, Graph.t()} | {:error, term()}
-  def build_graph(nodes, connections) do
-    Graph.from_workflow(nodes, connections)
-  end
-
-  @doc """
-  Performs topological sort on a workflow's nodes.
-
-  This is exposed for testing and debugging purposes.
-  """
-  @spec topological_sort([map()], [map()]) :: {:ok, [String.t()]} | {:error, term()}
-  def topological_sort(nodes, connections) do
-    with {:ok, graph} <- Graph.from_workflow(nodes, connections) do
-      Graph.topological_sort(graph)
-    end
-  end
-
-  # Legacy delegations for backward compatibility
-  @doc false
-  @deprecated "Use Graph.from_workflow/2 instead"
-  def build_dag(nodes, connections), do: build_graph(nodes, connections)
-end
-
-defmodule Imgd.Runtime.NodeExecutionError do
-  @moduledoc """
-  Exception raised when a node execution fails.
-  """
-  defexception [:node_id, :node_type_id, :reason]
-
-  @impl true
-  def message(%{node_id: node_id, node_type_id: type_id, reason: reason}) do
-    "Node #{node_id} (#{type_id}) failed: #{inspect(reason)}"
   end
 end

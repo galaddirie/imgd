@@ -401,16 +401,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     end
   end
 
-  defp handle_execute_to_node(socket) do
-    case socket.assigns.selected_node_id do
-      nil ->
-        {:noreply, put_flash(socket, :error, "No node selected")}
-
-      node_id ->
-        handle_execute_to_node_impl(socket, node_id)
-    end
-  end
-
   defp handle_execute_to_node_impl(socket, node_id) do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
@@ -442,16 +432,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Execution failed: #{format_error(reason)}")}
-    end
-  end
-
-  defp handle_execute_downstream(socket) do
-    case socket.assigns.selected_node_id do
-      nil ->
-        {:noreply, put_flash(socket, :error, "No node selected")}
-
-      node_id ->
-        handle_execute_downstream_impl(socket, node_id)
     end
   end
 

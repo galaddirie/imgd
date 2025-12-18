@@ -160,12 +160,13 @@ defmodule ImgdWeb.WorkflowLive.Show do
                         <td class="font-mono text-xs">
                           <div class="flex items-center gap-2">
                             {short_id(execution.id)}
-                            <.icon
+                            <span
                               :if={partial_execution?(execution)}
-                              name="hero-beaker"
-                              class="size-4 text-primary/80"
                               title="Partial execution"
-                            />
+                              class="inline-flex items-center"
+                            >
+                              <.icon name="hero-beaker" class="size-4 text-primary/80" />
+                            </span>
                           </div>
                         </td>
                         <td>
