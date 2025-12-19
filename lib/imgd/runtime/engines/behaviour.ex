@@ -1,4 +1,4 @@
-defmodule Imgd.Runtime.Engine.Behaviour do
+defmodule Imgd.Runtime.Engines.Behaviour do
   @moduledoc """
   Behavior for workflow execution engines.
   """

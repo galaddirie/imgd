@@ -15,7 +15,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   ## Engine Abstraction
 
   The actual workflow execution is delegated to the configured engine module
-  (see `Imgd.Runtime.Engine.Behaviour`). By default, this is
+  (see `Imgd.Runtime.Engines.Behaviour`). By default, this is
   `Imgd.Runtime.Engines.Runic`, but can be swapped by configuring
   `:imgd, :execution_engine` in your application config.
 

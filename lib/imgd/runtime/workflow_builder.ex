@@ -96,5 +96,5 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   end
 
   @doc false
-  def engine, do: Imgd.Runtime.Engine.Behaviour.engine()
+  def engine, do: Imgd.Runtime.Engines.Behaviour.engine()
 end
