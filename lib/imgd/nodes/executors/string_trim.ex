@@ -64,7 +64,7 @@ defmodule Imgd.Nodes.Executors.StringTrim do
     "description" => "Trimmed string"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   @supported_sides ~w(both leading trailing)
 

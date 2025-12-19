@@ -61,7 +61,7 @@ defmodule Imgd.Nodes.Executors.StringCase do
     "description" => "String with case conversion applied"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   @supported_operations ~w(upper lower title camel snake kebab)
 

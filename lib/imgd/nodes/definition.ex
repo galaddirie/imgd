@@ -28,7 +28,7 @@ defmodule Imgd.Nodes.Definition do
         @input_schema %{"type" => "object"}
         @output_schema %{"type" => "object"}
 
-        @behaviour Imgd.Runtime.NodeExecutor
+        @behaviour Imgd.Nodes.Executors.Behaviour
 
         @impl true
         def execute(config, input, context) do

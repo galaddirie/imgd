@@ -79,7 +79,7 @@ defmodule Imgd.Nodes.Executors.Transform do
     "description" => "Transformed data"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   @supported_operations ~w(map filter pick omit merge set rename flatten passthrough)
 

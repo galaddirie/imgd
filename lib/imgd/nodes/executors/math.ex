@@ -65,7 +65,7 @@ defmodule Imgd.Nodes.Executors.Math do
     "description" => "The result of the arithmetic operation"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   @supported_operations ~w(add subtract multiply divide modulo power square_root abs round ceil floor)
 

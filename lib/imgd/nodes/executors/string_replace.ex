@@ -67,7 +67,7 @@ defmodule Imgd.Nodes.Executors.StringReplace do
     "description" => "String with replacements applied"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   @impl true
   def execute(config, input, _context) do

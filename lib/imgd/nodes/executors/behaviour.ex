@@ -1,4 +1,4 @@
-defmodule Imgd.Runtime.NodeExecutor do
+defmodule Imgd.Nodes.Executors.Behaviour do
   @moduledoc """
   Behaviour for node executors.
 
@@ -9,7 +9,7 @@ defmodule Imgd.Runtime.NodeExecutor do
   ## Example Implementation
 
       defmodule Imgd.Nodes.Executors.HTTP do
-        @behaviour Imgd.Runtime.NodeExecutor
+        @behaviour Imgd.Nodes.Executors.Behaviour
 
         @impl true
         def execute(config, input, context) do

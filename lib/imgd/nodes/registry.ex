@@ -34,7 +34,7 @@ defmodule Imgd.Nodes.Registry do
           icon: "hero-sparkles",
           kind: :action
 
-        @behaviour Imgd.Runtime.NodeExecutor
+        @behaviour Imgd.Nodes.Executors.Behaviour
         # ... implementation
       end
 

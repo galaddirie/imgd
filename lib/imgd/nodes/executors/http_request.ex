@@ -92,7 +92,7 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
     }
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   require Logger
 

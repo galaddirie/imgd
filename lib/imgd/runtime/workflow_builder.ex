@@ -2,7 +2,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   @moduledoc """
   Facade for building executable workflows from WorkflowVersions.
 
-  This module delegates to the configured `ExecutionEngine` for actual
+  This module delegates to the configured `WorkflowBuilder` for actual
   workflow construction. It provides a stable API that doesn't change
   when the underlying engine is swapped.
 
@@ -17,7 +17,7 @@ defmodule Imgd.Runtime.WorkflowBuilder do
 
       config :imgd, :execution_engine, Imgd.Runtime.Engines.Runic
 
-  See `Imgd.Runtime.ExecutionEngine` for implementing custom engines.
+  See `Imgd.Runtime.Engines.Behaviour` for implementing custom engines.
   """
 
   alias Imgd.Workflows.{Workflow, WorkflowVersion}

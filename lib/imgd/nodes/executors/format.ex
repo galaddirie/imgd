@@ -41,7 +41,7 @@ defmodule Imgd.Nodes.Executors.Format do
     "description" => "The formatted string"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   @impl true
   def execute(config, input, _context) do

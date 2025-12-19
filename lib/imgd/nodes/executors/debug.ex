@@ -46,7 +46,7 @@ defmodule Imgd.Nodes.Executors.Debug do
     "description" => "The input data, unchanged"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
   require Logger
 
   @impl true

@@ -19,18 +19,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   `Imgd.Runtime.Engines.Runic`, but can be swapped by configuring
   `:imgd, :execution_engine` in your application config.
 
-  ## Separation of Concerns
 
-  | Concern | ExecutionWorker | WorkflowRunner | Engine |
-  |---------|-----------------|----------------|--------|
-  | Job queuing/retries | ✓ | | |
-  | Trace context propagation | ✓ | | |
-  | Loading records from DB | ✓ | | |
-  | Execution state machine | | ✓ | |
-  | Timeout handling | | ✓ | |
-  | PubSub broadcasts | | ✓ | |
-  | Workflow building | | | ✓ |
-  | Node execution | | | ✓ |
 
   ## Execution Flow
 

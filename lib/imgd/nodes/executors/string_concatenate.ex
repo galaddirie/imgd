@@ -55,7 +55,7 @@ defmodule Imgd.Nodes.Executors.StringConcatenate do
     "description" => "The concatenated string"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   @impl true
   def execute(config, input, _context) do

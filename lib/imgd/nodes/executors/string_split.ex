@@ -69,7 +69,7 @@ defmodule Imgd.Nodes.Executors.StringSplit do
     "description" => "List of split string parts"
   }
 
-  @behaviour Imgd.Runtime.NodeExecutor
+  @behaviour Imgd.Nodes.Executors.Behaviour
 
   @impl true
   def execute(config, input, _context) do

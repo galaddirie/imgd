@@ -10,7 +10,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   The engine converts a WorkflowVersion into a Runic.Workflow:
   1. Parse nodes and connections into a Graph structure
   2. Topologically sort nodes to determine execution order
-  3. Create Runic steps that wrap NodeExecutor.execute/3 calls
+  3. Create Runic steps that wrap NodeExecutor.execute/4 calls
   4. Wire up data flow via Runic's parent/child dependencies
   5. Install observability hooks for real-time node tracking
 
@@ -37,7 +37,8 @@ defmodule Imgd.Runtime.Engines.Runic do
   alias Imgd.Workflows.Embeds.Node
   alias Ecto.Changeset
   alias Imgd.Executions.{Context, Execution, NodeExecution, NodeExecutionBuffer}
-  alias Imgd.Runtime.{ExecutionState, NodeExecutor, Serializer}
+  alias Imgd.Runtime.{ExecutionState, Serializer}
+  alias Imgd.Nodes.Executors.Behaviour, as: NodeExecutor
   alias Imgd.Observability.Instrumentation
   alias Imgd.Runtime.Expression.Evaluator
 
