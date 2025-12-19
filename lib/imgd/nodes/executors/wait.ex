@@ -43,7 +43,7 @@ defmodule Imgd.Nodes.Executors.Wait do
   require Logger
 
   @impl true
-  def execute(config, input, _context) do
+  def execute(config, input, _execution) do
     seconds = Map.get(config, "seconds", 5)
     milliseconds = trunc(seconds * 1000)
 

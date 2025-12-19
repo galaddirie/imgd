@@ -31,7 +31,7 @@ defmodule Imgd.Nodes.Definition do
         @behaviour Imgd.Nodes.Executors.Behaviour
 
         @impl true
-        def execute(config, input, context) do
+        def execute(config, input, execution) do
           # ... implementation
         end
       end

@@ -32,17 +32,17 @@ defmodule Imgd.Runtime.Expression do
   ## Examples
 
       # Simple field access
-      Expression.evaluate("Hello {{ json.name }}!", context)
+      Expression.evaluate("Hello {{ json.name }}!", execution)
 
       # Node output access
-      Expression.evaluate("Status: {{ nodes.HTTP.json.status }}", context)
+      Expression.evaluate("Status: {{ nodes.HTTP.json.status }}", execution)
 
       # With filters
-      Expression.evaluate("{{ json.items | size }}", context)
-      Expression.evaluate("{{ json.data | json }}", context)
+      Expression.evaluate("{{ json.items | size }}", execution)
+      Expression.evaluate("{{ json.data | json }}", execution)
 
       # Conditionals
-      Expression.evaluate("{% if json.active %}Yes{% else %}No{% endif %}", context)
+      Expression.evaluate("{% if json.active %}Yes{% else %}No{% endif %}", execution)
 
   ## Security
 
@@ -53,7 +53,8 @@ defmodule Imgd.Runtime.Expression do
   """
 
   alias Imgd.Runtime.Expression.{Context, Filters, Cache}
-  alias Imgd.Executions.Context, as: ExecContext
+  alias Imgd.Runtime.ExecutionState
+  alias Imgd.Executions.Execution
 
   require Logger
 
@@ -61,13 +62,15 @@ defmodule Imgd.Runtime.Expression do
   @type eval_opts :: [
           strict_variables: boolean(),
           strict_filters: boolean(),
-          timeout_ms: pos_integer()
+          timeout_ms: pos_integer(),
+          state_store: module()
         ]
 
   @default_opts [
     strict_variables: false,
     strict_filters: true,
-    timeout_ms: 1_000
+    timeout_ms: 1_000,
+    state_store: ExecutionState
   ]
 
   # Pattern to detect if a string contains Liquid expressions
@@ -83,16 +86,18 @@ defmodule Imgd.Runtime.Expression do
   - `:strict_variables` - Return error for undefined variables (default: false)
   - `:strict_filters` - Return error for undefined filters (default: true)
   - `:timeout_ms` - Maximum evaluation time in ms (default: 1000)
+  - `:state_store` - Module for runtime state (default: ExecutionState)
   """
-  @spec evaluate(String.t(), ExecContext.t(), eval_opts()) :: eval_result()
-  def evaluate(template, %ExecContext{} = exec_context, opts \\ []) when is_binary(template) do
+  @spec evaluate(String.t(), Execution.t(), eval_opts()) :: eval_result()
+  def evaluate(template, %Execution{} = execution, opts \\ []) when is_binary(template) do
     opts = Keyword.merge(@default_opts, opts)
+    state_store = Keyword.get(opts, :state_store)
 
     # Fast path: no expressions to evaluate
     unless contains_expression?(template) do
       {:ok, template}
     else
-      vars = Context.build(exec_context)
+      vars = Context.build(execution, state_store)
       do_evaluate(template, vars, opts)
     end
   end
@@ -119,10 +124,11 @@ defmodule Imgd.Runtime.Expression do
   Recursively walks the structure and evaluates any string values that
   contain Liquid expressions.
   """
-  @spec evaluate_deep(term(), ExecContext.t(), eval_opts()) :: {:ok, term()} | {:error, term()}
-  def evaluate_deep(data, %ExecContext{} = exec_context, opts \\ []) do
-    vars = Context.build(exec_context)
+  @spec evaluate_deep(term(), Execution.t(), eval_opts()) :: {:ok, term()} | {:error, term()}
+  def evaluate_deep(data, %Execution{} = execution, opts \\ []) do
     opts = Keyword.merge(@default_opts, opts)
+    state_store = Keyword.get(opts, :state_store)
+    vars = Context.build(execution, state_store)
 
     try do
       result = do_evaluate_deep(data, vars, opts)

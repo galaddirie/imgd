@@ -2,8 +2,12 @@ defmodule Imgd.Runtime.Expression.Context do
   @moduledoc """
   Builds the variable context for expression evaluation.
 
-  Transforms an `Imgd.Executions.Context` into a flat map suitable
-  for Liquid template rendering.
+  Transforms an `Imgd.Executions.Execution` struct combined with runtime
+  state from `ExecutionState` into a flat map suitable for Liquid template rendering.
+
+  This module builds the context **on-demand** from the single source of truth:
+  - Static data from `Execution` (trigger, metadata, workflow info)
+  - Dynamic data from `ExecutionState` (node outputs, current input)
 
   ## Variable Structure
 
@@ -30,7 +34,8 @@ defmodule Imgd.Runtime.Expression.Context do
   ```
   """
 
-  alias Imgd.Executions.Context, as: ExecContext
+  alias Imgd.Executions.Execution
+  alias Imgd.Runtime.ExecutionState
 
   # Environment variables that are safe to expose
   # Configure via application env: config :imgd, :allowed_env_vars, [...]
@@ -41,20 +46,33 @@ defmodule Imgd.Runtime.Expression.Context do
   )
 
   @doc """
-  Builds a variable map from an execution context.
+  Builds a variable map from an execution and runtime state.
 
   The resulting map uses string keys for compatibility with Liquid.
+
+  ## Parameters
+
+  - `execution` - The Execution struct (should have workflow_version preloaded for variables)
+  - `state_store` - The state store module (default: ExecutionState)
   """
-  @spec build(ExecContext.t()) :: map()
-  def build(%ExecContext{} = ctx) do
+  @spec build(Execution.t(), module()) :: map()
+  def build(%Execution{} = execution, state_store \\ ExecutionState) do
+    # Get dynamic data from state store
+    runtime_outputs = state_store.outputs(execution.id)
+    current_input = state_store.current_input(execution.id) || Execution.trigger_data(execution)
+
+    # Merge persisted context with runtime data
+    # state_store takes priority for nodes that just ran
+    all_outputs = Map.merge(execution.context || %{}, runtime_outputs)
+
     %{
-      "json" => normalize_value(ctx.current_input),
-      "input" => normalize_value(ctx.current_input),
-      "nodes" => build_nodes_map(ctx.node_outputs),
-      "execution" => build_execution_map(ctx),
-      "workflow" => build_workflow_map(ctx),
-      "variables" => normalize_map(ctx.variables),
-      "metadata" => build_metadata_map(ctx.metadata),
+      "json" => normalize_value(current_input),
+      "input" => normalize_value(current_input),
+      "nodes" => build_nodes_map(all_outputs),
+      "execution" => build_execution_map(execution),
+      "workflow" => build_workflow_map(execution),
+      "variables" => extract_variables(execution),
+      "metadata" => build_metadata_map(execution),
       "env" => build_env_map(),
       "now" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "today" => Date.utc_today() |> Date.to_iso8601()
@@ -109,25 +127,35 @@ defmodule Imgd.Runtime.Expression.Context do
 
   defp build_nodes_map(_), do: %{}
 
-  defp build_execution_map(%ExecContext{} = ctx) do
+  defp build_execution_map(%Execution{} = execution) do
+    trigger_type = Execution.trigger_type(execution)
+    trigger_data = Execution.trigger_data(execution)
+    metadata = execution.metadata || %{}
+
     %{
-      "id" => ctx.execution_id,
-      "trigger_type" => to_string(ctx.trigger_type || "unknown"),
-      "trigger_data" => normalize_value(ctx.trigger_data)
+      "id" => execution.id,
+      "trigger_type" => to_string(trigger_type || "unknown"),
+      "trigger_data" => normalize_value(trigger_data)
     }
-    |> maybe_put("started_at", get_in(ctx.metadata, [:started_at]))
-    |> maybe_put("trace_id", get_in(ctx.metadata, [:trace_id]))
-    |> maybe_put("correlation_id", get_in(ctx.metadata, [:correlation_id]))
+    |> maybe_put("started_at", execution.started_at)
+    |> maybe_put("trace_id", get_metadata_field(metadata, :trace_id))
+    |> maybe_put("correlation_id", get_metadata_field(metadata, :correlation_id))
   end
 
-  defp build_workflow_map(%ExecContext{} = ctx) do
+  defp build_workflow_map(%Execution{} = execution) do
     %{
-      "id" => ctx.workflow_id,
-      "version_id" => ctx.workflow_version_id
+      "id" => execution.workflow_id,
+      "version_id" => execution.workflow_version_id
     }
   end
 
-  defp build_metadata_map(metadata) when is_map(metadata) do
+  defp build_metadata_map(%Execution{metadata: metadata}) when is_struct(metadata) do
+    metadata
+    |> Map.from_struct()
+    |> normalize_map()
+  end
+
+  defp build_metadata_map(%Execution{metadata: metadata}) when is_map(metadata) do
     normalize_map(metadata)
   end
 
@@ -146,6 +174,22 @@ defmodule Imgd.Runtime.Expression.Context do
   defp allowed_vars do
     Application.get_env(:imgd, :allowed_env_vars, @default_allowed_env_vars)
   end
+
+  defp extract_variables(%Execution{} = execution) do
+    case execution.workflow_version do
+      %{settings: settings} when is_map(settings) ->
+        Map.get(settings, "variables") || Map.get(settings, :variables) || %{}
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp get_metadata_field(%{} = metadata, key) when is_atom(key) do
+    Map.get(metadata, key) || Map.get(metadata, Atom.to_string(key))
+  end
+
+  defp get_metadata_field(_, _), do: nil
 
   # ============================================================================
   # Value Normalization

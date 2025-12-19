@@ -3,27 +3,32 @@ defmodule Imgd.Runtime.ExpressionTest do
 
   alias Imgd.Runtime.Expression
   alias Imgd.Runtime.Expression.{Context, Filters}
-  alias Imgd.Executions.Context, as: ExecContext
+  alias Imgd.Executions.Execution
+
+  defmodule MockStateStore do
+    def outputs(_), do: %{}
+    def current_input(_), do: nil
+  end
 
   describe "evaluate/3" do
     test "returns unchanged string when no expressions" do
       ctx = build_context()
-      assert {:ok, "Hello World"} = Expression.evaluate("Hello World", ctx)
+      assert {:ok, "Hello World"} = Expression.evaluate("Hello World", ctx, state_store: MockStateStore)
     end
 
     test "evaluates simple variable" do
       ctx = build_context(%{"name" => "Alice"})
-      assert {:ok, "Hello Alice"} = Expression.evaluate("Hello {{ json.name }}", ctx)
+      assert {:ok, "Hello Alice"} = Expression.evaluate("Hello {{ json.name }}", ctx, state_store: MockStateStore)
     end
 
     test "evaluates nested variable" do
       ctx = build_context(%{"user" => %{"name" => "Bob"}})
-      assert {:ok, "Hello Bob"} = Expression.evaluate("Hello {{ json.user.name }}", ctx)
+      assert {:ok, "Hello Bob"} = Expression.evaluate("Hello {{ json.user.name }}", ctx, state_store: MockStateStore)
     end
 
     test "handles missing variable gracefully" do
       ctx = build_context()
-      assert {:ok, "Hello "} = Expression.evaluate("Hello {{ json.missing }}", ctx)
+      assert {:ok, "Hello "} = Expression.evaluate("Hello {{ json.missing }}", ctx, state_store: MockStateStore)
     end
 
     test "evaluates node outputs" do
@@ -34,34 +39,34 @@ defmodule Imgd.Runtime.ExpressionTest do
       ctx = build_context(%{}, node_outputs)
 
       assert {:ok, "Status: 200"} =
-               Expression.evaluate("Status: {{ nodes.HTTP.json.status }}", ctx)
+               Expression.evaluate("Status: {{ nodes.HTTP.json.status }}", ctx, state_store: MockStateStore)
     end
 
     test "evaluates execution metadata" do
       ctx = build_context()
-      assert {:ok, result} = Expression.evaluate("ID: {{ execution.id }}", ctx)
+      assert {:ok, result} = Expression.evaluate("ID: {{ execution.id }}", ctx, state_store: MockStateStore)
       assert String.starts_with?(result, "ID: ")
     end
 
     test "evaluates workflow metadata" do
       ctx = build_context()
-      assert {:ok, result} = Expression.evaluate("Workflow: {{ workflow.id }}", ctx)
+      assert {:ok, result} = Expression.evaluate("Workflow: {{ workflow.id }}", ctx, state_store: MockStateStore)
       assert String.starts_with?(result, "Workflow: ")
     end
 
     test "evaluates conditionals" do
       ctx = build_context(%{"active" => true})
       template = "{% if json.active %}Yes{% else %}No{% endif %}"
-      assert {:ok, "Yes"} = Expression.evaluate(template, ctx)
+      assert {:ok, "Yes"} = Expression.evaluate(template, ctx, state_store: MockStateStore)
 
       ctx2 = build_context(%{"active" => false})
-      assert {:ok, "No"} = Expression.evaluate(template, ctx2)
+      assert {:ok, "No"} = Expression.evaluate(template, ctx2, state_store: MockStateStore)
     end
 
     test "evaluates loops" do
       ctx = build_context(%{"items" => ["a", "b", "c"]})
       template = "{% for item in json.items %}{{ item }}{% endfor %}"
-      assert {:ok, "abc"} = Expression.evaluate(template, ctx)
+      assert {:ok, "abc"} = Expression.evaluate(template, ctx, state_store: MockStateStore)
     end
 
     test "times out on long-running expressions" do
@@ -81,7 +86,7 @@ defmodule Imgd.Runtime.ExpressionTest do
         "static" => "unchanged"
       }
 
-      assert {:ok, result} = Expression.evaluate_deep(data, ctx)
+      assert {:ok, result} = Expression.evaluate_deep(data, ctx, state_store: MockStateStore)
       assert result["title"] == "Hello Test"
       assert result["count"] == "42"
       assert result["static"] == "unchanged"
@@ -91,7 +96,7 @@ defmodule Imgd.Runtime.ExpressionTest do
       ctx = build_context(%{"x" => "A", "y" => "B"})
       data = ["{{ json.x }}", "static", "{{ json.y }}"]
 
-      assert {:ok, result} = Expression.evaluate_deep(data, ctx)
+      assert {:ok, result} = Expression.evaluate_deep(data, ctx, state_store: MockStateStore)
       assert result == ["A", "static", "B"]
     end
 
@@ -106,7 +111,7 @@ defmodule Imgd.Runtime.ExpressionTest do
         }
       }
 
-      assert {:ok, result} = Expression.evaluate_deep(data, ctx)
+      assert {:ok, result} = Expression.evaluate_deep(data, ctx, state_store: MockStateStore)
       assert result["level1"]["level2"]["level3"] == "deep"
     end
   end
@@ -142,52 +147,52 @@ defmodule Imgd.Runtime.ExpressionTest do
   describe "filters" do
     test "json filter" do
       ctx = build_context(%{"data" => %{"a" => 1}})
-      assert {:ok, ~s({"a":1})} = Expression.evaluate("{{ json.data | json }}", ctx)
+      assert {:ok, ~s({"a":1})} = Expression.evaluate("{{ json.data | json }}", ctx, state_store: MockStateStore)
     end
 
     test "dig filter" do
       ctx = build_context(%{"nested" => %{"deep" => %{"value" => "found"}}})
-      assert {:ok, "found"} = Expression.evaluate("{{ json.nested | dig: 'deep.value' }}", ctx)
+      assert {:ok, "found"} = Expression.evaluate("{{ json.nested | dig: 'deep.value' }}", ctx, state_store: MockStateStore)
     end
 
     test "pluck filter" do
       ctx = build_context(%{"items" => [%{"name" => "a"}, %{"name" => "b"}]})
-      assert {:ok, result} = Expression.evaluate("{{ json.items | pluck: 'name' | json }}", ctx)
+      assert {:ok, result} = Expression.evaluate("{{ json.items | pluck: 'name' | json }}", ctx, state_store: MockStateStore)
       assert result == ~s(["a","b"])
     end
 
     test "sha256 filter" do
       ctx = build_context(%{"secret" => "password"})
-      assert {:ok, result} = Expression.evaluate("{{ json.secret | sha256 }}", ctx)
+      assert {:ok, result} = Expression.evaluate("{{ json.secret | sha256 }}", ctx, state_store: MockStateStore)
       assert String.length(result) == 64
       assert String.match?(result, ~r/^[0-9a-f]+$/)
     end
 
     test "base64 filters" do
       ctx = build_context(%{"text" => "hello"})
-      assert {:ok, "aGVsbG8="} = Expression.evaluate("{{ json.text | base64_encode }}", ctx)
+      assert {:ok, "aGVsbG8="} = Expression.evaluate("{{ json.text | base64_encode }}", ctx, state_store: MockStateStore)
 
       ctx2 = build_context(%{"encoded" => "aGVsbG8="})
-      assert {:ok, "hello"} = Expression.evaluate("{{ json.encoded | base64_decode }}", ctx2)
+      assert {:ok, "hello"} = Expression.evaluate("{{ json.encoded | base64_decode }}", ctx2, state_store: MockStateStore)
     end
 
     test "default filter" do
       ctx = build_context(%{"empty" => nil, "present" => "value"})
 
       assert {:ok, "fallback"} =
-               Expression.evaluate("{{ json.empty | default: 'fallback' }}", ctx)
+               Expression.evaluate("{{ json.empty | default: 'fallback' }}", ctx, state_store: MockStateStore)
 
-      assert {:ok, "value"} = Expression.evaluate("{{ json.present | default: 'fallback' }}", ctx)
+      assert {:ok, "value"} = Expression.evaluate("{{ json.present | default: 'fallback' }}", ctx, state_store: MockStateStore)
     end
 
     test "to_int filter" do
       ctx = build_context(%{"str" => "42"})
-      assert {:ok, "42"} = Expression.evaluate("{{ json.str | to_int }}", ctx)
+      assert {:ok, "42"} = Expression.evaluate("{{ json.str | to_int }}", ctx, state_store: MockStateStore)
     end
 
     test "slugify filter" do
       ctx = build_context(%{"title" => "Hello World!"})
-      assert {:ok, "hello-world"} = Expression.evaluate("{{ json.title | slugify }}", ctx)
+      assert {:ok, "hello-world"} = Expression.evaluate("{{ json.title | slugify }}", ctx, state_store: MockStateStore)
     end
 
     test "where_eq filter" do
@@ -203,7 +208,8 @@ defmodule Imgd.Runtime.ExpressionTest do
       assert {:ok, result} =
                Expression.evaluate(
                  "{{ json.items | where_eq: 'status', 'active' | pluck: 'name' | json }}",
-                 ctx
+                 ctx,
+                 state_store: MockStateStore
                )
 
       assert result == ~s(["a","c"])
@@ -222,7 +228,8 @@ defmodule Imgd.Runtime.ExpressionTest do
       assert {:ok, result} =
                Expression.evaluate(
                  "{{ json.items | sort_by: 'name' | pluck: 'name' | json }}",
-                 ctx
+                 ctx,
+                 state_store: MockStateStore
                )
 
       assert result == ~s(["a","b","c"])
@@ -234,26 +241,27 @@ defmodule Imgd.Runtime.ExpressionTest do
       assert {:ok, "2024-01-15"} =
                Expression.evaluate(
                  "{{ json.date | format_date: '%Y-%m-%d' }}",
-                 ctx
+                 ctx,
+                 state_store: MockStateStore
                )
     end
 
     test "add_days filter" do
       ctx = build_context(%{"date" => "2024-01-15T10:30:00Z"})
-      assert {:ok, result} = Expression.evaluate("{{ json.date | add_days: 7 }}", ctx)
+      assert {:ok, result} = Expression.evaluate("{{ json.date | add_days: 7 }}", ctx, state_store: MockStateStore)
       assert String.contains?(result, "2024-01-22")
     end
 
     test "math filters" do
       ctx = build_context(%{"num" => -5.7})
-      assert {:ok, "5.7"} = Expression.evaluate("{{ json.num | abs }}", ctx)
-      assert {:ok, "-5"} = Expression.evaluate("{{ json.num | ceil }}", ctx)
-      assert {:ok, "-6"} = Expression.evaluate("{{ json.num | floor }}", ctx)
+      assert {:ok, "5.7"} = Expression.evaluate("{{ json.num | abs }}", ctx, state_store: MockStateStore)
+      assert {:ok, "-5"} = Expression.evaluate("{{ json.num | ceil }}", ctx, state_store: MockStateStore)
+      assert {:ok, "-6"} = Expression.evaluate("{{ json.num | floor }}", ctx, state_store: MockStateStore)
     end
 
     test "clamp filter" do
       ctx = build_context(%{"num" => 150})
-      assert {:ok, "100.0"} = Expression.evaluate("{{ json.num | clamp: 0, 100 }}", ctx)
+      assert {:ok, "100.0"} = Expression.evaluate("{{ json.num | clamp: 0, 100 }}", ctx, state_store: MockStateStore)
     end
 
     test "chained filters" do
@@ -268,7 +276,8 @@ defmodule Imgd.Runtime.ExpressionTest do
       assert {:ok, result} =
                Expression.evaluate(
                  "{{ json.items | pluck: 'name' | first | downcase }}",
-                 ctx
+                 ctx,
+                 state_store: MockStateStore
                )
 
       assert result == "hello"
@@ -317,27 +326,22 @@ defmodule Imgd.Runtime.ExpressionTest do
   end
 
   describe "Context module" do
-    test "builds context from execution context" do
-      exec_ctx = %ExecContext{
-        execution_id: "exec-123",
+    test "builds context from execution" do
+      execution = %Execution{
+        id: "exec-123",
         workflow_id: "wf-456",
         workflow_version_id: "ver-789",
-        trigger_type: :manual,
-        trigger_data: %{"key" => "value"},
-        node_outputs: %{"Node1" => %{"result" => "ok"}},
-        variables: %{"env" => "prod"},
-        current_node_id: "current",
-        current_input: %{"input" => "data"},
-        metadata: %{trace_id: "trace-abc"}
+        trigger: %Execution.Trigger{type: :manual, data: %{"key" => "value"}},
+        context: %{"Node1" => %{"result" => "ok"}},
+        metadata: %Execution.Metadata{trace_id: "trace-abc"}
       }
 
-      vars = Context.build(exec_ctx)
+      vars = Context.build(execution, MockStateStore)
 
-      assert vars["json"] == %{"input" => "data"}
+      assert vars["json"] == %{"key" => "value"}
       assert vars["nodes"]["Node1"]["json"] == %{"result" => "ok"}
       assert vars["execution"]["id"] == "exec-123"
       assert vars["workflow"]["id"] == "wf-456"
-      assert vars["variables"]["env"] == "prod"
       assert is_binary(vars["now"])
       assert is_binary(vars["today"])
     end
@@ -363,20 +367,20 @@ defmodule Imgd.Runtime.ExpressionTest do
     test "cannot access file system" do
       ctx = build_context()
       # Liquid doesn't have file access, but verify no injection possible
-      assert {:ok, _} = Expression.evaluate("{{ 'test' }}", ctx)
+      assert {:ok, _} = Expression.evaluate("{{ 'test' }}", ctx, state_store: MockStateStore)
     end
 
     test "handles very long templates" do
       ctx = build_context(%{"x" => "y"})
       template = String.duplicate("{{ json.x }}", 1000)
-      assert {:ok, result} = Expression.evaluate(template, ctx)
+      assert {:ok, result} = Expression.evaluate(template, ctx, state_store: MockStateStore)
       assert String.length(result) == 1000
     end
 
     test "handles deeply nested access attempts" do
       ctx = build_context(%{"a" => %{"b" => %{"c" => %{"d" => "deep"}}}})
-      assert {:ok, "deep"} = Expression.evaluate("{{ json.a.b.c.d }}", ctx)
-      assert {:ok, ""} = Expression.evaluate("{{ json.a.b.c.d.e.f.g }}", ctx)
+      assert {:ok, "deep"} = Expression.evaluate("{{ json.a.b.c.d }}", ctx, state_store: MockStateStore)
+      assert {:ok, ""} = Expression.evaluate("{{ json.a.b.c.d.e.f.g }}", ctx, state_store: MockStateStore)
     end
   end
 
@@ -385,17 +389,13 @@ defmodule Imgd.Runtime.ExpressionTest do
   # ============================================================================
 
   defp build_context(input \\ %{}, node_outputs \\ %{}) do
-    %ExecContext{
-      execution_id: "test-exec-id",
-      workflow_id: "test-workflow-id",
-      workflow_version_id: "test-version-id",
-      trigger_type: :manual,
-      trigger_data: %{},
-      node_outputs: node_outputs,
-      variables: %{},
-      current_node_id: "current-node",
-      current_input: input,
-      metadata: %{}
+    %Execution{
+      id: Ecto.UUID.generate(),
+      workflow_id: Ecto.UUID.generate(),
+      workflow_version_id: Ecto.UUID.generate(),
+      trigger: %Execution.Trigger{type: :manual, data: input},
+      context: node_outputs,
+      metadata: %Execution.Metadata{trace_id: "test-trace"}
     }
   end
 end

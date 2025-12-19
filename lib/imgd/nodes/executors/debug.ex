@@ -50,7 +50,7 @@ defmodule Imgd.Nodes.Executors.Debug do
   require Logger
 
   @impl true
-  def execute(config, input, _context) do
+  def execute(config, input, _execution) do
     label = Map.get(config, "label", "Debug Node")
     level = Map.get(config, "level", "info") |> String.to_atom()
 

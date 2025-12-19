@@ -50,7 +50,7 @@ defmodule Imgd.Workers.ExecutionWorker do
   require Logger
 
   alias Imgd.Repo
-  alias Imgd.Executions.{Execution, Context}
+  alias Imgd.Executions.Execution
   alias Imgd.Runtime.{ExecutionState, WorkflowRunner, WorkflowBuilder}
   alias Imgd.Observability.Instrumentation
 
@@ -116,13 +116,9 @@ defmodule Imgd.Workers.ExecutionWorker do
     target_nodes = Map.get(args, "target_nodes", [])
     pinned_outputs = Map.get(args, "pinned_outputs", %{})
 
-    context = Context.new(execution)
-    context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
-
     builder_fun = fn ->
       WorkflowBuilder.build_partial(
         execution.workflow_version || execution.workflow,
-        context,
         execution,
         [
           target_nodes: target_nodes,
@@ -134,7 +130,7 @@ defmodule Imgd.Workers.ExecutionWorker do
 
     handle_runner_result(
       execution,
-      WorkflowRunner.run_with_builder(execution, context, builder_fun, ExecutionState)
+      WorkflowRunner.run_with_builder(execution, builder_fun, ExecutionState)
     )
   end
 

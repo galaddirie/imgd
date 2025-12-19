@@ -47,16 +47,16 @@ defmodule Imgd.Nodes.Executors.Behaviour do
   - `{:skip, reason}` - The node was skipped (e.g., condition not met)
   """
 
-  alias Imgd.Executions.Context
+  alias Imgd.Executions.Execution
 
   @doc """
-  Executes the node with the given configuration, input, and context.
+  Executes the node with the given configuration, input, and execution.
 
   ## Parameters
 
   - `config` - The node's configuration map (from `node.config`)
   - `input` - The input data flowing into this node (from parent nodes)
-  - `context` - The execution context containing workflow state, variables, etc.
+  - `execution` - The current Execution record.
 
   ## Returns
 
@@ -64,7 +64,7 @@ defmodule Imgd.Nodes.Executors.Behaviour do
   - `{:error, reason}` - Failure with error details
   - `{:skip, reason}` - Node was skipped
   """
-  @callback execute(config :: map(), input :: term(), context :: Context.t()) ::
+  @callback execute(config :: map(), input :: term(), execution :: Execution.t()) ::
               {:ok, output :: term()}
               | {:error, reason :: term()}
               | {:skip, reason :: term()}
@@ -145,10 +145,10 @@ defmodule Imgd.Nodes.Executors.Behaviour do
 
   This is a convenience function that combines resolution and execution.
   """
-  def execute(type_id, config, input, context) do
+  def execute(type_id, config, input, execution) do
     case resolve(type_id) do
       {:ok, module} ->
-        module.execute(config, input, context)
+        module.execute(config, input, execution)
 
       {:error, reason} ->
         {:error, {:executor_not_found, reason}}

@@ -66,7 +66,7 @@ defmodule Imgd.Nodes.Executors.StringCase do
   @supported_operations ~w(upper lower title camel snake kebab)
 
   @impl true
-  def execute(config, input, _context) do
+  def execute(config, input, _execution) do
     operation = Map.fetch!(config, "operation")
     input_field = Map.get(config, "input_field")
 

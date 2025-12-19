@@ -100,7 +100,7 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
   @default_method "GET"
 
   @impl true
-  def execute(config, input, _context) do
+  def execute(config, input, _execution) do
     url = Map.fetch!(config, "url")
     method = Map.get(config, "method", @default_method) |> normalize_method()
     headers = Map.get(config, "headers", %{}) |> normalize_headers()

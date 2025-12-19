@@ -74,7 +74,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   defp detect_field_mode(value), do: {:literal, value}
 
   defp maybe_evaluate_expressions(socket) do
-    if socket.assigns[:execution_context] do
+    if socket.assigns[:execution] do
       evaluate_all_expressions(socket)
     else
       socket
@@ -82,7 +82,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   end
 
   defp evaluate_all_expressions(socket) do
-    context = socket.assigns.execution_context
+    execution = socket.assigns.execution
     modes = socket.assigns.field_modes
     values = socket.assigns.field_values
 
@@ -91,7 +91,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
         if mode == :expression do
           expr = Map.get(values, field, "")
 
-          case evaluate_expression(expr, context) do
+          case evaluate_expression(expr, execution) do
             {:ok, result} ->
               {Map.put(prev_acc, field, result), err_acc}
 
@@ -108,8 +108,8 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
     |> assign(:expression_errors, errors)
   end
 
-  defp evaluate_expression(expr, context) when is_binary(expr) and expr != "" do
-    Expression.evaluate(expr, context)
+  defp evaluate_expression(expr, execution) when is_binary(expr) and expr != "" do
+    Expression.evaluate(expr, execution)
   end
 
   defp evaluate_expression(_, _), do: {:ok, nil}
@@ -195,10 +195,10 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   defp maybe_evaluate_single_field(socket, field) do
     mode = Map.get(socket.assigns.field_modes, field)
 
-    if mode == :expression and socket.assigns[:execution_context] do
+    if mode == :expression and socket.assigns[:execution] do
       value = Map.get(socket.assigns.field_values, field, "")
 
-      case evaluate_expression(value, socket.assigns.execution_context) do
+      case evaluate_expression(value, socket.assigns.execution) do
         {:ok, result} ->
           socket
           |> assign(
@@ -380,14 +380,14 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
                 />
               </div>
             </div>
-            <div class="flex-1 overflow-y-auto custom-scrollbar">
-              <.variable_explorer
-                context={@execution_context}
-                search={@variable_search}
-                expanded={@explorer_expanded}
-                myself={@myself}
-              />
-            </div>
+          <div class="flex-1 overflow-y-auto custom-scrollbar">
+            <.variable_explorer
+              execution={@execution}
+              search={@variable_search}
+              expanded={@explorer_expanded}
+              myself={@myself}
+            />
+          </div>
             <div class="p-4 border-t border-base-200 bg-base-200/5">
               <div class="text-[10px] font-bold uppercase tracking-wider text-base-content/40 mb-2">
                 Expression Tip
@@ -408,7 +408,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
                   field_values={@field_values}
                   expression_previews={@expression_previews}
                   expression_errors={@expression_errors}
-                  has_context={not is_nil(@execution_context)}
+                  has_context={not is_nil(@execution)}
                   myself={@myself}
                 />
               <% :output -> %>
@@ -433,14 +433,14 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
             <div class="flex items-center gap-2">
               <div class={[
                 "size-2 rounded-full",
-                if(@execution_context, do: "bg-success animate-pulse", else: "bg-warning")
+                if(@execution, do: "bg-success animate-pulse", else: "bg-warning")
               ]}>
               </div>
               <span class="text-xs font-bold text-base-content/70">
-                {if @execution_context, do: "Live Preview Active", else: "Static Mode"}
+                {if @execution, do: "Live Preview Active", else: "Static Mode"}
               </span>
             </div>
-            <%= if !@execution_context do %>
+            <%= if !@execution do %>
               <div class="flex items-center gap-1.5 text-xs text-base-content/40 font-medium">
                 <.icon name="hero-information-circle" class="size-4" />
                 Run workflow to enable expression previews
@@ -476,7 +476,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   # Sub-components
   # ============================================================================
 
-  attr :context, :map, required: true
+  attr :execution, :map, required: true
   attr :search, :string, default: ""
   attr :expanded, :map, required: true
   attr :myself, :any, required: true
@@ -484,8 +484,8 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   defp variable_explorer(assigns) do
     # Transform execution context struct to map with string keys for explorer
     context_map =
-      if assigns.context do
-        Imgd.Runtime.Expression.Context.build(assigns.context)
+      if assigns.execution do
+        Imgd.Runtime.Expression.Context.build(assigns.execution)
       else
         nil
       end

@@ -12,7 +12,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   alias Imgd.Workflows
   alias Imgd.Executions
-  alias Imgd.Executions.{Execution, NodeExecution, Context, PubSub}
+  alias Imgd.Executions.{Execution, NodeExecution, PubSub}
   alias Imgd.Workflows.DagLayout
   alias ImgdWeb.WorkflowLive.NodeConfigModal
   import ImgdWeb.WorkflowLive.RunnerComponents
@@ -48,7 +48,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:selected_version_id, "draft")
           |> assign_source_graph(workflow)
           |> assign(:execution, nil)
-          |> assign(:execution_context, nil)
           |> assign(:node_states, %{})
           |> assign(:selected_node_id, nil)
           |> assign(:running?, false)
@@ -104,9 +103,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         PubSub.subscribe_execution(execution.id)
         node_states = build_node_states_from_execution(execution)
 
-        # Build execution context for expression preview
-        exec_context = build_execution_context(execution, node_states)
-
         # Source for graph rendering
         source = execution.workflow_version || socket.assigns.workflow
 
@@ -116,7 +112,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         socket =
           socket
           |> assign(:execution, execution)
-          |> assign(:execution_context, exec_context)
           |> assign(:node_states, node_states)
           |> assign(:running?, Execution.active?(execution))
           |> assign(:selected_version_id, version_id)
@@ -142,25 +137,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
       {:ok, json} -> json
       _ -> "{}"
     end
-  end
-
-  # ============================================================================
-  # Build Execution Context for Expression Preview
-  # ============================================================================
-
-  defp build_execution_context(nil, _), do: nil
-
-  defp build_execution_context(%Execution{} = execution, node_states) do
-    # Build node outputs from node_states
-    node_outputs =
-      node_states
-      |> Enum.filter(fn {_, state} -> state[:output_data] != nil end)
-      |> Enum.map(fn {node_id, state} -> {node_id, state[:output_data]} end)
-      |> Map.new()
-
-    # Create context with accumulated outputs
-    Context.new(execution)
-    |> Map.put(:node_outputs, node_outputs)
   end
 
   # ============================================================================
@@ -358,7 +334,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:execution, execution)
           |> assign(:running?, true)
           |> assign(:node_states, %{})
-          |> assign(:execution_context, nil)
           |> assign(:trace_log_count, 0)
           |> assign(:selected_demo, parsed.demo)
           |> assign(:run_form, run_form)
@@ -409,7 +384,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:execution, execution)
           |> assign(:running?, true)
           |> assign(:node_states, build_initial_pin_states(workflow))
-          |> assign(:execution_context, nil)
           |> assign(:trace_log_count, 0)
           |> stream(:trace_log, [], reset: true)
           |> append_trace_log(:info, "Partial execution started", %{
@@ -521,14 +495,9 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   @impl true
   def handle_info({:execution_completed, execution}, socket) do
-    # Rebuild context now that execution is complete
-    node_states = socket.assigns.node_states
-    exec_context = build_execution_context(execution, node_states)
-
     socket =
       socket
       |> assign(:execution, execution)
-      |> assign(:execution_context, exec_context)
       |> assign(:running?, false)
       |> append_trace_log(:success, "Execution completed", %{
         duration_us: Execution.duration_us(execution),
@@ -594,13 +563,9 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         error: nil
       })
 
-    # Update execution context with new output
-    exec_context = build_execution_context(socket.assigns.execution, node_states)
-
     socket =
       socket
       |> assign(:node_states, node_states)
-      |> assign(:execution_context, exec_context)
       |> append_trace_log(:success, "Node completed: #{node_name}", %{
         duration_us: duration_us,
         node_id: short_id(node_id)
@@ -1143,7 +1108,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           module={NodeConfigModal}
           id={"node-config-#{@config_modal_node.id}"}
           node={@config_modal_node}
-          execution_context={@execution_context}
+          execution={@execution}
           node_output={get_in(@node_states, [@config_modal_node.id, :output_data])}
           pinned_data={Map.get(@pins_with_status, @config_modal_node.id)}
         />

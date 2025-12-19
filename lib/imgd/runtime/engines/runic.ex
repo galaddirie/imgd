@@ -14,9 +14,18 @@ defmodule Imgd.Runtime.Engines.Runic do
   4. Wire up data flow via Runic's parent/child dependencies
   5. Install observability hooks for real-time node tracking
 
+  ## Runtime State
+
+  All runtime state is managed by ExecutionState (ETS-backed):
+  - Node outputs are recorded after each node completes
+  - Current node context is set before expression evaluation
+  - Timing information is tracked for metrics
+
+  No intermediate "Context" struct is used - ExecutionState is the single source of truth.
+
   ## Hooks and Real-Time Events
 
-  When an Execution record is provided to `build/3`, the engine installs
+  When an Execution record is provided to `build/4`, the engine installs
   before/after hooks on each step to:
   - Create/update NodeExecution records via the buffer
   - Broadcast PubSub events for real-time UI updates
@@ -36,8 +45,8 @@ defmodule Imgd.Runtime.Engines.Runic do
   alias Imgd.Workflows.Workflow, as: ImgdWorkflow
   alias Imgd.Workflows.Embeds.Node
   alias Ecto.Changeset
-  alias Imgd.Executions.{Context, Execution, NodeExecution, NodeExecutionBuffer}
-  alias Imgd.Runtime.{ExecutionState, Serializer}
+  alias Imgd.Executions.{Execution, NodeExecution, NodeExecutionBuffer}
+  alias Imgd.Runtime.Serializer
   alias Imgd.Nodes.Executors.Behaviour, as: NodeExecutor
   alias Imgd.Observability.Instrumentation
   alias Imgd.Runtime.Expression.Evaluator
@@ -47,7 +56,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   # ===========================================================================
 
   @impl true
-  def build(source, %Context{} = context, execution, state_store, opts \\ [])
+  def build(source, execution, state_store, opts \\ [])
       when is_struct(source, WorkflowVersion) or is_struct(source, ImgdWorkflow) do
     with {:ok, graph} <- Graph.from_workflow(source.nodes, source.connections),
          {:ok, sorted_ids} <- Graph.topological_sort(graph) do
@@ -55,9 +64,9 @@ defmodule Imgd.Runtime.Engines.Runic do
       sorted_nodes = Enum.map(sorted_ids, &Map.fetch!(node_map, &1))
 
       if execution do
-        build_with_hooks(sorted_nodes, graph, context, source, execution, state_store, opts)
+        build_with_hooks(sorted_nodes, graph, source, execution, state_store, opts)
       else
-        build_simple(sorted_nodes, graph, context, source, state_store, opts)
+        build_simple(sorted_nodes, graph, source, state_store, opts)
       end
     else
       {:error, {:invalid_edges, edges}} ->
@@ -71,27 +80,22 @@ defmodule Imgd.Runtime.Engines.Runic do
     end
   end
 
-  def build(source, %Context{} = context, execution) do
-    build(source, context, execution, ExecutionState, [])
-  end
-
   @impl true
-  def execute(workflow, input, %Context{} = context, state_store) do
+  def execute(workflow, trigger_data, %Execution{} = execution, state_store) do
     try do
-      executed = Workflow.react_until_satisfied(workflow, input)
+      executed = Workflow.react_until_satisfied(workflow, trigger_data)
 
       productions = Workflow.raw_productions(executed)
       build_log = extract_build_log(executed)
       execution_log = extract_execution_log(executed)
       output = determine_output(productions)
 
-      node_outputs = state_store.outputs(context.execution_id)
-      merged_outputs = Map.merge(context.node_outputs, node_outputs)
+      node_outputs = state_store.outputs(execution.id)
 
       {:ok,
        %{
          output: output,
-         node_outputs: merged_outputs,
+         node_outputs: node_outputs,
          engine_logs: %{
            build_log: build_log,
            execution_log: execution_log
@@ -99,8 +103,6 @@ defmodule Imgd.Runtime.Engines.Runic do
        }}
     rescue
       e in Imgd.Runtime.NodeExecutionError ->
-        execution = build_execution_stub(context)
-
         handle_node_failed(
           execution,
           e.node_id,
@@ -119,18 +121,8 @@ defmodule Imgd.Runtime.Engines.Runic do
     end
   end
 
-  def execute(workflow, input, %Context{} = context) do
-    execute(workflow, input, context, ExecutionState)
-  end
-
   @impl true
-  def build_partial(
-        source,
-        %Context{} = context,
-        %Execution{} = execution,
-        opts,
-        state_store
-      )
+  def build_partial(source, %Execution{} = execution, opts, state_store)
       when is_struct(source, WorkflowVersion) or is_struct(source, ImgdWorkflow) do
     target_node_ids = Keyword.get(opts, :target_nodes, [])
     pinned_outputs = Keyword.get(opts, :pinned_outputs, %{})
@@ -155,7 +147,6 @@ defmodule Imgd.Runtime.Engines.Runic do
         filtered_nodes = Enum.filter(source.nodes, &(&1.id in nodes_to_run))
 
         # Include connections where both source and target are in the run set.
-        # Boundary pinned nodes are already included in nodes_to_run.
         filtered_connections =
           Enum.filter(source.connections, fn c ->
             c.source_node_id in nodes_to_run and c.target_node_id in nodes_to_run
@@ -163,37 +154,21 @@ defmodule Imgd.Runtime.Engines.Runic do
 
         partial_source = %{source | nodes: filtered_nodes, connections: filtered_connections}
 
-        # Merge pinned outputs into context
-        context_with_pins = %{
-          context
-          | node_outputs: Map.merge(context.node_outputs, pinned_outputs)
-        }
-
+        # Pre-record pinned outputs to state store
         for {node_id, output} <- pinned_outputs do
-          state_store.record_output(context.execution_id, node_id, output)
+          state_store.record_output(execution.id, node_id, output)
         end
 
-        build(partial_source, context_with_pins, execution, state_store,
-          pinned_outputs: pinned_outputs
-        )
+        build(partial_source, execution, state_store, pinned_outputs: pinned_outputs)
       end
     end
-  end
-
-  def build_partial(
-        source,
-        %Context{} = context,
-        %Execution{} = execution,
-        opts \\ []
-      ) do
-    build_partial(source, context, execution, opts, ExecutionState)
   end
 
   # ===========================================================================
   # Workflow Building
   # ===========================================================================
 
-  defp build_with_hooks(sorted_nodes, graph, context, source, execution, state_store, opts) do
+  defp build_with_hooks(sorted_nodes, graph, source, execution, state_store, opts) do
     version_tag =
       cond do
         is_struct(source, WorkflowVersion) -> source.version_tag
@@ -215,7 +190,7 @@ defmodule Imgd.Runtime.Engines.Runic do
 
     {workflow, step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
-        step = create_step(node, context, state_store, execution, opts)
+        step = create_step(node, execution, state_store, opts)
         parents = Graph.parents(graph, node.id)
 
         wf =
@@ -243,7 +218,7 @@ defmodule Imgd.Runtime.Engines.Runic do
       {:error, {:build_failed, Exception.message(e)}}
   end
 
-  defp build_simple(sorted_nodes, graph, context, source, state_store, opts) do
+  defp build_simple(sorted_nodes, graph, source, state_store, opts) do
     version_tag =
       cond do
         is_struct(source, WorkflowVersion) -> source.version_tag
@@ -263,7 +238,8 @@ defmodule Imgd.Runtime.Engines.Runic do
 
     {workflow, _step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
-        step = create_step(node, context, state_store, nil, opts)
+        # For simple builds without execution, create a basic step
+        step = create_simple_step(node, state_store, opts)
         parents = Graph.parents(graph, node.id)
 
         wf =
@@ -300,19 +276,36 @@ defmodule Imgd.Runtime.Engines.Runic do
     Runic.workflow(name: "empty_partial_#{id}")
   end
 
-  defp create_step(%Node{} = node, %Context{} = context, state_store, execution, opts) do
+  defp create_step(%Node{} = node, %Execution{} = execution, state_store, opts) do
     pinned_outputs = Keyword.get(opts, :pinned_outputs, %{})
 
     work =
       if Map.has_key?(pinned_outputs, node.id) do
         fn _input ->
           output = Map.fetch!(pinned_outputs, node.id)
-          # We still want to record the output in state_store so downstream nodes see it
-          state_store.record_output(context.execution_id, node.id, output)
+          # Record the pinned output so downstream nodes can see it
+          state_store.record_output(execution.id, node.id, output)
           output
         end
       else
-        fn input -> execute_node(node, input, context, state_store, execution) end
+        fn input -> execute_node(node, input, execution, state_store) end
+      end
+
+    Step.new(
+      name: node.id,
+      work: work,
+      hash: Components.fact_hash({node.id, node.type_id})
+    )
+  end
+
+  defp create_simple_step(%Node{} = node, _state_store, opts) do
+    pinned_outputs = Keyword.get(opts, :pinned_outputs, %{})
+
+    work =
+      if Map.has_key?(pinned_outputs, node.id) do
+        fn _input -> Map.fetch!(pinned_outputs, node.id) end
+      else
+        fn input -> {:needs_execution, node.id, input} end
       end
 
     Step.new(
@@ -332,15 +325,13 @@ defmodule Imgd.Runtime.Engines.Runic do
   # Node Execution
   # ===========================================================================
 
-  defp execute_node(%Node{} = node, input, %Context{} = context, state_store, _execution) do
-    ctx =
-      context
-      |> merge_runtime_outputs(state_store)
-      |> Context.set_current_node(node.id, input)
+  defp execute_node(%Node{} = node, input, %Execution{} = execution, state_store) do
+    # Set current node context in state store for expression evaluation
+    state_store.set_current_node(execution.id, node.id, input)
 
-    case Evaluator.resolve_config(node.config, ctx) do
+    case Evaluator.resolve_config(node.config, execution, state_store) do
       {:ok, resolved_config} ->
-        execute_with_config(node, resolved_config, input, ctx, state_store)
+        execute_with_config(node, resolved_config, input, execution, state_store)
 
       {:error, reason} ->
         raise Imgd.Runtime.NodeExecutionError,
@@ -350,11 +341,11 @@ defmodule Imgd.Runtime.Engines.Runic do
     end
   end
 
-  defp execute_with_config(%Node{} = node, config, input, ctx, state_store) do
+  defp execute_with_config(%Node{} = node, config, input, %Execution{} = execution, state_store) do
     try do
-      case NodeExecutor.execute(node.type_id, config, input, ctx) do
+      case NodeExecutor.execute(node.type_id, config, input, execution) do
         {:ok, output} ->
-          state_store.record_output(ctx.execution_id, node.id, output)
+          state_store.record_output(execution.id, node.id, output)
           output
 
         {:error, reason} ->
@@ -376,11 +367,6 @@ defmodule Imgd.Runtime.Engines.Runic do
           node_type_id: node.type_id,
           reason: {:execution_exception, Exception.message(e)}
     end
-  end
-
-  defp merge_runtime_outputs(%Context{} = context, state_store) do
-    outputs = state_store.outputs(context.execution_id)
-    %{context | node_outputs: Map.merge(context.node_outputs, outputs)}
   end
 
   # ===========================================================================
@@ -700,14 +686,6 @@ defmodule Imgd.Runtime.Engines.Runic do
     rescue
       _ -> []
     end
-  end
-
-  defp build_execution_stub(%Context{} = context) do
-    %Execution{
-      id: context.execution_id,
-      workflow_id: context.workflow_id,
-      workflow_version_id: context.workflow_version_id
-    }
   end
 
   defp serialize_event(event) do

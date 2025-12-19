@@ -84,7 +84,7 @@ defmodule Imgd.Nodes.Executors.Transform do
   @supported_operations ~w(map filter pick omit merge set rename flatten passthrough)
 
   @impl true
-  def execute(config, input, _context) do
+  def execute(config, input, _execution) do
     operation = Map.fetch!(config, "operation")
     options = Map.get(config, "options", %{})
 

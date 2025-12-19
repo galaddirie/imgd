@@ -70,7 +70,7 @@ defmodule Imgd.Nodes.Executors.Math do
   @supported_operations ~w(add subtract multiply divide modulo power square_root abs round ceil floor)
 
   @impl true
-  def execute(config, input, _context) do
+  def execute(config, input, _execution) do
     operation = Map.fetch!(config, "operation")
     operand = Map.get(config, "operand")
 

@@ -12,14 +12,10 @@ defmodule Imgd.Runtime.WorkflowRunner do
   - Updates execution records in the database
   - Broadcasts PubSub events for real-time UI updates
 
-  ## Engine Abstraction
+  ## Runtime State
 
-  The actual workflow execution is delegated to the configured engine module
-  (see `Imgd.Runtime.Engines.Behaviour`). By default, this is
-  `Imgd.Runtime.Engines.Runic`, but can be swapped by configuring
-  `:imgd, :execution_engine` in your application config.
-
-
+  All runtime state (node outputs, timing, etc.) is managed by ExecutionState.
+  The Execution struct provides static metadata (trigger data, workflow info, etc.).
 
   ## Execution Flow
 
@@ -35,7 +31,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
   require Logger
 
   alias Imgd.Repo
-  alias Imgd.Executions.{Execution, Context}
+  alias Imgd.Executions.Execution
   alias Imgd.Runtime.{ExecutionState, Serializer, WorkflowBuilder}
   alias Imgd.Observability.Instrumentation
 
@@ -70,28 +66,23 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   @doc """
-  Run an execution using a provided builder function and precomputed context.
+  Run an execution using a provided builder function.
 
   Used for partial executions where only a subset of nodes are built.
   """
-  @spec run_with_builder(Execution.t(), Context.t(), (-> {:ok, term()} | {:error, term()})) ::
-          run_result()
-  def run_with_builder(%Execution{} = execution, %Context{} = context, builder_fun) do
-    run_with_builder(execution, context, builder_fun, ExecutionState)
+  @spec run_with_builder(Execution.t(), (-> {:ok, term()} | {:error, term()})) :: run_result()
+  def run_with_builder(%Execution{} = execution, builder_fun) do
+    run_with_builder(execution, builder_fun, ExecutionState)
   end
 
-  @spec run_with_builder(
-          Execution.t(),
-          Context.t(),
-          (-> {:ok, term()} | {:error, term()}),
-          module()
-        ) :: run_result()
-  def run_with_builder(%Execution{} = execution, %Context{} = context, builder_fun, state_store)
+  @spec run_with_builder(Execution.t(), (-> {:ok, term()} | {:error, term()}), module()) ::
+          run_result()
+  def run_with_builder(%Execution{} = execution, builder_fun, state_store)
       when is_function(builder_fun, 0) do
     Instrumentation.trace_execution(execution, fn ->
       with {:ok, execution} <- mark_running(execution),
            {:ok, executable} <- builder_fun.(),
-           result <- execute_with_timeout(execution, executable, context, state_store) do
+           result <- execute_with_timeout(execution, executable, state_store) do
         handle_execution_result(execution, result)
       else
         {:error, reason} -> mark_failed(execution, reason)
@@ -105,9 +96,8 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
   defp do_run(%Execution{} = execution, state_store, opts) do
     with {:ok, execution} <- mark_running(execution),
-         {:ok, context} <- build_context(execution),
-         {:ok, executable} <- build_workflow(execution, context, state_store, opts),
-         result <- execute_with_timeout(execution, executable, context, state_store) do
+         {:ok, executable} <- build_workflow(execution, state_store, opts),
+         result <- execute_with_timeout(execution, executable, state_store) do
       handle_execution_result(execution, result)
     else
       {:error, reason} ->
@@ -115,10 +105,10 @@ defmodule Imgd.Runtime.WorkflowRunner do
     end
   end
 
-  defp build_workflow(execution, context, state_store, opts) do
+  defp build_workflow(execution, state_store, opts) do
     source = execution.workflow_version || execution.workflow
 
-    case WorkflowBuilder.build(source, context, execution, state_store, opts) do
+    case WorkflowBuilder.build(source, execution, state_store, opts) do
       {:ok, executable} ->
         {:ok, executable}
 
@@ -140,8 +130,8 @@ defmodule Imgd.Runtime.WorkflowRunner do
     mark_failed(execution, reason)
   end
 
-  defp handle_execution_result(execution, {:timeout, context}) do
-    handle_result(execution, {:timeout, context})
+  defp handle_execution_result(execution, {:timeout, _}) do
+    handle_result(execution, {:timeout, nil})
   end
 
   # ===========================================================================
@@ -254,20 +244,10 @@ defmodule Imgd.Runtime.WorkflowRunner do
   end
 
   # ===========================================================================
-  # Context Building
-  # ===========================================================================
-
-  defp build_context(%Execution{} = execution) do
-    trigger_data = Execution.trigger_data(execution)
-    context = Context.new(execution, current_node_id: nil, current_input: trigger_data)
-    {:ok, context}
-  end
-
-  # ===========================================================================
   # Execution with Timeout
   # ===========================================================================
 
-  defp execute_with_timeout(%Execution{} = execution, executable, context, state_store) do
+  defp execute_with_timeout(%Execution{} = execution, executable, state_store) do
     timeout_ms = get_timeout_ms(execution)
     trigger_data = Execution.trigger_data(execution)
 
@@ -275,7 +255,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
 
     task =
       Task.async(fn ->
-        execute_workflow(executable, trigger_data, context, state_store)
+        execute_workflow(executable, trigger_data, execution, state_store)
       end)
 
     result =
@@ -292,7 +272,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
             timeout_ms: timeout_ms
           )
 
-          {:timeout, context}
+          {:timeout, nil}
       end
 
     state_store.cleanup(execution.id)
@@ -316,23 +296,23 @@ defmodule Imgd.Runtime.WorkflowRunner do
   # Workflow Execution (via Engine)
   # ===========================================================================
 
-  defp execute_workflow(executable, initial_input, context, state_store) do
+  defp execute_workflow(executable, initial_input, execution, state_store) do
     Logger.debug("Starting workflow execution",
-      execution_id: context.execution_id,
+      execution_id: execution.id,
       trigger_input: inspect(initial_input)
     )
 
-    case WorkflowBuilder.execute(executable, initial_input, context, state_store) do
+    case WorkflowBuilder.execute(executable, initial_input, execution, state_store) do
       {:ok, result} ->
         Logger.debug("Workflow execution completed",
-          execution_id: context.execution_id
+          execution_id: execution.id
         )
 
         {:ok, result}
 
       {:error, reason} ->
         Logger.error("Workflow execution failed",
-          execution_id: context.execution_id,
+          execution_id: execution.id,
           error: inspect(reason)
         )
 
@@ -351,7 +331,7 @@ defmodule Imgd.Runtime.WorkflowRunner do
     mark_completed(execution, output, outputs, logs)
   end
 
-  defp handle_result(execution, {:timeout, _context}) do
+  defp handle_result(execution, {:timeout, _}) do
     mark_timeout(execution)
   end
 

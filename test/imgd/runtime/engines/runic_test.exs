@@ -2,7 +2,7 @@ defmodule Imgd.Runtime.Engines.RunicTest do
   use Imgd.DataCase, async: false
 
   alias Imgd.Runtime.Engines.Runic
-  alias Imgd.Executions.{Context, NodeExecution, NodeExecutionBuffer}
+  alias Imgd.Executions.{NodeExecution, NodeExecutionBuffer}
   alias Imgd.Runtime.ExecutionState
   alias Imgd.Repo
 
@@ -11,7 +11,6 @@ defmodule Imgd.Runtime.Engines.RunicTest do
     workflow = insert(:workflow, user: user)
     version = insert(:workflow_version, workflow: workflow)
     execution = insert(:execution, workflow: workflow, workflow_version: version)
-    context = Context.new(execution)
 
     ExecutionState.start(execution.id)
 
@@ -19,7 +18,7 @@ defmodule Imgd.Runtime.Engines.RunicTest do
       ExecutionState.cleanup(execution.id)
     end)
 
-    %{execution: execution, context: context, version: version}
+    %{execution: execution, version: version}
   end
 
   describe "hooks idempotency" do

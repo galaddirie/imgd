@@ -69,7 +69,7 @@ defmodule Imgd.Nodes.Executors.StringTrim do
   @supported_sides ~w(both leading trailing)
 
   @impl true
-  def execute(config, input, _context) do
+  def execute(config, input, _execution) do
     characters = Map.get(config, "characters")
     side = Map.get(config, "side", "both")
     input_field = Map.get(config, "input_field")

@@ -8,9 +8,9 @@ defmodule Imgd.Runtime.Expression.Evaluator do
 
   ## Usage in Node Executors
 
-      def execute(config, input, context) do
+      def execute(config, input, execution, state_store) do
         # Resolve all expressions in config
-        {:ok, resolved_config} = Evaluator.resolve_config(config, context)
+        {:ok, resolved_config} = Evaluator.resolve_config(config, execution, state_store)
 
         # Now use resolved_config with actual values
         url = resolved_config["url"]
@@ -35,7 +35,8 @@ defmodule Imgd.Runtime.Expression.Evaluator do
   """
 
   alias Imgd.Runtime.Expression
-  alias Imgd.Executions.Context
+  alias Imgd.Runtime.ExecutionState
+  alias Imgd.Executions.Execution
 
   require Logger
 
@@ -47,9 +48,10 @@ defmodule Imgd.Runtime.Expression.Evaluator do
 
   Returns `{:ok, resolved_config}` or `{:error, reason}`.
   """
-  @spec resolve_config(map(), Context.t()) :: {:ok, map()} | {:error, term()}
-  def resolve_config(config, %Context{} = context) when is_map(config) do
-    Expression.evaluate_deep(config, context)
+  @spec resolve_config(map(), Execution.t(), module()) :: {:ok, map()} | {:error, term()}
+  def resolve_config(config, %Execution{} = execution, state_store \\ ExecutionState)
+      when is_map(config) do
+    Expression.evaluate_deep(config, execution, state_store: state_store)
   end
 
   @doc """
@@ -57,9 +59,10 @@ defmodule Imgd.Runtime.Expression.Evaluator do
 
   Returns `{:ok, result}` or `{:error, reason}`.
   """
-  @spec resolve(String.t(), Context.t()) :: {:ok, String.t()} | {:error, term()}
-  def resolve(template, %Context{} = context) when is_binary(template) do
-    Expression.evaluate(template, context)
+  @spec resolve(String.t(), Execution.t(), module()) :: {:ok, String.t()} | {:error, term()}
+  def resolve(template, %Execution{} = execution, state_store \\ ExecutionState)
+      when is_binary(template) do
+    Expression.evaluate(template, execution, state_store: state_store)
   end
 
   @doc """
@@ -67,9 +70,10 @@ defmodule Imgd.Runtime.Expression.Evaluator do
 
   Useful when you want to fail gracefully.
   """
-  @spec resolve_or_original(String.t(), Context.t()) :: String.t()
-  def resolve_or_original(template, %Context{} = context) when is_binary(template) do
-    case Expression.evaluate(template, context) do
+  @spec resolve_or_original(String.t(), Execution.t(), module()) :: String.t()
+  def resolve_or_original(template, %Execution{} = execution, state_store \\ ExecutionState)
+      when is_binary(template) do
+    case Expression.evaluate(template, execution, state_store: state_store) do
       {:ok, result} -> result
       {:error, _} -> template
     end
@@ -83,11 +87,12 @@ defmodule Imgd.Runtime.Expression.Evaluator do
   ## Examples
 
       # Config: "{{ nodes.API.json.data | json }}"
-      {:ok, %{"key" => "value"}} = resolve_json(template, context)
+      {:ok, %{"key" => "value"}} = resolve_json(template, execution)
   """
-  @spec resolve_json(String.t(), Context.t()) :: {:ok, term()} | {:error, term()}
-  def resolve_json(template, %Context{} = context) when is_binary(template) do
-    with {:ok, result} <- Expression.evaluate(template, context) do
+  @spec resolve_json(String.t(), Execution.t(), module()) :: {:ok, term()} | {:error, term()}
+  def resolve_json(template, %Execution{} = execution, state_store \\ ExecutionState)
+      when is_binary(template) do
+    with {:ok, result} <- Expression.evaluate(template, execution, state_store: state_store) do
       case Jason.decode(result) do
         {:ok, decoded} -> {:ok, decoded}
         {:error, _} -> {:ok, result}

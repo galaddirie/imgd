@@ -1,6 +1,6 @@
 defmodule Imgd.Executions do
   @moduledoc """
-  Context for workflow executions and node executions.
+  Logic for workflow executions and node executions.
 
   All functions require an `Imgd.Accounts.Scope` with a user, ensuring callers
   only interact with their own workflows and executions.
@@ -16,9 +16,9 @@ defmodule Imgd.Executions do
   import Imgd.ContextHelpers, only: [normalize_attrs: 1, scope_user_id!: 1]
 
   alias Imgd.Accounts.Scope
-  alias Imgd.Executions.{Execution, NodeExecution, Context}
+  alias Imgd.Executions.{Execution, NodeExecution}
   alias Imgd.Workflows.{Workflow, WorkflowVersion}
-  alias Imgd.Runtime.{WorkflowRunner, WorkflowBuilder}
+  alias Imgd.Runtime.{WorkflowRunner, WorkflowBuilder, ExecutionState}
   alias Imgd.Repo
 
   require Logger
@@ -379,9 +379,7 @@ defmodule Imgd.Executions do
         }
       }
 
-      # If no version_id provided, we try to resolve one for validation
-      # but execute_partial calls start_execution which does its own resolution
-      execute_partial(scope, workflow, nil, [node_id], pinned_outputs, attrs, opts)
+      execute_partial(scope, workflow, [node_id], pinned_outputs, attrs, opts)
     end
   end
 
@@ -389,7 +387,7 @@ defmodule Imgd.Executions do
   # Private: Partial Execution Implementation
   # ============================================================================
 
-  defp execute_partial(scope, workflow, _version, target_nodes, pinned_outputs, attrs, opts) do
+  defp execute_partial(scope, workflow, target_nodes, pinned_outputs, attrs, opts) do
     with {:ok, execution} <- start_execution(scope, workflow, attrs) do
       execution = preload_for_execution(execution)
 
@@ -424,20 +422,23 @@ defmodule Imgd.Executions do
   end
 
   defp run_sync(execution, :partial, %{target_nodes: target_nodes, pinned_outputs: pinned_outputs}) do
-    context = Context.new(execution)
-    context = %{context | node_outputs: Map.merge(context.node_outputs, pinned_outputs)}
+    state_store = ExecutionState
+
+    # Pre-record pinned outputs
+    for {node_id, output} <- pinned_outputs do
+      state_store.record_output(execution.id, node_id, output)
+    end
 
     builder_fun = fn ->
       WorkflowBuilder.build_partial(
         execution.workflow_version || execution.workflow,
-        context,
         execution,
-        target_nodes: target_nodes,
-        pinned_outputs: pinned_outputs
+        [target_nodes: target_nodes, pinned_outputs: pinned_outputs],
+        state_store
       )
     end
 
-    WorkflowRunner.run_with_builder(execution, context, builder_fun)
+    WorkflowRunner.run_with_builder(execution, builder_fun, state_store)
   end
 
   defp maybe_subscribe(%Execution{id: execution_id}, opts) do

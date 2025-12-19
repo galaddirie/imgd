@@ -3,7 +3,6 @@ defmodule Imgd.Runtime.WorkflowBuilderTest do
 
   alias Imgd.Runtime.WorkflowBuilder
   alias Imgd.Runtime.Engines.Runic, as: RunicEngine
-  alias Imgd.Executions.Context
 
   describe "engine/0" do
     test "returns configured engine" do
@@ -42,35 +41,21 @@ defmodule Imgd.Runtime.WorkflowBuilderTest do
 
       execution = insert(:execution, workflow: workflow, workflow_version: version)
 
-      context = %Context{
-        execution_id: execution.id,
-        workflow_id: workflow.id,
-        workflow_version_id: version.id,
-        trigger_type: :manual,
-        trigger_data: %{},
-        node_outputs: %{},
-        variables: %{},
-        current_node_id: nil,
-        current_input: nil,
-        metadata: %{}
-      }
-
-      %{version: version, context: context, execution: execution}
+      %{version: version, execution: execution}
     end
 
     test "builds workflow via configured engine", %{
       version: version,
-      context: context,
       execution: execution
     } do
-      assert {:ok, _executable} = WorkflowBuilder.build(version, context, execution)
+      assert {:ok, _executable} = WorkflowBuilder.build(version, execution)
     end
 
-    test "builds without execution for preview mode", %{version: version, context: context} do
-      assert {:ok, _executable} = WorkflowBuilder.build(version, context, nil)
+    test "builds without execution for preview mode", %{version: version} do
+      assert {:ok, _executable} = WorkflowBuilder.build(version, nil)
     end
 
-    test "returns error for invalid workflow", %{context: context, execution: execution} do
+    test "returns error for invalid workflow", %{execution: execution} do
       invalid_version = %Imgd.Workflows.WorkflowVersion{
         workflow_id: Ecto.UUID.generate(),
         version_tag: "1.0.0",
@@ -86,7 +71,7 @@ defmodule Imgd.Runtime.WorkflowBuilderTest do
       }
 
       assert {:error, {:cycle_detected, _}} =
-               WorkflowBuilder.build(invalid_version, context, execution)
+               WorkflowBuilder.build(invalid_version, execution)
     end
   end
 
@@ -112,35 +97,21 @@ defmodule Imgd.Runtime.WorkflowBuilderTest do
 
       execution = insert(:execution, workflow: workflow, workflow_version: version)
 
-      context = %Context{
-        execution_id: execution.id,
-        workflow_id: workflow.id,
-        workflow_version_id: version.id,
-        trigger_type: :manual,
-        trigger_data: %{},
-        node_outputs: %{},
-        variables: %{},
-        current_node_id: nil,
-        current_input: nil,
-        metadata: %{}
-      }
-
       # Start execution state for the test
       Imgd.Runtime.ExecutionState.start(execution.id)
       on_exit(fn -> Imgd.Runtime.ExecutionState.cleanup(execution.id) end)
 
-      %{version: version, context: context, execution: execution}
+      %{version: version, execution: execution}
     end
 
     test "executes workflow and returns results", %{
       version: version,
-      context: context,
       execution: execution
     } do
-      {:ok, executable} = WorkflowBuilder.build(version, context, execution)
+      {:ok, executable} = WorkflowBuilder.build(version, execution)
       input = %{"test" => "data"}
 
-      assert {:ok, result} = WorkflowBuilder.execute(executable, input, context)
+      assert {:ok, result} = WorkflowBuilder.execute(executable, input, execution)
       assert is_map(result.output)
       assert is_map(result.node_outputs)
       assert is_map(result.engine_logs)

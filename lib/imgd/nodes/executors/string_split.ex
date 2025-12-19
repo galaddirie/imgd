@@ -72,7 +72,7 @@ defmodule Imgd.Nodes.Executors.StringSplit do
   @behaviour Imgd.Nodes.Executors.Behaviour
 
   @impl true
-  def execute(config, input, _context) do
+  def execute(config, input, _execution) do
     delimiter = Map.get(config, "delimiter", "")
     limit = Map.get(config, "limit")
     trim_parts = Map.get(config, "trim_parts", false)
