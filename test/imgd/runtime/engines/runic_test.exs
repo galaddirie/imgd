@@ -85,4 +85,49 @@ defmodule Imgd.Runtime.Engines.RunicTest do
       assert Enum.at(node_execs, 0).status == :completed
     end
   end
+
+  describe "handle_node_failed" do
+    test "marks a running node as failed with error context", %{execution: execution} do
+      node_id = "failing_node"
+      node_info = %{type_id: "format", name: "Formatter"}
+      fact_start = %{value: %{"input" => "data"}}
+      reason = {:expression_error, %{message: "bad template"}}
+
+      Runic.handle_node_started(execution, node_id, node_info, fact_start, ExecutionState)
+      Runic.handle_node_failed(execution, node_id, node_info, reason, ExecutionState)
+
+      NodeExecutionBuffer.flush()
+
+      [node_exec] =
+        Repo.all(
+          from n in NodeExecution,
+            where: n.execution_id == ^execution.id and n.node_id == ^node_id
+        )
+
+      assert node_exec.status == :failed
+      assert node_exec.completed_at
+      assert %{"type" => "node_failure", "node_id" => ^node_id} = node_exec.error
+      assert node_exec.error["reason"] =~ "expression_error"
+    end
+
+    test "creates a failed record when the start hook was missed", %{execution: execution} do
+      node_id = "missing_start"
+      node_info = %{type_id: "format", name: "Formatter"}
+      reason = :unexpected
+
+      Runic.handle_node_failed(execution, node_id, node_info, reason, ExecutionState)
+
+      NodeExecutionBuffer.flush()
+
+      [node_exec] =
+        Repo.all(
+          from n in NodeExecution,
+            where: n.execution_id == ^execution.id and n.node_id == ^node_id
+        )
+
+      assert node_exec.status == :failed
+      assert node_exec.started_at
+      assert node_exec.completed_at
+    end
+  end
 end

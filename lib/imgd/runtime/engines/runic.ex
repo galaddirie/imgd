@@ -98,6 +98,16 @@ defmodule Imgd.Runtime.Engines.Runic do
        }}
     rescue
       e in Imgd.Runtime.NodeExecutionError ->
+        execution = build_execution_stub(context)
+
+        handle_node_failed(
+          execution,
+          e.node_id,
+          %{type_id: e.node_type_id},
+          e.reason,
+          state_store
+        )
+
         {:error, {:node_failed, e.node_id, e.reason}}
 
       e ->
@@ -205,7 +215,7 @@ defmodule Imgd.Runtime.Engines.Runic do
 
     {workflow, step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
-        step = create_step(node, context, state_store)
+        step = create_step(node, context, state_store, execution)
         parents = Graph.parents(graph, node.id)
 
         wf =
@@ -253,7 +263,7 @@ defmodule Imgd.Runtime.Engines.Runic do
 
     {workflow, _step_map} =
       Enum.reduce(sorted_nodes, {base_workflow, %{}}, fn node, {wf, steps} ->
-        step = create_step(node, context, state_store)
+        step = create_step(node, context, state_store, nil)
         parents = Graph.parents(graph, node.id)
 
         wf =
@@ -290,8 +300,8 @@ defmodule Imgd.Runtime.Engines.Runic do
     Runic.workflow(name: "empty_partial_#{id}")
   end
 
-  defp create_step(%Node{} = node, %Context{} = context, state_store) do
-    work = fn input -> execute_node(node, input, context, state_store) end
+  defp create_step(%Node{} = node, %Context{} = context, state_store, execution) do
+    work = fn input -> execute_node(node, input, context, state_store, execution) end
 
     Step.new(
       name: node.id,
@@ -310,7 +320,7 @@ defmodule Imgd.Runtime.Engines.Runic do
   # Node Execution
   # ===========================================================================
 
-  defp execute_node(%Node{} = node, input, %Context{} = context, state_store) do
+  defp execute_node(%Node{} = node, input, %Context{} = context, state_store, _execution) do
     ctx =
       context
       |> merge_runtime_outputs(state_store)
@@ -448,6 +458,114 @@ defmodule Imgd.Runtime.Engines.Runic do
   end
 
   @doc false
+  def handle_node_failed(execution, node_id, node_info, reason, state_store) do
+    node_type_id = Map.get(node_info, :type_id) || Map.get(node_info, "type_id") || "unknown"
+    node_name = Map.get(node_info, :name) || node_id
+
+    duration_ms =
+      case state_store.fetch_start_time(execution.id, node_id) do
+        {:ok, start_time} -> System.monotonic_time(:millisecond) - start_time
+        :error -> 0
+      end
+
+    error = Execution.format_error({:node_failed, node_id, reason})
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    node_exec =
+      case state_store.fetch_node_execution(execution.id, node_id) do
+        {:ok, node_exec} ->
+          node_exec
+
+        :error ->
+          find_running_node_execution(execution.id, node_id)
+      end
+
+    case node_exec do
+      %NodeExecution{status: :failed} ->
+        :ok
+
+      %NodeExecution{} = node_exec ->
+        case Changeset.apply_action(
+               NodeExecution.changeset(node_exec, %{
+                 status: :failed,
+                 error: error,
+                 completed_at: now
+               }),
+               :update
+             ) do
+          {:ok, updated} ->
+            state_store.put_node_execution(execution.id, node_id, updated)
+            NodeExecutionBuffer.record(updated)
+
+            Instrumentation.record_node_failed(
+              execution,
+              updated,
+              {:node_failed, node_id, reason},
+              duration_ms
+            )
+
+            Logger.error("Node failed: #{node_name}",
+              node_type: node_type_id,
+              node_id: node_id,
+              error: inspect(reason)
+            )
+
+          {:error, changeset} ->
+            Logger.warning("Failed to validate node execution failure",
+              execution_id: execution.id,
+              node_id: node_id,
+              errors: inspect(changeset.errors)
+            )
+        end
+
+      nil ->
+        started_at = DateTime.add(now, -duration_ms, :millisecond)
+        id = Ecto.UUID.generate()
+
+        attrs = %{
+          execution_id: execution.id,
+          node_id: node_id,
+          node_type_id: node_type_id,
+          status: :failed,
+          error: error,
+          started_at: started_at,
+          completed_at: now,
+          queued_at: started_at,
+          attempt: 1
+        }
+
+        case Changeset.apply_action(
+               NodeExecution.changeset(%NodeExecution{id: id}, attrs),
+               :insert
+             ) do
+          {:ok, node_exec} ->
+            state_store.put_node_execution(execution.id, node_id, node_exec)
+            NodeExecutionBuffer.record(node_exec)
+
+            Instrumentation.record_node_failed(
+              execution,
+              node_exec,
+              {:node_failed, node_id, reason},
+              duration_ms
+            )
+
+            Logger.error("Node failed: #{node_name}",
+              node_type: node_type_id,
+              node_id: node_id,
+              error: inspect(reason)
+            )
+
+          {:error, changeset} ->
+            Logger.warning("Failed to insert failed node execution",
+              execution_id: execution.id,
+              node_id: node_id,
+              errors: inspect(changeset.errors)
+            )
+        end
+    end
+  end
+
+  @doc false
   def handle_node_completed(execution, node_id, node_info, fact, state_store) do
     node_type_id = node_info.type_id
     node_name = node_info.name
@@ -570,6 +688,14 @@ defmodule Imgd.Runtime.Engines.Runic do
     rescue
       _ -> []
     end
+  end
+
+  defp build_execution_stub(%Context{} = context) do
+    %Execution{
+      id: context.execution_id,
+      workflow_id: context.workflow_id,
+      workflow_version_id: context.workflow_version_id
+    }
   end
 
   defp serialize_event(event) do
