@@ -19,6 +19,7 @@ defmodule Imgd.Workflows.DagLayout do
       # }
   """
 
+  # TODO: delete this once we move ui to react
   alias Imgd.Graph
 
   @type node_id :: String.t()
