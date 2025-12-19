@@ -87,13 +87,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
                 field={@run_form[:version_id]}
                 type="select"
                 label="Workflow Version"
-                options={[
-                  {"Draft (Current Changes)", "draft"}
-                  | Enum.map(
-                      @versions,
-                      &{"v#{&1.version_tag} - #{format_relative_time(&1.published_at)}", &1.id}
-                    )
-                ]}
+                options={[{"Draft (Current Changes)", "draft"} | Enum.map(@versions, &{"v#{&1.version_tag} - #{format_relative_time(&1.published_at)}", &1.id})]}
                 class="select select-bordered w-full select-sm h-10"
               />
             </div>
@@ -513,7 +507,8 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             class="px-2 py-1 rounded-full text-xs font-medium shadow-sm bg-base-100 border border-base-300 hover:bg-base-200 transition flex items-center gap-1"
             title="Configure node"
           >
-            <.icon name="hero-cog-6-tooth" class="size-3" /> Configure
+            <.icon name="hero-cog-6-tooth" class="size-3" />
+            Configure
           </button>
           <button
             type="button"
@@ -539,7 +534,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             <animate attributeName="opacity" values="0.5;0;0.5" dur="1s" repeatCount="indefinite" />
           </circle>
         <% else %>
-          <%= if @pinned and not @state[:status] do %>
+          <%= if @pinned and is_nil(@state[:status]) do %>
             <circle cx="0" cy="0" r="6" class={[(@pin_stale && "fill-warning") || "fill-primary/60"]} />
           <% else %>
             <circle cx="0" cy="0" r="6" class={node_status_indicator_class(@state[:status])} />
@@ -584,7 +579,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             Running...
           </text>
         <% end %>
-        <%= if @pinned and not @state[:status] do %>
+        <%= if @pinned and is_nil(@state[:status]) do %>
           <text x="16" y="64" class="text-[10px] fill-primary/60">
             Using pinned data
           </text>
