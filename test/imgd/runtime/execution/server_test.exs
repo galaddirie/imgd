@@ -4,8 +4,10 @@ defmodule Imgd.Runtime.Execution.ServerTest do
   """
   use Imgd.DataCase, async: false
 
-  alias Imgd.Runtime.Execution.Supervisor
+  alias Imgd.Accounts.Scope
+  alias Imgd.Executions
   alias Imgd.Executions.Execution
+  alias Imgd.Runtime.Execution.Supervisor
 
   describe "start_link/1 with published workflow version" do
     test "execution transitions from pending to running with a published version" do
@@ -37,6 +39,7 @@ defmodule Imgd.Runtime.Execution.ServerTest do
     test "execution transitions from pending to running without a published version" do
       # Create a workflow with nodes directly on it (draft mode)
       user = insert(:user)
+      scope = Scope.for_user(user)
 
       workflow =
         insert(:workflow,
@@ -53,17 +56,14 @@ defmodule Imgd.Runtime.Execution.ServerTest do
           connections: []
         )
 
-      # Create execution WITHOUT a workflow_version (draft execution)
+      # Create execution WITHOUT a workflow_version (draft execution) using snapshots
       {:ok, execution} =
-        Repo.insert(%Execution{
-          status: :pending,
-          workflow_id: workflow.id,
-          workflow_version_id: nil,
-          trigger: %{type: :manual, data: %{value: 42}},
-          context: %{}
+        Executions.start_preview_execution(scope, workflow, %{
+          trigger: %{type: :manual, data: %{value: 42}}
         })
 
       assert execution.workflow_version_id == nil
+      assert execution.workflow_snapshot_id != nil
 
       # Start the execution process - this should NOT crash
       {:ok, pid} = Supervisor.start_execution(execution.id)
@@ -85,6 +85,7 @@ defmodule Imgd.Runtime.Execution.ServerTest do
 
     test "execution uses workflow nodes when workflow_version is nil" do
       user = insert(:user)
+      scope = Scope.for_user(user)
 
       # Create workflow with specific nodes
       workflow =
@@ -117,14 +118,10 @@ defmodule Imgd.Runtime.Execution.ServerTest do
           ]
         )
 
-      # Create execution without workflow_version
+      # Create execution without workflow_version using snapshots
       {:ok, execution} =
-        Repo.insert(%Execution{
-          status: :pending,
-          workflow_id: workflow.id,
-          workflow_version_id: nil,
-          trigger: %{type: :manual, data: %{}},
-          context: %{}
+        Executions.start_preview_execution(scope, workflow, %{
+          trigger: %{type: :manual, data: %{}}
         })
 
       # Start execution

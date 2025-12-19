@@ -17,11 +17,28 @@ defmodule Imgd.Executions.Execution do
   business logic as they may change with engine versions.
   """
   @derive {Jason.Encoder,
-           except: [
-             :__meta__,
-             :workflow,
-             :workflow_version,
-             :triggered_by_user
+           only: [
+             :id,
+             :workflow_version_id,
+             :workflow_snapshot_id,
+             :workflow_id,
+             :status,
+             :execution_type,
+             :trigger,
+             :engine_build_log,
+             :engine_execution_log,
+             :context,
+             :pinned_data,
+             :output,
+             :error,
+             :waiting_for,
+             :started_at,
+             :completed_at,
+             :expires_at,
+             :metadata,
+             :triggered_by_user_id,
+             :inserted_at,
+             :updated_at
            ]}
   use Imgd.Schema
   import Imgd.ChangesetHelpers
@@ -32,8 +49,10 @@ defmodule Imgd.Executions.Execution do
 
   @type status :: :pending | :running | :paused | :completed | :failed | :cancelled | :timeout
   @type trigger_type :: :manual | :schedule | :webhook | :event
+  @type execution_type :: :production | :preview | :partial
 
   @statuses [:pending, :running, :paused, :completed, :failed, :cancelled, :timeout]
+  @execution_types [:production, :preview, :partial]
 
   defmodule Trigger do
     @moduledoc "Embedded trigger data for an execution"
@@ -79,13 +98,16 @@ defmodule Imgd.Executions.Execution do
 
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
-          workflow_version_id: Ecto.UUID.t(),
+          workflow_version_id: Ecto.UUID.t() | nil,
+          workflow_snapshot_id: Ecto.UUID.t() | nil,
           workflow_id: Ecto.UUID.t(),
           status: status(),
+          execution_type: execution_type(),
           trigger: Trigger.t(),
           engine_build_log: [map()],
           engine_execution_log: [map()],
           context: map(),
+          pinned_data: map(),
           output: map() | nil,
           error: map() | nil,
           waiting_for: map() | nil,
@@ -100,9 +122,11 @@ defmodule Imgd.Executions.Execution do
 
   schema "executions" do
     belongs_to :workflow_version, WorkflowVersion
+    belongs_to :workflow_snapshot, Imgd.Workflows.WorkflowSnapshot
     belongs_to :workflow, Workflow
 
     field :status, Ecto.Enum, values: @statuses, default: :pending
+    field :execution_type, Ecto.Enum, values: @execution_types, default: :production
 
     embeds_one :trigger, Trigger, on_replace: :update
     embeds_one :metadata, Metadata, on_replace: :update
@@ -114,6 +138,9 @@ defmodule Imgd.Executions.Execution do
 
     # Accumulated outputs from all nodes: %{"node_id" => output_data}
     field :context, :map, default: %{}
+
+    # Snapshotted pinned data for partial/preview runs
+    field :pinned_data, :map, default: %{}
 
     # Final declared output (from an output node)
     field :output, :map
@@ -139,11 +166,14 @@ defmodule Imgd.Executions.Execution do
     execution
     |> cast(attrs, [
       :workflow_version_id,
+      :workflow_snapshot_id,
       :workflow_id,
       :status,
+      :execution_type,
       :engine_build_log,
       :engine_execution_log,
       :context,
+      :pinned_data,
       :output,
       :error,
       :waiting_for,
@@ -154,13 +184,31 @@ defmodule Imgd.Executions.Execution do
     ])
     |> cast_embed(:trigger, required: true, with: &trigger_changeset/2)
     |> cast_embed(:metadata, with: &metadata_changeset/2)
-    |> validate_required([:workflow_id, :status])
+    |> validate_required([:workflow_id, :status, :execution_type])
+    |> validate_immutable_source()
     |> validate_map_field(:context)
+    |> validate_map_field(:pinned_data)
     |> validate_map_field(:output, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
     |> validate_map_field(:waiting_for, allow_nil: true)
     |> validate_list_of_maps(:engine_build_log)
     |> validate_list_of_maps(:engine_execution_log)
+  end
+
+  defp validate_immutable_source(changeset) do
+    version_id = get_field(changeset, :workflow_version_id)
+    snapshot_id = get_field(changeset, :workflow_snapshot_id)
+
+    cond do
+      is_nil(version_id) and is_nil(snapshot_id) ->
+        add_error(changeset, :base, "execution must reference a version or snapshot")
+
+      not is_nil(version_id) and not is_nil(snapshot_id) ->
+        add_error(changeset, :base, "execution cannot reference both version and snapshot")
+
+      true ->
+        changeset
+    end
   end
 
   defp trigger_changeset(trigger, attrs) do

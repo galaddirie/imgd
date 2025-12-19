@@ -113,26 +113,16 @@ defmodule Imgd.Runtime.Execution.Server do
   def handle_event(:internal, :load_execution, :initializing, data) do
     case data.persistence.load_execution(data.execution_id) do
       {:ok, execution} ->
-        # Use workflow_version if present, otherwise fall back to draft workflow
-        {nodes, connections} =
-          case execution.workflow_version do
-            %{nodes: nodes, connections: connections} ->
-              {nodes, connections}
-
-            nil ->
-              # Running a draft workflow - use the workflow's current state
-              workflow = execution.workflow
-              {workflow.nodes, workflow.connections}
-          end
-
+        # Load nodes and connections from exactly one immutable source
+        {nodes, connections} = load_immutable_source(execution)
         node_map = Map.new(nodes, &{&1.id, &1})
 
         case Graph.from_workflow(nodes, connections) do
           {:ok, graph} ->
-            # Handle Partial execution
+            # Handle Partial execution using snapshotted pins
             {graph, node_results} = prepare_graph_and_state(graph, execution)
 
-            # Initialize states for pinned nodes
+            # Initialize states for completed/pinned nodes
             node_states = Map.new(Map.keys(node_results), &{&1, :completed})
 
             data = %{
@@ -241,49 +231,11 @@ defmodule Imgd.Runtime.Execution.Server do
       target_nodes = Map.get(extras, "target_nodes", [])
       pinned_ids = Map.get(extras, "pinned_nodes", [])
 
-      # Extract pinned outputs from where they are stored?
-      # In Executions context, we extracted them from Workflow.
-      # But `Server` only loads `Execution`.
-      # The `Execution` record doesn't store the pinned values, only `pinned_nodes` list.
-      # We need to look up pinned outputs.
-      # However, `Execution` doesn't have them.
-      # Wait, `Executions.start_execution` extracts them but doesn't put them in Execution struct unless we put them in metadata?
-      # The previous implementation passed them via `opts`.
-
-      # Ideally the `Execution` struct created for partial run should have everything needed.
-      # Or `Server` needs to load Workflow to get pinned data?
-      # `Server` loads `workflow_version`. But pinned data is on `Workflow`.
-      # `Execution` belongs to `Workflow`. We can load it.
-
-      # Simple solution: Load execution with workflow preloaded, or verify if it's there.
-
-      # Get Pinned Outputs
-      # pinned_outputs = Imgd.Workflows.extract_pinned_data(execution.workflow)
-
-      # We need to ensure we have access to them.
-      # The `data.execution` has `workflow` loaded in `load_execution` in `EctoPersistence`.
-
-      pinned_outputs =
-        if execution.workflow do
-          Imgd.Workflows.extract_pinned_data(execution.workflow)
-        else
-          %{}
-        end
-
-      # Filter pinned outputs to only those in `pinned_ids`
-      pinned_outputs = Map.take(pinned_outputs, pinned_ids)
+      # Use snapshotted pinned_data from the execution record
+      pinned_outputs = Map.take(execution.pinned_data || %{}, pinned_ids)
 
       subgraph =
         Graph.execution_subgraph(graph, target_nodes, pinned: pinned_ids, include_targets: true)
-
-      # Prepare node_results with pinned data so they are treated as "completed" or available inputs
-      # Use `node_results` map for this.
-
-      # Note: Pinned nodes are "boundary" in subgraph.
-      # We need `node_states` to reflect them as `:completed` if we want to skip running them.
-      # Or if `Graph.execution_subgraph` includes them as leaves, they will appear as `runnable` but with 0 parents in subgraph.
-      # If we have their result in `node_results` and mark them `:completed` in `node_states`, they won't be picked up as runnable?
-      # `get_runnable` checks `is_nil(state)`.
 
       {subgraph, pinned_outputs}
     else
@@ -457,4 +409,20 @@ defmodule Imgd.Runtime.Execution.Server do
 
   defp put_node_state(data, id, status), do: put_in(data.node_states[id], status)
   defp put_node_result(data, id, result), do: put_in(data.node_results[id], result)
+
+  defp load_immutable_source(%Execution{} = execution) do
+    cond do
+      not is_nil(execution.workflow_version_id) ->
+        version = execution.workflow_version
+        {version.nodes, version.connections}
+
+      not is_nil(execution.workflow_snapshot_id) ->
+        snapshot = execution.workflow_snapshot
+        {snapshot.nodes, snapshot.connections}
+
+      true ->
+        # This should be impossible due to database constraints
+        raise "Execution #{execution.id} has no immutable source (version or snapshot)"
+    end
+  end
 end

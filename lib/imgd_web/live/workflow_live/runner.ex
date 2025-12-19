@@ -11,6 +11,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
+  alias Imgd.Workflows.EditingSessions
   alias Imgd.Executions
   alias Imgd.Executions.{Execution, NodeExecution, PubSub}
   alias Imgd.Workflows.DagLayout
@@ -39,16 +40,25 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         initial_payload = if(initial_demo, do: initial_demo.data, else: %{})
         run_form = build_run_form(initial_payload, version_id: "draft")
 
+        {:ok, session} = EditingSessions.get_or_create_session(scope, workflow)
+
         socket =
           socket
           |> assign(:page_title, "Run: #{workflow.name}")
           |> assign(:workflow, workflow)
+          |> assign(:editing_session, session)
           |> assign(:versions, versions)
           |> assign(:versions_map, versions_map)
           |> assign(:selected_version_id, "draft")
           |> assign_source_graph(workflow)
           |> assign(:execution, nil)
-          |> assign(:node_states, %{})
+          |> assign(
+            :node_states,
+            build_initial_pin_states(
+              workflow,
+              EditingSessions.get_pins_with_status(session, workflow)
+            )
+          )
           |> assign(:selected_node_id, nil)
           |> assign(:running?, false)
           |> assign(:can_run?, length(workflow.nodes || []) > 0)
@@ -65,7 +75,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:show_context_menu, false)
           |> assign(:context_menu_node_id, nil)
           |> assign(:context_menu_position, %{x: 0, y: 0})
-          |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(workflow))
+          |> assign(:pins_with_status, EditingSessions.get_pins_with_status(session, workflow))
           |> stream(:trace_log, [], dom_id: &"trace-#{&1.id}")
 
         {:ok, socket}
@@ -95,7 +105,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     scope = socket.assigns.current_scope
 
     case Executions.get_execution(scope, execution_id,
-           preload: [:node_executions, :workflow_version]
+           preload: [:node_executions, :workflow_version, :workflow_snapshot]
          ) do
       nil ->
         {:noreply, put_flash(socket, :error, "Execution not found")}
@@ -104,7 +114,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         node_states = build_node_states_from_execution(execution)
 
         # Source for graph rendering
-        source = execution.workflow_version || socket.assigns.workflow
+        source =
+          execution.workflow_version || execution.workflow_snapshot || socket.assigns.workflow
 
         version_id =
           if execution.workflow_version, do: execution.workflow_version.id, else: "draft"
@@ -270,12 +281,13 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
 
+    session = socket.assigns.editing_session
+
     case Workflows.unpin_node_output(scope, workflow, node_id) do
-      {:ok, updated_workflow} ->
+      {:ok, _} ->
         socket =
           socket
-          |> assign(:workflow, updated_workflow)
-          |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(updated_workflow))
+          |> assign(:pins_with_status, EditingSessions.get_pins_with_status(session, workflow))
           |> assign(:show_context_menu, false)
           |> put_flash(:info, "Pin removed")
           |> append_trace_log(:info, "Removed pin", %{node_id: node_id})
@@ -291,20 +303,14 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   def handle_event("clear_all_pins", _params, socket) do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
+    {:ok, _} = Workflows.clear_all_pins(scope, workflow)
 
-    case Workflows.clear_all_pins(scope, workflow) do
-      {:ok, updated_workflow} ->
-        socket =
-          socket
-          |> assign(:workflow, updated_workflow)
-          |> assign(:pins_with_status, %{})
-          |> put_flash(:info, "All pins cleared")
+    socket =
+      socket
+      |> assign(:pins_with_status, %{})
+      |> put_flash(:info, "All pins cleared")
 
-        {:noreply, socket}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to clear pins: #{format_error(reason)}")}
-    end
+    {:noreply, socket}
   end
 
   # ============================================================================
@@ -334,7 +340,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> maybe_subscribe_to_execution(execution.id)
           |> assign(:execution, execution)
           |> assign(:running?, true)
-          |> assign(:node_states, %{})
+          |> assign(
+            :node_states,
+            build_initial_pin_states(workflow, socket.assigns.pins_with_status)
+          )
           |> assign(:trace_log_count, 0)
           |> assign(:selected_demo, parsed.demo)
           |> assign(:run_form, run_form)
@@ -371,18 +380,20 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     trigger_data = get_trigger_data_from_form(socket)
     version_id = socket.assigns.selected_version_id
 
-    case Executions.execute_node(scope, workflow, node_id,
-           workflow_version_id: version_id,
-           trigger_data: trigger_data,
-           async: true
-         ) do
+    case Executions.start_partial_execution(scope, workflow, node_id, %{
+           trigger: %{type: :manual, data: trigger_data},
+           metadata: build_manual_metadata("Partial Run: #{node_id}")
+         }) do
       {:ok, execution} ->
         socket =
           socket
           |> maybe_subscribe_to_execution(execution.id)
           |> assign(:execution, execution)
           |> assign(:running?, true)
-          |> assign(:node_states, build_initial_pin_states(workflow))
+          |> assign(
+            :node_states,
+            build_initial_pin_states(workflow, socket.assigns.pins_with_status)
+          )
           |> assign(:trace_log_count, 0)
           |> stream(:trace_log, [], reset: true)
           |> append_trace_log(:info, "Partial execution started", %{
@@ -455,17 +466,17 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   def handle_info({:pin_node_output, node_id, output_data, label}, socket) do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
+    session = socket.assigns.editing_session
     execution_id = socket.assigns.execution && socket.assigns.execution.id
 
     case Workflows.pin_node_output(scope, workflow, node_id, output_data,
            execution_id: execution_id,
            label: if(label == "", do: nil, else: label)
          ) do
-      {:ok, updated_workflow} ->
+      {:ok, _} ->
         socket =
           socket
-          |> assign(:workflow, updated_workflow)
-          |> assign(:pins_with_status, Workflows.get_pinned_outputs_with_status(updated_workflow))
+          |> assign(:pins_with_status, EditingSessions.get_pins_with_status(session, workflow))
           |> put_flash(:info, "Output pinned successfully")
           |> append_trace_log(:info, "Pinned node output", %{node_id: node_id})
 
@@ -667,8 +678,8 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     end
   end
 
-  defp build_initial_pin_states(workflow) do
-    (workflow.pinned_outputs || %{})
+  defp build_initial_pin_states(_workflow, pins_with_status) do
+    pins_with_status
     |> Enum.map(fn {node_id, pin} ->
       {node_id,
        %{
@@ -1139,7 +1150,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         <.node_context_menu
           node_id={@context_menu_node_id}
           node_name={(node && node.name) || @context_menu_node_id}
-          pinned={Map.has_key?(@workflow.pinned_outputs || %{}, @context_menu_node_id)}
+          pinned={Map.has_key?(@pins_with_status || %{}, @context_menu_node_id)}
           pin_stale={(pin_status && pin_status["stale"]) || false}
           has_output={get_in(@node_states, [@context_menu_node_id, :output_data]) != nil}
           position={@context_menu_position}

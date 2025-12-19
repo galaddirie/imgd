@@ -95,39 +95,125 @@ defmodule Imgd.Executions do
   end
 
   @doc """
-  Starts an execution for the given workflow.
-
-  By default the published version is used. You can override by providing
-  `:workflow_version` or `:workflow_version_id` in attrs. The current user is
-  stored on `triggered_by_user_id`.
+  Starts a production execution against a published version.
   """
-  def start_execution(%Scope{} = scope, %Workflow{} = workflow, attrs \\ %{}) do
+  def start_production_execution(%Scope{} = scope, %Workflow{} = workflow, attrs \\ %{}) do
     attrs = normalize_attrs(attrs)
 
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, version} <- resolve_version_for_execution(workflow, attrs) do
-      # Extract pinned outputs from workflow
-      pinned_outputs = Imgd.Workflows.extract_pinned_data(workflow)
-
-      metadata =
+      params =
         attrs
-        |> Map.get(:metadata, %{})
-        |> normalize_attrs()
-        |> Map.update(:extras, %{"pinned_nodes" => Map.keys(pinned_outputs)}, fn extras ->
-          Map.put(extras || %{}, "pinned_nodes", Map.keys(pinned_outputs))
-        end)
+        |> drop_protected_execution_keys()
+        |> Map.put(:workflow_id, workflow.id)
+        |> Map.put(:workflow_version_id, version.id)
+        |> Map.put(:workflow_snapshot_id, nil)
+        |> Map.put(:execution_type, :production)
+        |> Map.put(:pinned_data, %{})
+        |> Map.put_new(:triggered_by_user_id, scope.user.id)
+
+      %Execution{}
+      |> Execution.changeset(params)
+      |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Starts a preview execution with an automatic snapshot.
+  """
+  def start_preview_execution(%Scope{} = scope, %Workflow{} = workflow, attrs \\ %{}) do
+    attrs = normalize_attrs(attrs)
+
+    with :ok <- authorize_workflow(scope, workflow),
+         {:ok, snapshot} <- Imgd.Workflows.Snapshots.get_or_create(scope, workflow),
+         {:ok, session} <- Imgd.Workflows.EditingSessions.get_or_create_session(scope, workflow) do
+      pinned_data =
+        Imgd.Workflows.EditingSessions.get_compatible_pins(session, snapshot.source_hash)
 
       params =
         attrs
         |> drop_protected_execution_keys()
         |> Map.put(:workflow_id, workflow.id)
-        |> Map.put(:workflow_version_id, if(version, do: version.id, else: nil))
+        |> Map.put(:workflow_version_id, nil)
+        |> Map.put(:workflow_snapshot_id, snapshot.id)
+        |> Map.put(:execution_type, :preview)
+        |> Map.put(:pinned_data, pinned_data)
+        |> Map.put_new(:triggered_by_user_id, scope.user.id)
+
+      %Execution{}
+      |> Execution.changeset(params)
+      |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Starts a partial execution to a target node.
+  """
+  def start_partial_execution(
+        %Scope{} = scope,
+        %Workflow{} = workflow,
+        target_node_id,
+        attrs \\ %{}
+      ) do
+    attrs = normalize_attrs(attrs)
+
+    with :ok <- authorize_workflow(scope, workflow),
+         {:ok, _node} <- find_workflow_node(workflow, target_node_id),
+         {:ok, snapshot} <- Imgd.Workflows.Snapshots.get_or_create(scope, workflow),
+         {:ok, session} <- Imgd.Workflows.EditingSessions.get_or_create_session(scope, workflow) do
+      compatible_pins =
+        Imgd.Workflows.EditingSessions.get_compatible_pins(session, snapshot.source_hash)
+
+      metadata =
+        attrs
+        |> Map.get(:metadata, %{})
+        |> normalize_attrs()
+        |> Map.update(
+          :extras,
+          %{
+            "partial" => true,
+            "target_node" => target_node_id,
+            "pinned_nodes" => Map.keys(compatible_pins)
+          },
+          fn extras ->
+            extras
+            |> Map.put("partial", true)
+            |> Map.put("target_node", target_node_id)
+            |> Map.put("pinned_nodes", Map.keys(compatible_pins))
+          end
+        )
+
+      params =
+        attrs
+        |> drop_protected_execution_keys()
+        |> Map.put(:workflow_id, workflow.id)
+        |> Map.put(:workflow_version_id, nil)
+        |> Map.put(:workflow_snapshot_id, snapshot.id)
+        |> Map.put(:execution_type, :partial)
+        |> Map.put(:pinned_data, compatible_pins)
         |> Map.put(:metadata, metadata)
         |> Map.put_new(:triggered_by_user_id, scope.user.id)
 
       %Execution{}
       |> Execution.changeset(params)
       |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Starts an execution for the given workflow.
+  """
+  def start_execution(%Scope{} = scope, %Workflow{} = workflow, attrs \\ %{}) do
+    attrs = normalize_attrs(attrs)
+    version_id = Map.get(attrs, :workflow_version_id) || Map.get(attrs, "workflow_version_id")
+
+    cond do
+      version_id == "draft" or (is_nil(version_id) and is_nil(workflow.published_version_id)) ->
+        start_preview_execution(scope, workflow, attrs)
+
+      true ->
+        # Production execution against specific version or published default
+        start_production_execution(scope, workflow, attrs)
     end
   end
 
@@ -362,40 +448,26 @@ defmodule Imgd.Executions do
   def execute_node(%Scope{} = scope, %Workflow{} = workflow, node_id, opts \\ []) do
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, _node} <- find_workflow_node(workflow, node_id) do
-      pinned_outputs = Imgd.Workflows.extract_pinned_data(workflow)
       trigger_data = Keyword.get(opts, :trigger_data, %{})
-      version_id = Keyword.get(opts, :workflow_version_id)
 
       attrs = %{
-        workflow_version_id: version_id,
         trigger: %{type: :manual, data: trigger_data},
-        metadata: %{
-          extras: %{
-            "partial" => true,
-            "target_node" => node_id,
-            "pinned_nodes" => Map.keys(pinned_outputs)
-          }
-        }
+        metadata: Keyword.get(opts, :metadata, %{})
       }
 
-      execute_partial(scope, workflow, [node_id], pinned_outputs, attrs, opts)
+      with {:ok, execution} <- start_partial_execution(scope, workflow, node_id, attrs) do
+        execution = preload_for_execution(execution)
+        maybe_subscribe(execution, opts)
+
+        # Mode args are no longer needed as pins are already in execution
+        run_with_mode(execution, :partial, %{}, opts)
+      end
     end
   end
 
   # ============================================================================
   # Private: Partial Execution Implementation
   # ============================================================================
-
-  defp execute_partial(scope, workflow, target_nodes, pinned_outputs, attrs, opts) do
-    with {:ok, execution} <- start_execution(scope, workflow, attrs) do
-      execution = preload_for_execution(execution)
-
-      maybe_subscribe(execution, opts)
-
-      mode_args = %{target_nodes: target_nodes, pinned_outputs: pinned_outputs}
-      run_with_mode(execution, :partial, mode_args, opts)
-    end
-  end
 
   defp run_with_mode(execution, mode, mode_args, opts) do
     async = Keyword.get(opts, :async, true)

@@ -17,7 +17,7 @@ defmodule Imgd.Runtime.Execution.EctoPersistence do
   def load_execution(id) do
     Execution
     |> Repo.get(id)
-    |> Repo.preload([:workflow_version, :workflow])
+    |> Repo.preload([:workflow_version, :workflow_snapshot, :workflow])
     |> case do
       nil -> {:error, :not_found}
       execution -> {:ok, execution}
