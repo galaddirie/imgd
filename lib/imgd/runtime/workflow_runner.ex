@@ -65,13 +65,18 @@ defmodule Imgd.Runtime.WorkflowRunner do
   """
   @spec run(Execution.t()) :: run_result()
   def run(%Execution{} = execution) do
-    run(execution, ExecutionState)
+    run(execution, ExecutionState, [])
   end
 
   @spec run(Execution.t(), module()) :: run_result()
   def run(%Execution{} = execution, state_store) do
+    run(execution, state_store, [])
+  end
+
+  @spec run(Execution.t(), module(), keyword()) :: run_result()
+  def run(%Execution{} = execution, state_store, opts) do
     Instrumentation.trace_execution(execution, fn ->
-      do_run(execution, state_store)
+      do_run(execution, state_store, opts)
     end)
   end
 
@@ -109,10 +114,10 @@ defmodule Imgd.Runtime.WorkflowRunner do
   # Core Execution Flow
   # ===========================================================================
 
-  defp do_run(%Execution{} = execution, state_store) do
+  defp do_run(%Execution{} = execution, state_store, opts) do
     with {:ok, execution} <- mark_running(execution),
          {:ok, context} <- build_context(execution),
-         {:ok, executable} <- build_workflow(execution, context, state_store),
+         {:ok, executable} <- build_workflow(execution, context, state_store, opts),
          result <- execute_with_timeout(execution, executable, context, state_store) do
       handle_execution_result(execution, result)
     else
@@ -121,10 +126,10 @@ defmodule Imgd.Runtime.WorkflowRunner do
     end
   end
 
-  defp build_workflow(execution, context, state_store) do
+  defp build_workflow(execution, context, state_store, opts) do
     source = execution.workflow_version || execution.workflow
 
-    case WorkflowBuilder.build(source, context, execution, state_store) do
+    case WorkflowBuilder.build(source, context, execution, state_store, opts) do
       {:ok, executable} ->
         {:ok, executable}
 

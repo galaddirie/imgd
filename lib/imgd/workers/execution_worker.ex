@@ -104,7 +104,12 @@ defmodule Imgd.Workers.ExecutionWorker do
   end
 
   defp run_execution(%Execution{} = execution, false, _args) do
-    handle_runner_result(execution, WorkflowRunner.run(execution, ExecutionState))
+    pinned_outputs = Imgd.Workflows.extract_pinned_data(execution.workflow)
+
+    handle_runner_result(
+      execution,
+      WorkflowRunner.run(execution, ExecutionState, pinned_outputs: pinned_outputs)
+    )
   end
 
   defp run_execution(%Execution{} = execution, true, args) do

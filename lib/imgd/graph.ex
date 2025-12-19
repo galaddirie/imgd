@@ -374,28 +374,26 @@ defmodule Imgd.Graph do
   Extracts the induced subgraph for executing to target nodes.
 
   Returns a subgraph containing the targets and all their upstream dependencies,
-  optionally excluding pinned nodes.
+  stopping at pinned nodes. Pinned nodes themselves are included in the subgraph
+  as leaf sources.
 
   ## Options
 
-  - `:exclude` - List of vertex IDs to exclude (e.g., pinned nodes)
+  - `:exclude` - List of vertex IDs to exclude completely
+  - `:pinned` - List of vertex IDs that are pinned (upstream traversal stops here)
   - `:include_targets` - Whether to include target nodes (default: true)
   """
   @spec execution_subgraph(t(), [vertex_id()], keyword()) :: t()
   def execution_subgraph(%__MODULE__{} = graph, target_ids, opts \\ []) do
     exclude = Keyword.get(opts, :exclude, []) |> MapSet.new()
+    pinned = Keyword.get(opts, :pinned, []) |> MapSet.new()
     include_targets = Keyword.get(opts, :include_targets, true)
 
-    # Get all upstream dependencies of targets
-    all_needed =
-      target_ids
-      |> Enum.flat_map(fn id -> [id | upstream(graph, id)] end)
-      |> MapSet.new()
+    # Collect nodes to run by traversing upstream from targets,
+    # but stopping at pinned nodes.
+    nodes_to_run = collect_upstream_with_boundary(graph, target_ids, pinned, exclude)
 
-    # Remove excluded nodes
-    nodes_to_run = MapSet.difference(all_needed, exclude)
-
-    # Optionally remove targets themselves
+    # Remove targets if explicitly requested
     nodes_to_run =
       if include_targets do
         nodes_to_run
@@ -403,11 +401,34 @@ defmodule Imgd.Graph do
         MapSet.difference(nodes_to_run, MapSet.new(target_ids))
       end
 
-    # Prune nodes only needed to feed excluded nodes
-    target_ids_set = MapSet.new(target_ids)
-    pruned = prune_unnecessary_upstream(graph, nodes_to_run, exclude, target_ids_set)
+    subgraph(graph, nodes_to_run)
+  end
 
-    subgraph(graph, pruned)
+  defp collect_upstream_with_boundary(graph, start_ids, boundary, exclude) do
+    do_collect_upstream(graph, start_ids, boundary, exclude, MapSet.new())
+  end
+
+  defp do_collect_upstream(_graph, [], _boundary, _exclude, acc), do: acc
+
+  defp do_collect_upstream(graph, [id | rest], boundary, exclude, acc) do
+    cond do
+      MapSet.member?(acc, id) ->
+        do_collect_upstream(graph, rest, boundary, exclude, acc)
+
+      MapSet.member?(exclude, id) ->
+        do_collect_upstream(graph, rest, boundary, exclude, acc)
+
+      MapSet.member?(boundary, id) ->
+        # Include the boundary node but don't go upstream
+        acc = MapSet.put(acc, id)
+        do_collect_upstream(graph, rest, boundary, exclude, acc)
+
+      true ->
+        # Include node and recurse to parents
+        acc = MapSet.put(acc, id)
+        parents = parents(graph, id)
+        do_collect_upstream(graph, parents ++ rest, boundary, exclude, acc)
+    end
   end
 
   @doc """
@@ -420,40 +441,6 @@ defmodule Imgd.Graph do
     descendants = downstream(graph, start_id)
     vertex_ids = [start_id | descendants]
     subgraph(graph, vertex_ids)
-  end
-
-  defp prune_unnecessary_upstream(graph, nodes_to_run, excluded, target_ids) do
-    # Remove nodes whose only purpose is to feed excluded nodes
-    Enum.filter(nodes_to_run, fn id ->
-      has_path_to_execution?(graph, id, nodes_to_run, excluded, MapSet.new(), target_ids)
-    end)
-  end
-
-  defp has_path_to_execution?(graph, id, nodes_to_run, excluded, visited, target_ids) do
-    cond do
-      MapSet.member?(visited, id) ->
-        false
-
-      MapSet.member?(excluded, id) ->
-        false
-
-      MapSet.member?(target_ids, id) and MapSet.member?(nodes_to_run, id) ->
-        true
-
-      true ->
-        child_ids = children(graph, id)
-
-        if child_ids == [] do
-          MapSet.member?(nodes_to_run, id)
-        else
-          visited = MapSet.put(visited, id)
-
-          Enum.any?(child_ids, fn child ->
-            MapSet.member?(nodes_to_run, child) or
-              has_path_to_execution?(graph, child, nodes_to_run, excluded, visited, target_ids)
-          end)
-        end
-    end
   end
 
   # ============================================================================

@@ -107,11 +107,23 @@ defmodule Imgd.Executions do
 
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, version} <- resolve_version_for_execution(workflow, attrs) do
+      # Extract pinned outputs from workflow
+      pinned_outputs = Imgd.Workflows.extract_pinned_data(workflow)
+
+      metadata =
+        attrs
+        |> Map.get(:metadata, %{})
+        |> normalize_attrs()
+        |> Map.update(:extras, %{"pinned_nodes" => Map.keys(pinned_outputs)}, fn extras ->
+          Map.put(extras || %{}, "pinned_nodes", Map.keys(pinned_outputs))
+        end)
+
       params =
         attrs
         |> drop_protected_execution_keys()
         |> Map.put(:workflow_id, workflow.id)
         |> Map.put(:workflow_version_id, if(version, do: version.id, else: nil))
+        |> Map.put(:metadata, metadata)
         |> Map.put_new(:triggered_by_user_id, scope.user.id)
 
       %Execution{}

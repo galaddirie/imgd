@@ -35,24 +35,43 @@ defmodule Imgd.Runtime.WorkflowBuilder do
   - `context` - The execution context for resolving expressions and variables
   - `execution` - The Execution record (for hooks to broadcast events)
   - `state_store` - The state store module (optional, defaults to ExecutionState)
+  - `opts` - Additional build options (optional)
 
   ## Returns
 
   - `{:ok, executable}` - Successfully built workflow
   - `{:error, reason}` - Failed to build workflow
   """
-  @spec build(WorkflowVersion.t() | Workflow.t(), Context.t(), Execution.t() | nil, module()) ::
+  @spec build(
+          WorkflowVersion.t() | Workflow.t(),
+          Context.t(),
+          Execution.t() | nil,
+          module(),
+          keyword()
+        ) ::
           build_result()
-  def build(source, context, execution, state_store \\ ExecutionState) do
-    engine().build(source, context, execution, state_store)
+  def build(source, context, execution, state_store, opts) do
+    engine().build(source, context, execution, state_store, opts)
   end
 
-  @doc """
-  Builds an executable workflow without observability hooks.
-  """
+  @doc false
+  @spec build(WorkflowVersion.t() | Workflow.t(), Context.t(), Execution.t() | nil) ::
+          build_result()
+  def build(source, context, execution)
+      when is_nil(execution) or is_struct(execution, Execution) do
+    build(source, context, execution, ExecutionState, [])
+  end
+
+  @doc false
+  @spec build(WorkflowVersion.t() | Workflow.t(), Context.t(), keyword()) :: build_result()
+  def build(source, context, opts) when is_list(opts) do
+    build(source, context, nil, ExecutionState, opts)
+  end
+
+  @doc false
   @spec build(WorkflowVersion.t() | Workflow.t(), Context.t()) :: build_result()
   def build(source, context) do
-    build(source, context, nil, ExecutionState)
+    build(source, context, nil, ExecutionState, [])
   end
 
   @doc """

@@ -21,7 +21,7 @@ defmodule Imgd.Runtime.Engines.Behaviour do
           | {:unexpected_error, String.t()}
           | term()
 
-  @callback build(WorkflowVersion.t(), Context.t(), Execution.t() | nil, module()) ::
+  @callback build(WorkflowVersion.t(), Context.t(), Execution.t() | nil, module(), keyword()) ::
               {:ok, executable()} | {:error, build_error()}
 
   @callback execute(executable(), term(), Context.t(), module()) ::
