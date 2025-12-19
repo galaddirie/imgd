@@ -71,3 +71,5 @@ ex
 todo model dev mode and pinned nodes better
 
 we need to improve execution state store dependency injection, we call it directly sometimes
+
+remove extras and metadata from execution struct, ugly 
