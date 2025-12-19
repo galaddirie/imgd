@@ -41,7 +41,16 @@ defmodule Imgd.Executions.NodeExecutionBuffer do
   Record a node execution change to be flushed asynchronously.
   """
   def record(%NodeExecution{} = node_exec) do
-    GenServer.cast(__MODULE__, {:record, node_exec})
+    if Application.get_env(:imgd, :sync_node_execution_buffer, false) do
+      attrs = attrs_from_node_exec(node_exec)
+
+      Repo.insert_all(NodeExecution, [attrs],
+        on_conflict: {:replace, @updatable_fields},
+        conflict_target: [:id]
+      )
+    else
+      GenServer.cast(__MODULE__, {:record, node_exec})
+    end
   end
 
   @doc """

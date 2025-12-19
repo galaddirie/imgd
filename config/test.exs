@@ -38,6 +38,8 @@ config :imgd, Imgd.Observability.PromEx, disabled: true
 
 config :logger, level: :warning
 
+config :imgd, :sync_node_execution_buffer, true
+
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 

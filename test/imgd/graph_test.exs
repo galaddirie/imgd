@@ -89,7 +89,7 @@ defmodule Imgd.GraphTest do
     assert {:error, {:cycle_detected, _}} = Graph.topological_sort(graph)
   end
 
-  test "execution_subgraph removes pinned nodes" do
+  test "execution_subgraph excludes nodes" do
     nodes = [%{id: "a"}, %{id: "b"}, %{id: "c"}]
 
     connections = [
@@ -99,8 +99,25 @@ defmodule Imgd.GraphTest do
 
     graph = Graph.from_workflow!(nodes, connections)
 
-    subgraph = Graph.execution_subgraph(graph, ["c"], exclude: ["a"], include_targets: true)
+    subgraph = Graph.execution_subgraph(graph, ["c"], exclude: ["b"], include_targets: true)
 
+    # b is excluded, so c has no parents in subgraph, and a is not reached
+    assert Graph.vertex_ids(subgraph) |> Enum.sort() == ["c"]
+  end
+
+  test "execution_subgraph stops at pinned nodes" do
+    nodes = [%{id: "a"}, %{id: "b"}, %{id: "c"}]
+
+    connections = [
+      %{source_node_id: "a", target_node_id: "b"},
+      %{source_node_id: "b", target_node_id: "c"}
+    ]
+
+    graph = Graph.from_workflow!(nodes, connections)
+
+    subgraph = Graph.execution_subgraph(graph, ["c"], pinned: ["b"], include_targets: true)
+
+    # b is pinned, so it's included but traversal stops (a is not included)
     assert Graph.vertex_ids(subgraph) |> Enum.sort() == ["b", "c"]
   end
 end
