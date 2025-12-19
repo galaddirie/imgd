@@ -2,8 +2,9 @@ defmodule Imgd.Runtime.Engines.RunicTest do
   use Imgd.DataCase, async: false
 
   alias Imgd.Runtime.Engines.Runic
-  alias Imgd.Executions.{NodeExecution, NodeExecutionBuffer}
+  alias Imgd.Executions.NodeExecution
   alias Imgd.Runtime.ExecutionState
+  alias Imgd.Runtime.NodeExecutionBuffer
   alias Imgd.Repo
 
   setup do

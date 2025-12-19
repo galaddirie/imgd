@@ -43,7 +43,7 @@ defmodule Imgd.DataCase do
       Ecto.Adapters.SQL.Sandbox.allow(
         Imgd.Repo,
         pid,
-        Process.whereis(Imgd.Executions.NodeExecutionBuffer)
+        Process.whereis(Imgd.Runtime.NodeExecutionBuffer)
       )
     end
 

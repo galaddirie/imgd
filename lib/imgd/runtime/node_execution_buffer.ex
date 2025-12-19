@@ -1,4 +1,4 @@
-defmodule Imgd.Executions.NodeExecutionBuffer do
+defmodule Imgd.Runtime.NodeExecutionBuffer do
   @moduledoc """
   Buffers node execution writes so Runic hooks do not block on DB calls.
 

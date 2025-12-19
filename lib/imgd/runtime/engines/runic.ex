@@ -45,7 +45,8 @@ defmodule Imgd.Runtime.Engines.Runic do
   alias Imgd.Workflows.Workflow, as: ImgdWorkflow
   alias Imgd.Workflows.Embeds.Node
   alias Ecto.Changeset
-  alias Imgd.Executions.{Execution, NodeExecution, NodeExecutionBuffer}
+  alias Imgd.Executions.{Execution, NodeExecution}
+  alias Imgd.Runtime.NodeExecutionBuffer
   alias Imgd.Runtime.Serializer
   alias Imgd.Nodes.Executors.Behaviour, as: NodeExecutor
   alias Imgd.Observability.Instrumentation
