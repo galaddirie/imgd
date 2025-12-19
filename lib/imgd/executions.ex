@@ -18,7 +18,6 @@ defmodule Imgd.Executions do
   alias Imgd.Accounts.Scope
   alias Imgd.Executions.{Execution, NodeExecution}
   alias Imgd.Workflows.{Workflow, WorkflowVersion}
-  alias Imgd.Runtime.{WorkflowRunner, WorkflowBuilder, ExecutionState}
   alias Imgd.Repo
 
   require Logger
@@ -421,24 +420,33 @@ defmodule Imgd.Executions do
     {:ok, execution}
   end
 
-  defp run_sync(execution, :partial, %{target_nodes: target_nodes, pinned_outputs: pinned_outputs}) do
-    state_store = ExecutionState
+  defp run_sync(execution, :partial, _mode_args) do
+    # Start execution via Supervisor
+    case Imgd.Runtime.Execution.Supervisor.start_execution(execution.id) do
+      {:ok, pid} ->
+        ref = Process.monitor(pid)
 
-    # Pre-record pinned outputs
-    for {node_id, output} <- pinned_outputs do
-      state_store.record_output(execution.id, node_id, output)
+        receive do
+          {:DOWN, ^ref, :process, _pid, :normal} ->
+            # Reload execution to return fresh state
+            {:ok, Repo.get!(Execution, execution.id)}
+
+          {:DOWN, ^ref, :process, _pid, reason} ->
+            {:error, reason}
+        end
+
+      {:error, {:already_started, pid}} ->
+        # Just monitor existing
+        ref = Process.monitor(pid)
+
+        receive do
+          {:DOWN, ^ref, :process, _pid, _} ->
+            {:ok, Repo.get!(Execution, execution.id)}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
-
-    builder_fun = fn ->
-      WorkflowBuilder.build_partial(
-        execution.workflow_version || execution.workflow,
-        execution,
-        [target_nodes: target_nodes, pinned_outputs: pinned_outputs],
-        state_store
-      )
-    end
-
-    WorkflowRunner.run_with_builder(execution, builder_fun, state_store)
   end
 
   defp maybe_subscribe(%Execution{id: execution_id}, opts) do

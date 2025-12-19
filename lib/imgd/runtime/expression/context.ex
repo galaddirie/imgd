@@ -35,7 +35,6 @@ defmodule Imgd.Runtime.Expression.Context do
   """
 
   alias Imgd.Executions.Execution
-  alias Imgd.Runtime.ExecutionState
 
   # Environment variables that are safe to expose
   # Configure via application env: config :imgd, :allowed_env_vars, [...]
@@ -53,17 +52,16 @@ defmodule Imgd.Runtime.Expression.Context do
   ## Parameters
 
   - `execution` - The Execution struct (should have workflow_version preloaded for variables)
-  - `state_store` - The state store module (default: ExecutionState)
+  - `node_outputs` - Map of node_id -> output data
+  - `current_input` - The input data for the current node (optional)
   """
-  @spec build(Execution.t(), module()) :: map()
-  def build(%Execution{} = execution, state_store \\ ExecutionState) do
-    # Get dynamic data from state store
-    runtime_outputs = state_store.outputs(execution.id)
-    current_input = state_store.current_input(execution.id) || Execution.trigger_data(execution)
-
+  @spec build(Execution.t(), term(), term()) :: map()
+  def build(%Execution{} = execution, node_outputs \\ %{}, current_input \\ nil) do
     # Merge persisted context with runtime data
-    # state_store takes priority for nodes that just ran
-    all_outputs = Map.merge(execution.context || %{}, runtime_outputs)
+    execution_context = execution.context || %{}
+    node_outputs_map = if is_map(node_outputs), do: node_outputs, else: %{}
+    all_outputs = Map.merge(execution_context, node_outputs_map)
+    current_input = current_input || Execution.trigger_data(execution)
 
     %{
       "json" => normalize_value(current_input),

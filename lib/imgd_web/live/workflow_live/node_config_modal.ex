@@ -380,14 +380,14 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
                 />
               </div>
             </div>
-          <div class="flex-1 overflow-y-auto custom-scrollbar">
-            <.variable_explorer
-              execution={@execution}
-              search={@variable_search}
-              expanded={@explorer_expanded}
-              myself={@myself}
-            />
-          </div>
+            <div class="flex-1 overflow-y-auto custom-scrollbar">
+              <.variable_explorer
+                execution={@execution}
+                search={@variable_search}
+                expanded={@explorer_expanded}
+                myself={@myself}
+              />
+            </div>
             <div class="p-4 border-t border-base-200 bg-base-200/5">
               <div class="text-[10px] font-bold uppercase tracking-wider text-base-content/40 mb-2">
                 Expression Tip

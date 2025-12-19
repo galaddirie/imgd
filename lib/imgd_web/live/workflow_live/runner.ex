@@ -53,6 +53,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:running?, false)
           |> assign(:can_run?, length(workflow.nodes || []) > 0)
           |> assign(:trace_log_count, 0)
+          |> assign(:subscribed_execution_id, nil)
           |> assign(:demo_inputs, demo_inputs)
           |> assign(:selected_demo, initial_demo)
           |> assign(:run_form, run_form)
@@ -100,7 +101,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         {:noreply, put_flash(socket, :error, "Execution not found")}
 
       execution ->
-        PubSub.subscribe_execution(execution.id)
         node_states = build_node_states_from_execution(execution)
 
         # Source for graph rendering
@@ -111,6 +111,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
         socket =
           socket
+          |> maybe_subscribe_to_execution(execution.id)
           |> assign(:execution, execution)
           |> assign(:node_states, node_states)
           |> assign(:running?, Execution.active?(execution))
@@ -326,11 +327,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
                trigger: %{type: :manual, data: parsed.trigger_data},
                metadata: build_manual_metadata(parsed.demo_label)
              }) do
-        PubSub.subscribe_execution(execution.id)
         run_form = build_run_form(input_string, version_id: version_id)
 
         socket =
           socket
+          |> maybe_subscribe_to_execution(execution.id)
           |> assign(:execution, execution)
           |> assign(:running?, true)
           |> assign(:node_states, %{})
@@ -373,14 +374,12 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     case Executions.execute_node(scope, workflow, node_id,
            workflow_version_id: version_id,
            trigger_data: trigger_data,
-           async: true,
-           subscribe_fun: &PubSub.subscribe_execution/1
+           async: true
          ) do
       {:ok, execution} ->
-        PubSub.subscribe_execution(execution.id)
-
         socket =
           socket
+          |> maybe_subscribe_to_execution(execution.id)
           |> assign(:execution, execution)
           |> assign(:running?, true)
           |> assign(:node_states, build_initial_pin_states(workflow))
@@ -620,6 +619,25 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   defp short_id(id) when is_binary(id), do: String.slice(id, 0, 8)
   defp short_id(_), do: "-"
+
+  defp maybe_subscribe_to_execution(socket, execution_id) when is_binary(execution_id) do
+    current_id = socket.assigns.subscribed_execution_id
+
+    cond do
+      current_id == execution_id ->
+        socket
+
+      true ->
+        if current_id do
+          PubSub.unsubscribe_execution(current_id)
+        end
+
+        PubSub.subscribe_execution(execution_id)
+        assign(socket, :subscribed_execution_id, execution_id)
+    end
+  end
+
+  defp maybe_subscribe_to_execution(socket, _execution_id), do: socket
 
   defp format_error_for_log(nil), do: %{}
 

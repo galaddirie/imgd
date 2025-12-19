@@ -49,124 +49,57 @@ defmodule Imgd.Workers.ExecutionWorker do
 
   require Logger
 
-  alias Imgd.Repo
-  alias Imgd.Executions.Execution
-  alias Imgd.Runtime.{ExecutionState, WorkflowRunner, WorkflowBuilder}
   alias Imgd.Observability.Instrumentation
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
     execution_id = Map.fetch!(args, "execution_id")
-    partial = Map.get(args, "partial", false)
 
     # Extract and restore trace context for distributed tracing
     Instrumentation.extract_trace_context(args)
 
-    Logger.metadata(execution_id: execution_id, partial: partial)
-    Logger.info("Starting workflow execution job [partial: #{partial}]")
+    Logger.metadata(execution_id: execution_id)
+    Logger.info("Starting workflow execution job")
 
-    case load_execution(execution_id) do
-      {:ok, execution} ->
-        run_execution(execution, partial, args)
+    # Start the execution process (or attach to existing)
+    case Imgd.Runtime.Execution.Supervisor.start_execution(execution_id) do
+      {:ok, pid} ->
+        monitor_and_wait(pid, execution_id)
 
-      {:error, :not_found} ->
-        Logger.error("Execution not found", execution_id: execution_id)
-        {:cancel, "Execution not found: #{execution_id}"}
-
-      {:error, :already_terminal} ->
-        Logger.info("Execution already in terminal state, skipping")
-        :ok
-    end
-  end
-
-  # ============================================================================
-  # Private Functions
-  # ============================================================================
-
-  defp load_execution(execution_id) do
-    case Repo.get(Execution, execution_id) do
-      nil ->
-        {:error, :not_found}
-
-      %Execution{status: status} when status in [:completed, :failed, :cancelled, :timeout] ->
-        {:error, :already_terminal}
-
-      %Execution{} = execution ->
-        # Preload required associations
-        execution =
-          Repo.preload(execution, [
-            :workflow,
-            workflow_version: [:workflow]
-          ])
-
-        {:ok, execution}
-    end
-  end
-
-  defp run_execution(%Execution{} = execution, false, _args) do
-    pinned_outputs = Imgd.Workflows.extract_pinned_data(execution.workflow)
-
-    handle_runner_result(
-      execution,
-      WorkflowRunner.run(execution, ExecutionState, pinned_outputs: pinned_outputs)
-    )
-  end
-
-  defp run_execution(%Execution{} = execution, true, args) do
-    target_nodes = Map.get(args, "target_nodes", [])
-    pinned_outputs = Map.get(args, "pinned_outputs", %{})
-
-    builder_fun = fn ->
-      WorkflowBuilder.build_partial(
-        execution.workflow_version || execution.workflow,
-        execution,
-        [
-          target_nodes: target_nodes,
-          pinned_outputs: pinned_outputs
-        ],
-        ExecutionState
-      )
-    end
-
-    handle_runner_result(
-      execution,
-      WorkflowRunner.run_with_builder(execution, builder_fun, ExecutionState)
-    )
-  end
-
-  defp handle_runner_result(execution, result) do
-    case result do
-      {:ok, %Execution{status: :completed}} ->
-        Logger.info("Workflow execution completed successfully",
-          execution_id: execution.id
-        )
-
-        :ok
-
-      {:ok, %Execution{status: :timeout}} ->
-        Logger.warning("Workflow execution timed out",
-          execution_id: execution.id
-        )
-
-        # Return :ok since timeout is handled - we don't want Oban to retry
-        :ok
-
-      {:ok, %Execution{status: status}} ->
-        Logger.info("Workflow execution finished with status: #{status}",
-          execution_id: execution.id
-        )
-
-        :ok
+      {:error, {:already_started, pid}} ->
+        Logger.info("Execution already running, attaching", execution_id: execution_id)
+        monitor_and_wait(pid, execution_id)
 
       {:error, reason} ->
-        Logger.error("Workflow execution failed",
-          execution_id: execution.id,
-          error: inspect(reason)
+        Logger.error("Failed to start execution process",
+          execution_id: execution_id,
+          reason: inspect(reason)
         )
 
-        # Return error to let Oban know the job failed
-        # Since max_attempts is 1, this won't retry
-        {:error, inspect(reason)}
+        # Will retry if max_attempts > 1, but configured to 1
+        {:error, reason}
+    end
+  end
+
+  defp monitor_and_wait(pid, execution_id) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, _pid, :normal} ->
+        # Execution completed explicitly (Server stops with :normal on finish)
+        Logger.info("Execution process finished normally", execution_id: execution_id)
+        :ok
+
+      {:DOWN, ^ref, :process, _pid, :shutdown} ->
+        :ok
+
+      {:DOWN, ^ref, :process, _pid, reason} ->
+        Logger.error("Execution process crashed or failed",
+          execution_id: execution_id,
+          reason: inspect(reason)
+        )
+
+        {:error, reason}
     end
   end
 
