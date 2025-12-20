@@ -53,7 +53,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
     draft.settings[:node_schemas] || draft.settings["node_schemas"]
   end
 
-  # Miranda: Preloading here is expensive in render, but Show is usually one-off.
   defp render_schema(nil), do: "Not provided"
 
   defp render_schema(schema) do

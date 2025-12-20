@@ -19,7 +19,6 @@ defmodule Imgd.Executions do
   alias Imgd.Executions.{Execution, NodeExecution}
   alias Imgd.Workflows.{Workflow, WorkflowVersion, WorkflowDraft}
   alias Imgd.Repo
-  # Miranda: Executions now need aware of WorkflowDraft for partial/preview runs.
   require Logger
 
   @type scope :: %Scope{}
@@ -140,7 +139,6 @@ defmodule Imgd.Executions do
       pinned_data =
         Imgd.Workflows.EditingSession.Server.get_compatible_pins(pid, source_hash)
 
-      # Miranda: Source hash and pins are now retrieved through draft-aware workflows context.
       params =
         attrs
         |> drop_protected_execution_keys()
@@ -581,7 +579,6 @@ defmodule Imgd.Executions do
     end
   end
 
-  # Miranda: Preload for execution remains mostly the same, but Workflow itself no longer has draft data.
   # ============================================================================
   # Authorization Helpers
   # ============================================================================

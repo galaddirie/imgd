@@ -35,9 +35,14 @@ add undo/redo functionality - unsaved changes remain in session local storage
 n8n import feature
 
 
-for some reason only some values of a node are configurable 
-our workflows should not be port based, connections are purely used to infer dependency / hierarchy between nodes. not to flow data from one node output to  a specific input of another node.
+for some reason only some values of a node are configurable  while some fields automatically get assigned values from previous nodes. 
 
+99.999% of nodes will  not automatically assigned values from previous nodes,  like in n8n, they will most likey use fixed values or use expressions to access data from previous nodes or upstream nodes.
+
+connections are purely used to infer dependency / hierarchy between nodes. not to flow data from one node output to  a specific input of another node. ex our math node takes in a operation, value and an operand, the value is the input of the node and the operand is a fixed value. it should just take in two value inputs and that we can populate with either fixed values or expressions.
+
+
+we should only be able to access data from a nodes direct upstream nodes. 
 
 
 remove extras and metadata from execution struct, ugly 

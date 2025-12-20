@@ -386,7 +386,6 @@ defmodule ImgdWeb.WorkflowLive.Index do
     end
   end
 
-  # Miranda: Index view now preloads draft for each row, which is not ideal but necessary with current design if we want triggers there.
   defp sort_workflows(workflows) do
     Enum.sort_by(
       workflows,

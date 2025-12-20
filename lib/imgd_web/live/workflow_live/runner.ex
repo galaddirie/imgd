@@ -101,7 +101,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           {[], []}
       end
 
-    # Miranda: This handles both Workflow (preloads draft) and WorkflowVersion/Snapshot.
     {layout, layout_meta} =
       DagLayout.compute_with_metadata(nodes, connections)
 
@@ -131,7 +130,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         source =
           execution.workflow_version || execution.workflow_snapshot || socket.assigns.workflow
 
-        # Miranda: Note that if it's workflow, assign_source_graph will now preload the draft.
         version_id =
           if execution.workflow_version, do: execution.workflow_version.id, else: "draft"
 
@@ -787,7 +785,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   defp workflow_demo_inputs(workflow) do
     workflow = Imgd.Repo.preload(workflow, :draft)
     settings = (workflow.draft && workflow.draft.settings) || %{}
-    # Miranda: Demo inputs are now pulled from the draft settings.
     from_settings =
       settings
       |> fetch_setting(:demo_inputs)
@@ -839,7 +836,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     draft = workflow.draft || %Imgd.Workflows.WorkflowDraft{}
     nodes = draft.nodes || []
     type_ids = Enum.map(nodes, & &1.type_id)
-    # Miranda: Demo generation now correctly uses nodes from the draft.
     []
     |> maybe_add_math_demo(type_ids)
     |> maybe_add_template_demo(type_ids)
@@ -911,7 +907,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     end)
   end
 
-  # Miranda: Trigger check now correctly uses triggers from the draft.
 
   defp match_demo_input(value, demo_inputs) do
     normalized_value = normalize_demo_value(value)
