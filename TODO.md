@@ -34,12 +34,10 @@ add undo/redo functionality - unsaved changes remain in session local storage
 
 n8n import feature
 
+
+for some reason only some values of a node are configurable 
 our workflows should not be port based, connections are purely used to infer dependency / hierarchy between nodes. not to flow data from one node output to  a specific input of another node.
 
-
-
-# security updates
-- scope workflow drafts= theey should be protected( non-owners should never be able to draft workflows, pinned outputs, etc. currently we preload the workflow for executions and workflow versions model)
 
 
 
@@ -50,7 +48,5 @@ our workflows should not be port based, connections are purely used to infer dep
 remove extras and metadata from execution struct, ugly 
 
 
-duplicate expression files? 
 
 
-for some reason only some values of a node are configurable 
