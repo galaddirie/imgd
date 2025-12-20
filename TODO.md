@@ -40,11 +40,6 @@ our workflows should not be port based, connections are purely used to infer dep
 
 
 
-
-
-
-
-
 remove extras and metadata from execution struct, ugly 
 
 
