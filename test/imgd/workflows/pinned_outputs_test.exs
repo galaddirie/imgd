@@ -1,5 +1,5 @@
 defmodule Imgd.Workflows.PinnedOutputsTest do
-  use Imgd.DataCase, async: true
+  use Imgd.DataCase, async: false
 
   import Imgd.AccountsFixtures
 
@@ -23,25 +23,36 @@ defmodule Imgd.Workflows.PinnedOutputsTest do
         connections: []
       })
 
-    %{scope: scope, workflow: workflow}
+    session_pid =
+      start_supervised!(
+        {Imgd.Workflows.EditingSession.Server, [scope: scope, workflow: workflow]}
+      )
+
+    %{scope: scope, workflow: workflow, session_pid: session_pid}
   end
 
-  test "pins and unpins output", %{scope: scope, workflow: workflow} do
-    {:ok, pin} = Workflows.pin_node_output(scope, workflow, "a", %{"value" => 42})
+  test "pins and unpins output", %{scope: scope, workflow: workflow, session_pid: session_pid} do
+    :ok = Workflows.pin_node_output(scope, workflow, "a", %{"value" => 42})
 
+    state = :sys.get_state(session_pid)
+    pin = Map.get(state.pinned_outputs, "a")
     assert pin.data == %{"value" => 42}
     assert pin.user_id == scope.user.id
 
-    {:ok, session} = EditingSessions.get_or_create_session(scope, workflow)
-    pins = EditingSessions.get_pins_with_status(session, workflow)
+    pins = EditingSessions.get_pins_with_status_from_server(session_pid, workflow)
     assert %{"a" => %{"data" => %{"value" => 42}}} = pins
 
+    {:ok, session} = EditingSessions.get_or_create_session(scope, workflow)
     {:ok, _} = Workflows.unpin_node_output(scope, workflow, "a")
     assert EditingSessions.list_pins(session) == []
   end
 
-  test "staleness is detected when node config changes", %{scope: scope, workflow: workflow} do
-    {:ok, _pin} = Workflows.pin_node_output(scope, workflow, "a", %{"ok" => true})
+  test "staleness is detected when node config changes", %{
+    scope: scope,
+    workflow: workflow,
+    session_pid: session_pid
+  } do
+    :ok = Workflows.pin_node_output(scope, workflow, "a", %{"ok" => true})
 
     {:ok, updated_workflow} =
       Workflows.update_workflow(scope, workflow, %{
@@ -55,8 +66,7 @@ defmodule Imgd.Workflows.PinnedOutputsTest do
         ]
       })
 
-    {:ok, session} = EditingSessions.get_or_create_session(scope, updated_workflow)
-    pins = EditingSessions.get_pins_with_status(session, updated_workflow)
+    pins = EditingSessions.get_pins_with_status_from_server(session_pid, updated_workflow)
     assert pins["a"]["stale"]
     assert pins["a"]["node_exists"]
   end

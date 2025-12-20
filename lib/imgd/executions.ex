@@ -126,19 +126,19 @@ defmodule Imgd.Executions do
 
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, pid} <- Imgd.Workflows.EditingSessions.get_or_start_session(scope, workflow) do
-      session_summary = Imgd.Workflows.EditingSession.Server.get_summary(pid)
+      source_hash = Imgd.Workflows.compute_source_hash(workflow)
 
       # For preview, we still want a snapshot for persistence, but we can potentially
-      # optimize this by checking if snapshot already exists for state.source_hash
+      # optimize this by checking if snapshot already exists for the current source_hash
       {:ok, snapshot} =
         Imgd.Workflows.Snapshots.get_or_create_with_hash(
           scope,
           workflow,
-          session_summary.source_hash
+          source_hash
         )
 
       pinned_data =
-        Imgd.Workflows.EditingSession.Server.get_compatible_pins(pid, session_summary.source_hash)
+        Imgd.Workflows.EditingSession.Server.get_compatible_pins(pid, source_hash)
 
       params =
         attrs
@@ -186,13 +186,13 @@ defmodule Imgd.Executions do
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, _node} <- find_workflow_node(workflow, target_node_id),
          {:ok, pid} <- Imgd.Workflows.EditingSessions.get_or_start_session(scope, workflow) do
-      session_summary = Imgd.Workflows.EditingSession.Server.get_summary(pid)
+      source_hash = Imgd.Workflows.compute_source_hash(workflow)
 
       {:ok, snapshot} =
-        Imgd.Workflows.Snapshots.get_or_create_with_hash(scope, workflow, session_summary.source_hash)
+        Imgd.Workflows.Snapshots.get_or_create_with_hash(scope, workflow, source_hash)
 
       compatible_pins =
-        Imgd.Workflows.EditingSession.Server.get_compatible_pins(pid, session_summary.source_hash)
+        Imgd.Workflows.EditingSession.Server.get_compatible_pins(pid, source_hash)
 
       metadata =
         attrs

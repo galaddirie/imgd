@@ -73,14 +73,14 @@ defmodule Imgd.Workflows.EditingSessions do
   end
 
   def touch_session_id(session_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
     EditingSession
     |> where([s], s.id == ^session_id)
     |> Repo.update_all(
       set: [
-        last_activity_at: DateTime.utc_now() |> DateTime.truncate(:second),
-        expires_at:
-          DateTime.add(DateTime.utc_now(), @session_ttl_hours, :hour)
-          |> DateTime.truncate(:second)
+        last_activity_at: now,
+        expires_at: DateTime.add(now, @session_ttl_hours, :hour)
       ]
     )
   end

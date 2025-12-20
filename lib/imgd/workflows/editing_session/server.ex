@@ -204,13 +204,27 @@ defmodule Imgd.Workflows.EditingSession.Server do
       |> Repo.delete_all()
 
       # Insert all current pins
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      allowed_fields = [
+        :editing_session_id,
+        :workflow_id,
+        :user_id,
+        :node_id,
+        :source_hash,
+        :node_config_hash,
+        :data,
+        :source_execution_id,
+        :label,
+        :pinned_at
+      ]
+
       entries =
         Enum.map(state.pinned_outputs, fn {_, pin} ->
           pin
-          |> Map.from_struct()
-          |> Map.drop([:id, :inserted_at, :updated_at, :user, :workflow, :editing_session])
-          |> Map.put(:inserted_at, DateTime.utc_now() |> DateTime.truncate(:second))
-          |> Map.put(:updated_at, DateTime.utc_now() |> DateTime.truncate(:second))
+          |> Map.take(allowed_fields)
+          |> Map.put(:inserted_at, now)
+          |> Map.put(:updated_at, now)
         end)
 
       unless entries == [] do
@@ -218,7 +232,9 @@ defmodule Imgd.Workflows.EditingSession.Server do
       end
 
       # Update session last_activity_at
-      EditingSessions.touch_session_id(state.session_id)
+      _ = EditingSessions.touch_session_id(state.session_id)
+
+      {:ok, :synced}
     end)
 
     %{state | dirty: false, last_persisted_at: DateTime.utc_now()}
