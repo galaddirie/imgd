@@ -125,10 +125,20 @@ defmodule Imgd.Executions do
     attrs = normalize_attrs(attrs)
 
     with :ok <- authorize_workflow(scope, workflow),
-         {:ok, snapshot} <- Imgd.Workflows.Snapshots.get_or_create(scope, workflow),
-         {:ok, session} <- Imgd.Workflows.EditingSessions.get_or_create_session(scope, workflow) do
+         {:ok, pid} <- Imgd.Workflows.EditingSessions.get_or_start_session(scope, workflow) do
+      session_summary = Imgd.Workflows.EditingSession.Server.get_summary(pid)
+
+      # For preview, we still want a snapshot for persistence, but we can potentially
+      # optimize this by checking if snapshot already exists for state.source_hash
+      {:ok, snapshot} =
+        Imgd.Workflows.Snapshots.get_or_create_with_hash(
+          scope,
+          workflow,
+          session_summary.source_hash
+        )
+
       pinned_data =
-        Imgd.Workflows.EditingSessions.get_compatible_pins(session, snapshot.source_hash)
+        Imgd.Workflows.EditingSession.Server.get_compatible_pins(pid, session_summary.source_hash)
 
       params =
         attrs
@@ -143,6 +153,22 @@ defmodule Imgd.Executions do
       %Execution{}
       |> Execution.changeset(params)
       |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Immediate (fast-path) execution for previews, bypassing Oban.
+  """
+  def start_and_run_fast_path(%Scope{} = scope, %Workflow{} = workflow, attrs \\ %{}) do
+    with {:ok, execution} <- start_preview_execution(scope, workflow, attrs) do
+      # Preload and start runtime directly
+      execution = preload_for_execution(execution)
+
+      case Imgd.Runtime.Execution.Supervisor.start_execution(execution.id) do
+        {:ok, _pid} -> {:ok, %{execution: execution}}
+        {:error, {:already_started, _pid}} -> {:ok, %{execution: execution}}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 

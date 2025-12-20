@@ -27,6 +27,8 @@ defmodule Imgd.Application do
         Imgd.Runtime.Execution.Supervisor,
         # Add before Sandbox.Supervisor
         Imgd.Runtime.Expression.Cache,
+        Imgd.Workflows.EditingSession.Registry,
+        Imgd.Workflows.EditingSession.DynamicSupervisor,
         Imgd.Sandbox.Supervisor,
         ImgdWeb.Endpoint
       ]

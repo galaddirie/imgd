@@ -23,6 +23,10 @@ defmodule Imgd.Workflows.Snapshots do
         workflow.triggers || []
       )
 
+    get_or_create_with_hash(scope, workflow, source_hash)
+  end
+
+  def get_or_create_with_hash(%Scope{} = scope, %Workflow{} = workflow, source_hash) do
     case find_existing(workflow.id, source_hash) do
       nil -> create(scope, workflow, source_hash)
       snapshot -> {:ok, snapshot}

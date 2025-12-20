@@ -7,14 +7,36 @@ defmodule Imgd.Workflows.EditingSessions do
   alias Imgd.Repo
   alias Imgd.Accounts.Scope
   alias Imgd.Workflows.{Workflow, EditingSession, PinnedOutput}
+  alias Imgd.Workflows.EditingSession.{Registry, DynamicSupervisor, Server}
 
   # 7 days
   @session_ttl_hours 168
 
+  def get_or_start_session(%Scope{} = scope, %Workflow{} = workflow) do
+    user_id = scope_user_id!(scope)
+    workflow_id = workflow.id
+
+    case Registry.lookup(user_id, workflow_id) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, :not_found} ->
+        case DynamicSupervisor.start_session(scope, workflow) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+          error -> error
+        end
+    end
+  end
+
   def get_or_create_session(%Scope{} = scope, %Workflow{} = workflow) do
     case get_active_session(scope, workflow) do
-      nil -> create_session(scope, workflow)
-      session -> {:ok, touch_session(session)}
+      nil ->
+        create_session(scope, workflow)
+
+      session ->
+        touch_session_id(session.id)
+        {:ok, session}
     end
   end
 
@@ -50,13 +72,17 @@ defmodule Imgd.Workflows.EditingSessions do
     |> Repo.insert()
   end
 
-  def touch_session(%EditingSession{} = session) do
-    session
-    |> EditingSession.changeset(%{
-      last_activity_at: DateTime.utc_now(),
-      expires_at: DateTime.add(DateTime.utc_now(), @session_ttl_hours, :hour)
-    })
-    |> Repo.update!()
+  def touch_session_id(session_id) do
+    EditingSession
+    |> where([s], s.id == ^session_id)
+    |> Repo.update_all(
+      set: [
+        last_activity_at: DateTime.utc_now() |> DateTime.truncate(:second),
+        expires_at:
+          DateTime.add(DateTime.utc_now(), @session_ttl_hours, :hour)
+          |> DateTime.truncate(:second)
+      ]
+    )
   end
 
   def close_session(%EditingSession{} = session) do
@@ -132,27 +158,30 @@ defmodule Imgd.Workflows.EditingSessions do
   @doc """
   Retrieves pins for a session with status metadata (stale, orphaned).
   """
-  def get_pins_with_status(%EditingSession{} = session, %Workflow{} = workflow) do
-    pins = list_pins(session)
+  def get_pins_with_status_from_server(pid, %Workflow{} = workflow) do
+    Server.get_status(pid, workflow)
+  end
+
+  def build_pins_status(pinned_outputs, base_source_hash, %Workflow{} = workflow) do
     nodes_by_id = Map.new(workflow.nodes || [], &{&1.id, &1})
 
-    pins
-    |> Map.new(fn pin ->
-      node = Map.get(nodes_by_id, pin.node_id)
+    pinned_outputs
+    |> Map.new(fn {node_id, pin} ->
+      node = Map.get(nodes_by_id, node_id)
 
       status = %{
         "id" => pin.id,
-        "node_id" => pin.node_id,
+        "node_id" => node_id,
         "label" => pin.label,
         "pinned_at" => pin.pinned_at,
         "data" => pin.data,
         "node_exists" => not is_nil(node),
         "stale" =>
           is_nil(node) or pin.node_config_hash != Imgd.Workflows.compute_node_config_hash(node),
-        "source_hash_match" => pin.source_hash == session.base_source_hash
+        "source_hash_match" => pin.source_hash == base_source_hash
       }
 
-      {pin.node_id, status}
+      {node_id, status}
     end)
   end
 

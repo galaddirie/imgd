@@ -40,13 +40,13 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         initial_payload = if(initial_demo, do: initial_demo.data, else: %{})
         run_form = build_run_form(initial_payload, version_id: "draft")
 
-        {:ok, session} = EditingSessions.get_or_create_session(scope, workflow)
+        {:ok, pid} = EditingSessions.get_or_start_session(scope, workflow)
 
         socket =
           socket
           |> assign(:page_title, "Run: #{workflow.name}")
           |> assign(:workflow, workflow)
-          |> assign(:editing_session, session)
+          |> assign(:editing_session_pid, pid)
           |> assign(:versions, versions)
           |> assign(:versions_map, versions_map)
           |> assign(:selected_version_id, "draft")
@@ -56,7 +56,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
             :node_states,
             build_initial_pin_states(
               workflow,
-              EditingSessions.get_pins_with_status(session, workflow)
+              EditingSessions.get_pins_with_status_from_server(pid, workflow)
             )
           )
           |> assign(:selected_node_id, nil)
@@ -75,7 +75,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           |> assign(:show_context_menu, false)
           |> assign(:context_menu_node_id, nil)
           |> assign(:context_menu_position, %{x: 0, y: 0})
-          |> assign(:pins_with_status, EditingSessions.get_pins_with_status(session, workflow))
+          |> assign(
+            :pins_with_status,
+            EditingSessions.get_pins_with_status_from_server(pid, workflow)
+          )
           |> stream(:trace_log, [], dom_id: &"trace-#{&1.id}")
 
         {:ok, socket}
@@ -281,13 +284,17 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
 
-    session = socket.assigns.editing_session
-
     case Workflows.unpin_node_output(scope, workflow, node_id) do
       {:ok, _} ->
         socket =
           socket
-          |> assign(:pins_with_status, EditingSessions.get_pins_with_status(session, workflow))
+          |> assign(
+            :pins_with_status,
+            EditingSessions.get_pins_with_status_from_server(
+              socket.assigns.editing_session_pid,
+              workflow
+            )
+          )
           |> assign(:show_context_menu, false)
           |> put_flash(:info, "Pin removed")
           |> append_trace_log(:info, "Removed pin", %{node_id: node_id})
@@ -326,36 +333,50 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
     if socket.assigns.can_run? do
       with {:ok, parsed} <-
-             parse_input_payload(input_string, socket.assigns.demo_inputs),
-           {:ok, %{execution: execution}} <-
-             Executions.start_and_enqueue_execution(scope, workflow, %{
-               workflow_version_id: version_id,
-               trigger: %{type: :manual, data: parsed.trigger_data},
-               metadata: build_manual_metadata(parsed.demo_label)
-             }) do
-        run_form = build_run_form(input_string, version_id: version_id)
+             parse_input_payload(input_string, socket.assigns.demo_inputs) do
+        run_task =
+          if version_id == "draft" do
+            Executions.start_and_run_fast_path(scope, workflow, %{
+              trigger: %{type: :manual, data: parsed.trigger_data},
+              metadata: build_manual_metadata(parsed.demo_label)
+            })
+          else
+            Executions.start_and_enqueue_execution(scope, workflow, %{
+              workflow_version_id: version_id,
+              trigger: %{type: :manual, data: parsed.trigger_data},
+              metadata: build_manual_metadata(parsed.demo_label)
+            })
+          end
 
-        socket =
-          socket
-          |> maybe_subscribe_to_execution(execution.id)
-          |> assign(:execution, execution)
-          |> assign(:running?, true)
-          |> assign(
-            :node_states,
-            build_initial_pin_states(workflow, socket.assigns.pins_with_status)
-          )
-          |> assign(:trace_log_count, 0)
-          |> assign(:selected_demo, parsed.demo)
-          |> assign(:run_form, run_form)
-          |> assign(:run_form_error, nil)
-          |> stream(:trace_log, [], reset: true)
-          |> append_trace_log(:info, "Execution started", %{
-            execution_id: short_id(execution.id),
-            version: version_id
-          })
-          |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
+        case run_task do
+          {:ok, %{execution: execution}} ->
+            run_form = build_run_form(input_string, version_id: version_id)
 
-        {:noreply, socket}
+            socket =
+              socket
+              |> maybe_subscribe_to_execution(execution.id)
+              |> assign(:execution, execution)
+              |> assign(:running?, true)
+              |> assign(
+                :node_states,
+                build_initial_pin_states(workflow, socket.assigns.pins_with_status)
+              )
+              |> assign(:trace_log_count, 0)
+              |> assign(:selected_demo, parsed.demo)
+              |> assign(:run_form, run_form)
+              |> assign(:run_form_error, nil)
+              |> stream(:trace_log, [], reset: true)
+              |> append_trace_log(:info, "Execution started", %{
+                execution_id: short_id(execution.id),
+                version: version_id
+              })
+              |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
+
+            {:noreply, socket}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
+        end
       else
         {:error, :invalid_payload, message} ->
           {:noreply,
@@ -365,9 +386,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
              build_run_form(input_string, version_id: version_id, errors: [data: {message, []}])
            )
            |> assign(:run_form_error, message)}
-
-        {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
       end
     else
       {:noreply, put_flash(socket, :error, "Workflow must have nodes before running")}
@@ -466,17 +484,22 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   def handle_info({:pin_node_output, node_id, output_data, label}, socket) do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
-    session = socket.assigns.editing_session
     execution_id = socket.assigns.execution && socket.assigns.execution.id
 
     case Workflows.pin_node_output(scope, workflow, node_id, output_data,
            execution_id: execution_id,
            label: if(label == "", do: nil, else: label)
          ) do
-      {:ok, _} ->
+      :ok ->
         socket =
           socket
-          |> assign(:pins_with_status, EditingSessions.get_pins_with_status(session, workflow))
+          |> assign(
+            :pins_with_status,
+            EditingSessions.get_pins_with_status_from_server(
+              socket.assigns.editing_session_pid,
+              workflow
+            )
+          )
           |> put_flash(:info, "Output pinned successfully")
           |> append_trace_log(:info, "Pinned node output", %{node_id: node_id})
 

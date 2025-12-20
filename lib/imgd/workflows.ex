@@ -16,7 +16,7 @@ defmodule Imgd.Workflows do
   import Imgd.ContextHelpers, only: [normalize_attrs: 1, scope_user_id!: 1]
 
   alias Imgd.Accounts.Scope
-  alias Imgd.Workflows.{PinnedOutput, Workflow, WorkflowVersion}
+  alias Imgd.Workflows.{Workflow, WorkflowVersion}
   alias Imgd.Repo
 
   @type scope :: %Scope{}
@@ -312,12 +312,12 @@ defmodule Imgd.Workflows do
   Pins a node's output data for development-time caching.
   """
   def pin_node_output(%Scope{} = scope, %Workflow{} = workflow, node_id, output_data, opts \\ []) do
-    with {:ok, session} <- Imgd.Workflows.EditingSessions.get_or_create_session(scope, workflow),
+    with {:ok, pid} <- Imgd.Workflows.EditingSessions.get_or_start_session(scope, workflow),
          {:ok, node} <- find_node(workflow, node_id) do
       node_config_hash = compute_node_config_hash(node)
       source_hash = compute_source_hash(workflow)
 
-      Imgd.Workflows.EditingSessions.create_pin(session, scope, %{
+      Imgd.Workflows.EditingSession.Server.pin_output(pid, %{
         node_id: node_id,
         source_hash: source_hash,
         node_config_hash: node_config_hash,
@@ -332,15 +332,9 @@ defmodule Imgd.Workflows do
   Removes a pinned output from a node.
   """
   def unpin_node_output(%Scope{} = scope, %Workflow{} = workflow, node_id) do
-    with session when not is_nil(session) <-
-           Imgd.Workflows.EditingSessions.get_active_session(scope, workflow) do
-      PinnedOutput
-      |> where([p], p.editing_session_id == ^session.id and p.node_id == ^node_id)
-      |> Repo.delete_all()
-
+    with {:ok, pid} <- Imgd.Workflows.EditingSessions.get_or_start_session(scope, workflow) do
+      Imgd.Workflows.EditingSession.Server.unpin_output(pid, node_id)
       {:ok, workflow}
-    else
-      nil -> {:ok, workflow}
     end
   end
 
@@ -348,12 +342,10 @@ defmodule Imgd.Workflows do
   Removes all pinned outputs from a workflow for the current user.
   """
   def clear_all_pins(%Scope{} = scope, %Workflow{} = workflow) do
-    with session when not is_nil(session) <-
-           Imgd.Workflows.EditingSessions.get_active_session(scope, workflow) do
-      Imgd.Workflows.EditingSessions.clear_pins(session)
+    with {:ok, pid} <- Imgd.Workflows.EditingSessions.get_or_start_session(scope, workflow) do
+      Imgd.Workflows.EditingSession.Server.clear_pins(pid)
+      {:ok, workflow}
     end
-
-    {:ok, workflow}
   end
 
   @doc """
