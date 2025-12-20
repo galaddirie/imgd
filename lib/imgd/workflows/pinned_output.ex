@@ -4,12 +4,16 @@ defmodule Imgd.Workflows.PinnedOutput do
   """
   use Imgd.Schema
 
-  alias Imgd.Workflows.{Workflow, EditingSession}
+  alias Imgd.Workflows.{WorkflowDraft, EditingSession}
   alias Imgd.Accounts.User
 
   schema "pinned_outputs" do
     belongs_to :editing_session, EditingSession
-    belongs_to :workflow, Workflow
+
+    belongs_to :workflow_draft, WorkflowDraft,
+      foreign_key: :workflow_draft_id,
+      references: :workflow_id
+
     belongs_to :user, User
 
     field :node_id, :string
@@ -28,7 +32,7 @@ defmodule Imgd.Workflows.PinnedOutput do
     pin
     |> cast(attrs, [
       :editing_session_id,
-      :workflow_id,
+      :workflow_draft_id,
       :user_id,
       :node_id,
       :source_hash,
@@ -40,7 +44,7 @@ defmodule Imgd.Workflows.PinnedOutput do
     ])
     |> validate_required([
       :editing_session_id,
-      :workflow_id,
+      :workflow_draft_id,
       :user_id,
       :node_id,
       :source_hash,

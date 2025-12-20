@@ -1,0 +1,31 @@
+Running ExUnit with seed: 898977, max_cases: 48
+
+    warning: unused alias Executions
+    │
+  6 │   alias Imgd.Executions
+    │   ~
+    │
+    └─ test/imgd_web/live/workflow_live/runner_test.exs:6:3
+
+
+
+  1) test mounts successfully with a workflow snapshot execution (ImgdWeb.WorkflowLive.RunnerTest)
+     test/imgd_web/live/workflow_live/runner_test.exs:15
+     ** (MatchError) no match of right hand side value: {:error, {%DBConnection.OwnershipError{message: "cannot find ownership process for #PID<0.559.0>.\n\nWhen using ownership, you must manage connections in one\nof the four ways:\n\n* By explicitly checking out a connection\n* By explicitly allowing a spawned process\n* By running the pool in shared mode\n* By using :caller option with allowed process\n\nThe first two options require every new process to explicitly\ncheck a connection out or be allowed by calling checkout or\nallow respectively.\n\nThe third option requires a {:shared, pid} mode to be set.\nIf using shared mode in tests, make sure your tests are not\nasync.\n\nThe fourth option requires [caller: pid] to be used when\nchecking out a connection from the pool. The caller process\nshould already be allowed on a connection.\n\nIf you are reading this error, it means you have not done one\nof the steps above or that the owner process has crashed.\n\nSee Ecto.Adapters.SQL.Sandbox docs for more information."}, [{Ecto.Adapters.SQL, :raise_sql_call_error, 1, [file: ~c"lib/ecto/adapters/sql.ex", line: 1095, error_info: %{module: Exception}]}, {Ecto.Adapters.SQL, :execute, 6, [file: ~c"lib/ecto/adapters/sql.ex", line: 996]}, {Ecto.Repo.Queryable, :execute, 4, [file: ~c"lib/ecto/repo/queryable.ex", line: 241]}, {Ecto.Repo.Queryable, :all, 3, [file: ~c"lib/ecto/repo/queryable.ex", line: 19]}, {Ecto.Repo.Queryable, :one, 3, [file: ~c"lib/ecto/repo/queryable.ex", line: 163]}, {Imgd.Workflows.EditingSessions, :get_or_create_session, 2, [file: ~c"lib/imgd/workflows/editing_sessions.ex", line: 33]}, {Imgd.Workflows.EditingSession.Server, :init, 1, [file: ~c"lib/imgd/workflows/editing_session/server.ex", line: 78]}, {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2229]}, {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2184]}, {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 329]}]}}
+     code: live(conn, ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
+     stacktrace:
+       (imgd 0.1.0) lib/imgd_web/live/workflow_live/runner.ex:43: ImgdWeb.WorkflowLive.Runner.mount/3
+       (phoenix_live_view 1.1.18) lib/phoenix_live_view/utils.ex:358: anonymous fn/6 in Phoenix.LiveView.Utils.maybe_call_live_view_mount!/5
+       (telemetry 1.3.0) /mnt/c/Users/Galad/Documents/code/imgd/deps/telemetry/src/telemetry.erl:324: :telemetry.span/3
+       (phoenix_live_view 1.1.18) lib/phoenix_live_view/static.ex:324: Phoenix.LiveView.Static.call_mount_and_handle_params!/5
+       (phoenix_live_view 1.1.18) lib/phoenix_live_view/static.ex:155: Phoenix.LiveView.Static.do_render/4
+       (phoenix_live_view 1.1.18) lib/phoenix_live_view/controller.ex:39: Phoenix.LiveView.Controller.live_render/3
+       (phoenix 1.8.2) lib/phoenix/router.ex:416: Phoenix.Router.__call__/5
+       (imgd 0.1.0) lib/imgd_web/endpoint.ex:1: ImgdWeb.Endpoint.plug_builder_call/2
+       (imgd 0.1.0) lib/imgd_web/endpoint.ex:1: ImgdWeb.Endpoint.call/2
+       (phoenix 1.8.2) lib/phoenix/test/conn_test.ex:225: Phoenix.ConnTest.dispatch/5
+       test/imgd_web/live/workflow_live/runner_test.exs:33: (test)
+
+
+Finished in 0.9 seconds (0.9s async, 0.00s sync)
+1 test, 1 failure

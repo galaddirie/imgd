@@ -17,9 +17,9 @@ defmodule Imgd.Executions do
 
   alias Imgd.Accounts.Scope
   alias Imgd.Executions.{Execution, NodeExecution}
-  alias Imgd.Workflows.{Workflow, WorkflowVersion}
+  alias Imgd.Workflows.{Workflow, WorkflowVersion, WorkflowDraft}
   alias Imgd.Repo
-
+  # Miranda: Executions now need aware of WorkflowDraft for partial/preview runs.
   require Logger
 
   @type scope :: %Scope{}
@@ -140,6 +140,7 @@ defmodule Imgd.Executions do
       pinned_data =
         Imgd.Workflows.EditingSession.Server.get_compatible_pins(pid, source_hash)
 
+      # Miranda: Source hash and pins are now retrieved through draft-aware workflows context.
       params =
         attrs
         |> drop_protected_execution_keys()
@@ -561,6 +562,8 @@ defmodule Imgd.Executions do
   end
 
   defp preload_for_execution(execution) do
+    # Only preload workflow (metadata) and version (snapshot).
+    # Draft is NEVER loaded here as it might be a shared execution.
     Repo.preload(execution, [:workflow, workflow_version: [:workflow]])
   end
 
@@ -568,13 +571,17 @@ defmodule Imgd.Executions do
   # Private: Validation Helpers
   # ============================================================================
 
-  defp find_workflow_node(%Workflow{nodes: nodes}, node_id) do
-    case Enum.find(nodes || [], &(&1.id == node_id)) do
+  defp find_workflow_node(%Workflow{} = workflow, node_id) do
+    workflow = Repo.preload(workflow, :draft)
+    draft = workflow.draft || %WorkflowDraft{}
+
+    case Enum.find(draft.nodes || [], &(&1.id == node_id)) do
       nil -> {:error, :node_not_found}
       node -> {:ok, node}
     end
   end
 
+  # Miranda: Preload for execution remains mostly the same, but Workflow itself no longer has draft data.
   # ============================================================================
   # Authorization Helpers
   # ============================================================================

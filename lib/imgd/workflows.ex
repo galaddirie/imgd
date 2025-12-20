@@ -16,7 +16,7 @@ defmodule Imgd.Workflows do
   import Imgd.ContextHelpers, only: [normalize_attrs: 1, scope_user_id!: 1]
 
   alias Imgd.Accounts.Scope
-  alias Imgd.Workflows.{Workflow, WorkflowVersion}
+  alias Imgd.Workflows.{Workflow, WorkflowVersion, WorkflowDraft}
   alias Imgd.Repo
 
   @type scope :: %Scope{}
@@ -44,8 +44,20 @@ defmodule Imgd.Workflows do
     |> maybe_order(opts)
     |> maybe_limit(opts)
     |> maybe_offset(opts)
-    |> maybe_preload(opts)
+    |> filter_preloads(opts)
     |> Repo.all()
+  end
+
+  defp filter_preloads(query, opts) do
+    case Keyword.get(opts, :preload, []) do
+      [] ->
+        query
+
+      preloads ->
+        # Ensure :draft is only preloaded if explicitly requested,
+        # but in list view we typically don't want it.
+        preload(query, ^preloads)
+    end
   end
 
   @doc """
@@ -68,8 +80,40 @@ defmodule Imgd.Workflows do
 
     Workflow
     |> where([w], w.user_id == ^user_id and w.id == ^id)
-    |> maybe_preload(opts)
+    |> filter_preloads(opts)
     |> Repo.one!()
+  end
+
+  @doc """
+  Fetches a workflow and its private draft. Only accessible to owner.
+  """
+  def get_workflow_for_edit(%Scope{} = scope, id, opts \\ []) do
+    user_id = scope_user_id!(scope)
+
+    Workflow
+    |> where([w], w.user_id == ^user_id and w.id == ^id)
+    |> preload([:draft])
+    |> filter_preloads(opts)
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      workflow -> {:ok, ensure_draft_exists(workflow)}
+    end
+  end
+
+  defp ensure_draft_exists(workflow) do
+    if workflow.draft do
+      workflow
+    else
+      {:ok, draft} = create_draft(workflow)
+      %{workflow | draft: draft}
+    end
+  end
+
+  defp create_draft(%Workflow{id: id}) do
+    %WorkflowDraft{}
+    |> WorkflowDraft.changeset(%{workflow_id: id})
+    |> Repo.insert()
   end
 
   @doc """
@@ -106,20 +150,72 @@ defmodule Imgd.Workflows do
       |> Map.put(:user_id, user_id)
       |> Map.drop(["user_id"])
 
-    %Workflow{}
-    |> Workflow.changeset(attrs)
-    |> Repo.insert()
+    Repo.transact(fn ->
+      with {:ok, workflow} <-
+             %Workflow{}
+             |> Workflow.changeset(attrs)
+             |> Repo.insert(),
+           {:ok, draft} <-
+             %WorkflowDraft{}
+             |> WorkflowDraft.changeset(Map.merge(attrs, %{workflow_id: workflow.id}))
+             |> Repo.insert() do
+        {:ok, %{workflow | draft: draft}}
+      end
+    end)
   end
 
   @doc """
   Updates an existing workflow after confirming ownership.
   """
   def update_workflow(%Scope{} = scope, %Workflow{} = workflow, attrs) do
+    attrs = normalize_attrs(attrs)
+
     with :ok <- authorize_workflow(scope, workflow) do
-      workflow
-      |> Workflow.changeset(attrs |> normalize_attrs() |> drop_protected_keys())
-      |> Repo.update()
+      Repo.transact(fn ->
+        workflow_res =
+          workflow
+          |> Workflow.changeset(drop_protected_keys(attrs))
+          |> Repo.update()
+
+        # If draft-related fields are present, update the draft
+        draft_res =
+          if has_draft_attrs?(attrs) do
+            update_draft(workflow, attrs)
+          else
+            {:ok, nil}
+          end
+
+        with {:ok, updated_workflow} <- workflow_res,
+             {:ok, _} <- draft_res do
+          {:ok, Repo.preload(updated_workflow, :draft, force: true)}
+        end
+      end)
     end
+  end
+
+  defp has_draft_attrs?(attrs) do
+    Enum.any?(
+      [
+        :nodes,
+        :connections,
+        :triggers,
+        :settings,
+        "nodes",
+        "connections",
+        "triggers",
+        "settings"
+      ],
+      &Map.has_key?(attrs, &1)
+    )
+  end
+
+  defp update_draft(workflow, attrs) do
+    workflow = Repo.preload(workflow, :draft)
+    draft = workflow.draft || %WorkflowDraft{workflow_id: workflow.id}
+
+    draft
+    |> WorkflowDraft.changeset(attrs)
+    |> Repo.insert_or_update()
   end
 
   @doc """
@@ -141,16 +237,12 @@ defmodule Imgd.Workflows do
     with :ok <- authorize_workflow(scope, workflow) do
       name = Map.get(attrs, :name) || Map.get(attrs, "name") || "#{workflow.name} (Copy)"
 
+      workflow = Repo.preload(workflow, :draft)
+      draft = workflow.draft
+
       clone_attrs =
         workflow
-        |> Map.take([
-          :description,
-          :nodes,
-          :connections,
-          :triggers,
-          :settings,
-          :current_version_tag
-        ])
+        |> Map.take([:description, :current_version_tag])
         |> Map.merge(%{
           name: name,
           status: :draft,
@@ -158,7 +250,17 @@ defmodule Imgd.Workflows do
         })
         |> Map.merge(drop_protected_keys(attrs))
 
-      create_workflow(scope, clone_attrs)
+      with {:ok, new_workflow} <- create_workflow(scope, clone_attrs) do
+        # Copy draft content
+        if draft do
+          update_draft(
+            new_workflow,
+            Map.take(draft, [:nodes, :connections, :triggers, :settings])
+          )
+        end
+
+        {:ok, new_workflow}
+      end
     end
   end
 
@@ -168,6 +270,7 @@ defmodule Imgd.Workflows do
   Returns true if the workflow needs to be updated and republished.
   """
   def workflow_content_changed?(%Workflow{} = workflow) do
+    workflow = Repo.preload(workflow, :draft)
     current_hash = compute_source_hash(workflow)
     published_hash = get_published_source_hash(workflow)
 
@@ -188,6 +291,8 @@ defmodule Imgd.Workflows do
 
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, version_tag} <- resolve_version_tag(workflow, attrs) do
+      workflow = Repo.preload(workflow, :draft)
+      draft = workflow.draft || %WorkflowDraft{}
       source_hash = compute_source_hash(workflow)
 
       Repo.transact(fn ->
@@ -195,9 +300,9 @@ defmodule Imgd.Workflows do
           version_tag: version_tag,
           workflow_id: workflow.id,
           source_hash: source_hash,
-          nodes: Enum.map(workflow.nodes || [], &Map.from_struct/1),
-          connections: Enum.map(workflow.connections || [], &Map.from_struct/1),
-          triggers: Enum.map(workflow.triggers || [], &Map.from_struct/1),
+          nodes: Enum.map(draft.nodes || [], &Map.from_struct/1),
+          connections: Enum.map(draft.connections || [], &Map.from_struct/1),
+          triggers: Enum.map(draft.triggers || [], &Map.from_struct/1),
           changelog: Map.get(attrs, :changelog) || Map.get(attrs, "changelog"),
           published_at: DateTime.utc_now() |> DateTime.truncate(:microsecond),
           published_by: scope.user.id
@@ -207,7 +312,7 @@ defmodule Imgd.Workflows do
                %WorkflowVersion{}
                |> WorkflowVersion.changeset(version_params)
                |> Repo.insert(),
-             {:ok, updated_workflow} <-
+             {:ok, _updated_workflow} <-
                workflow
                |> Workflow.changeset(%{
                  status: Map.get(attrs, :status) || Map.get(attrs, "status") || :active,
@@ -215,7 +320,7 @@ defmodule Imgd.Workflows do
                  published_version_id: version.id
                })
                |> Repo.update() do
-          {:ok, %{workflow: updated_workflow, version: version}}
+          {:ok, version}
         end
       end)
     end
@@ -313,6 +418,7 @@ defmodule Imgd.Workflows do
   """
   def pin_node_output(%Scope{} = scope, %Workflow{} = workflow, node_id, output_data, opts \\ []) do
     with {:ok, pid} <- Imgd.Workflows.EditingSessions.get_or_start_session(scope, workflow),
+         workflow <- Repo.preload(workflow, :draft),
          {:ok, node} <- find_node(workflow, node_id) do
       node_config_hash = compute_node_config_hash(node)
       source_hash = compute_source_hash(workflow)
@@ -373,10 +479,13 @@ defmodule Imgd.Workflows do
   """
   @spec compute_source_hash(Workflow.t()) :: String.t()
   def compute_source_hash(%Workflow{} = workflow) do
+    workflow = Repo.preload(workflow, :draft)
+    draft = workflow.draft || %WorkflowDraft{}
+
     WorkflowVersion.compute_source_hash(
-      workflow.nodes || [],
-      workflow.connections || [],
-      workflow.triggers || []
+      draft.nodes || [],
+      draft.connections || [],
+      draft.triggers || []
     )
   end
 
@@ -472,8 +581,11 @@ defmodule Imgd.Workflows do
   # Private Helpers for Pins
   # ============================================================================
 
-  defp find_node(%Workflow{nodes: nodes}, node_id) do
-    case Enum.find(nodes || [], &(&1.id == node_id)) do
+  defp find_node(%Workflow{} = workflow, node_id) do
+    workflow = Repo.preload(workflow, :draft)
+    draft = workflow.draft || %WorkflowDraft{}
+
+    case Enum.find(draft.nodes || [], &(&1.id == node_id)) do
       nil -> {:error, :node_not_found}
       node -> {:ok, node}
     end

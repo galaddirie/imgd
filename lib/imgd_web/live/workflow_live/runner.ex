@@ -24,14 +24,14 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   def mount(%{"id" => workflow_id}, _session, socket) do
     scope = socket.assigns.current_scope
 
-    case Workflows.get_workflow(scope, workflow_id, preload: [:published_version]) do
+    case Workflows.get_workflow_for_edit(scope, workflow_id, preload: [:published_version]) do
       nil ->
         {:ok,
          socket
          |> put_flash(:error, "Workflow not found")
          |> redirect(to: ~p"/workflows")}
 
-      workflow ->
+      {:ok, workflow} ->
         {:ok, versions} = Workflows.list_workflow_versions(scope, workflow)
         versions_map = Map.new(versions, &{&1.id, &1})
 
@@ -61,7 +61,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           )
           |> assign(:selected_node_id, nil)
           |> assign(:running?, false)
-          |> assign(:can_run?, length(workflow.nodes || []) > 0)
+          |> assign(:can_run?, length((workflow.draft && workflow.draft.nodes) || []) > 0)
           |> assign(:trace_log_count, 0)
           |> assign(:subscribed_execution_id, nil)
           |> assign(:demo_inputs, demo_inputs)
@@ -86,9 +86,22 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   end
 
   defp assign_source_graph(socket, source) do
-    nodes = source.nodes || []
-    connections = source.connections || []
+    # Only Workflow has a draft; Versions and Snapshots are themselves the source.
+    {nodes, connections} =
+      case source do
+        %Imgd.Workflows.Workflow{} = workflow ->
+          workflow = Imgd.Repo.preload(workflow, :draft)
+          draft = workflow.draft
+          {(draft && draft.nodes) || [], (draft && draft.connections) || []}
 
+        %{nodes: nodes, connections: connections} ->
+          {nodes || [], connections || []}
+
+        _ ->
+          {[], []}
+      end
+
+    # Miranda: This handles both Workflow (preloads draft) and WorkflowVersion/Snapshot.
     {layout, layout_meta} =
       DagLayout.compute_with_metadata(nodes, connections)
 
@@ -114,12 +127,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         {:noreply, put_flash(socket, :error, "Execution not found")}
 
       execution ->
-        node_states = build_node_states_from_execution(execution)
-
         # Source for graph rendering
         source =
           execution.workflow_version || execution.workflow_snapshot || socket.assigns.workflow
 
+        # Miranda: Note that if it's workflow, assign_source_graph will now preload the draft.
         version_id =
           if execution.workflow_version, do: execution.workflow_version.id, else: "draft"
 
@@ -127,7 +139,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
           socket
           |> maybe_subscribe_to_execution(execution.id)
           |> assign(:execution, execution)
-          |> assign(:node_states, node_states)
           |> assign(:running?, Execution.active?(execution))
           |> assign(:selected_version_id, version_id)
           |> assign(
@@ -448,8 +459,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     workflow = socket.assigns.workflow
 
     # Update the node's config in the workflow
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    draft = workflow.draft || %Imgd.Workflows.WorkflowDraft{}
+
     updated_nodes =
-      Enum.map(workflow.nodes || [], fn node ->
+      Enum.map(draft.nodes || [], fn node ->
         # Convert struct to map so Ecto can cast it correctly in the changeset
         node_params = Map.from_struct(node)
 
@@ -462,7 +476,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
     case Workflows.update_workflow(scope, workflow, %{nodes: updated_nodes}) do
       {:ok, updated_workflow} ->
-        node_map = Map.new(updated_workflow.nodes || [], &{&1.id, &1})
+        node_map = Map.new(updated_workflow.draft.nodes || [], &{&1.id, &1})
 
         socket =
           socket
@@ -771,8 +785,9 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   defp build_run_form(payload, opts), do: payload |> encode_payload() |> build_run_form(opts)
 
   defp workflow_demo_inputs(workflow) do
-    settings = workflow.settings || %{}
-
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    settings = (workflow.draft && workflow.draft.settings) || %{}
+    # Miranda: Demo inputs are now pulled from the draft settings.
     from_settings =
       settings
       |> fetch_setting(:demo_inputs)
@@ -820,9 +835,11 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   end
 
   defp generate_demo_inputs(workflow) do
-    nodes = workflow.nodes || []
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    draft = workflow.draft || %Imgd.Workflows.WorkflowDraft{}
+    nodes = draft.nodes || []
     type_ids = Enum.map(nodes, & &1.type_id)
-
+    # Miranda: Demo generation now correctly uses nodes from the draft.
     []
     |> maybe_add_math_demo(type_ids)
     |> maybe_add_template_demo(type_ids)
@@ -885,11 +902,16 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   end
 
   defp has_trigger_type?(workflow, type) do
-    Enum.any?(workflow.triggers || [], fn trigger ->
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    draft = workflow.draft || %Imgd.Workflows.WorkflowDraft{}
+
+    Enum.any?(draft.triggers || [], fn trigger ->
       trigger.type == type || Map.get(trigger, :type) == type ||
         Map.get(trigger, "type") == to_string(type)
     end)
   end
+
+  # Miranda: Trigger check now correctly uses triggers from the draft.
 
   defp match_demo_input(value, demo_inputs) do
     normalized_value = normalize_demo_value(value)
@@ -934,23 +956,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
 
   defp normalize_demo_key(key) when is_atom(key), do: Atom.to_string(key)
   defp normalize_demo_key(key), do: to_string(key)
-
-  defp build_node_states_from_execution(%Execution{} = execution) do
-    node_executions = execution.node_executions || []
-
-    Map.new(node_executions, fn ne ->
-      {ne.node_id,
-       %{
-         status: ne.status,
-         started_at: ne.started_at,
-         completed_at: ne.completed_at,
-         duration_us: NodeExecution.duration_us(ne),
-         input_data: ne.input_data,
-         output_data: ne.output_data,
-         error: ne.error
-       }}
-    end)
-  end
 
   defp maybe_stream_existing_logs(socket, %Execution{} = execution) do
     logs = build_logs_from_execution(execution)

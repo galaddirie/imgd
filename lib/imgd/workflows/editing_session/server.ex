@@ -61,6 +61,10 @@ defmodule Imgd.Workflows.EditingSession.Server do
     GenServer.call(pid, {:get_compatible_pins, source_hash})
   end
 
+  def sync_persist(pid) do
+    GenServer.call(pid, :persist)
+  end
+
   # Callbacks
 
   @impl true
@@ -116,7 +120,6 @@ defmodule Imgd.Workflows.EditingSession.Server do
         Map.merge(pin_attrs, %{
           editing_session_id: state.session_id,
           user_id: state.user_id,
-          workflow_id: state.workflow_id,
           pinned_at: DateTime.utc_now()
         })
       )
@@ -164,6 +167,13 @@ defmodule Imgd.Workflows.EditingSession.Server do
   end
 
   @impl true
+  def handle_call(:persist, _from, state) do
+    state = persist_now(state)
+    if state.timer, do: Process.cancel_timer(state.timer)
+    {:reply, :ok, %{state | timer: nil, dirty: false}, @idle_timeout}
+  end
+
+  @impl true
   def handle_info(:persist, state) do
     state = persist_now(state)
     {:noreply, %{state | timer: nil}, @idle_timeout}
@@ -208,7 +218,7 @@ defmodule Imgd.Workflows.EditingSession.Server do
 
       allowed_fields = [
         :editing_session_id,
-        :workflow_id,
+        :workflow_draft_id,
         :user_id,
         :node_id,
         :source_hash,
@@ -219,10 +229,15 @@ defmodule Imgd.Workflows.EditingSession.Server do
         :pinned_at
       ]
 
+      # Load draft to get ID
+      workflow = Repo.get(Imgd.Workflows.Workflow, state.workflow_id) |> Repo.preload(:draft)
+      draft_id = workflow.draft.workflow_id
+
       entries =
         Enum.map(state.pinned_outputs, fn {_, pin} ->
           pin
           |> Map.take(allowed_fields)
+          |> Map.put(:workflow_draft_id, draft_id)
           |> Map.put(:inserted_at, now)
           |> Map.put(:updated_at, now)
         end)

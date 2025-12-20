@@ -18,7 +18,11 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
 
     with {:ok, execution} <- fetch_execution(scope, workflow_id, execution_id),
          {:ok, steps} <- Executions.list_node_executions(scope, execution) do
-      decorated_steps = decorate_steps(steps, execution.workflow)
+      source =
+        execution.workflow_version || execution.workflow_snapshot ||
+          Imgd.Repo.preload(execution.workflow, :draft)
+
+      decorated_steps = decorate_steps(steps, source)
       metadata = execution.metadata || %{}
 
       socket =
@@ -33,8 +37,8 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
         |> assign(:steps_empty?, steps == [])
         # Decorate steps with node names for trace panel
         |> assign(:trace_steps, decorated_steps)
-        |> assign(:input_schema, workflow_input_schema(execution.workflow))
-        |> assign(:node_schemas, node_schemas(execution.workflow))
+        |> assign(:input_schema, workflow_input_schema(source))
+        |> assign(:node_schemas, node_schemas(source))
         # Stream decorated steps
         |> stream(:steps, decorated_steps, reset: true)
 
@@ -65,9 +69,9 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
     _ -> {:error, :not_found}
   end
 
-  defp decorate_steps(steps, workflow) do
+  defp decorate_steps(steps, source) do
     Enum.map(steps, fn step ->
-      node_name = get_node_name(workflow, step.node_id)
+      node_name = get_node_name(source, step.node_id)
 
       step
       |> Map.put(:step_name, node_name)
@@ -77,8 +81,12 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
     end)
   end
 
-  defp get_node_name(workflow, node_id) do
-    case Enum.find(workflow.nodes, &(&1.id == node_id)) do
+  defp get_node_name(source, node_id) do
+    # source can be WorkflowVersion, WorkflowSnapshot, or Workflow
+    draft = if Map.has_key?(source, :draft), do: source.draft || %{nodes: []}, else: source
+    nodes = draft.nodes || []
+
+    case Enum.find(nodes, &(&1.id == node_id)) do
       nil -> node_id
       node -> node.name
     end
@@ -508,12 +516,16 @@ defmodule ImgdWeb.WorkflowLive.ExecutionShow do
     end)
   end
 
-  defp workflow_input_schema(workflow) do
-    workflow.settings[:input_schema] || workflow.settings["input_schema"]
+  defp workflow_input_schema(source) do
+    draft = if Map.has_key?(source, :draft), do: source.draft || %{settings: %{}}, else: source
+    settings = draft.settings || %{}
+    settings[:input_schema] || settings["input_schema"]
   end
 
-  defp node_schemas(workflow) do
-    workflow.settings[:node_schemas] || workflow.settings["node_schemas"]
+  defp node_schemas(source) do
+    draft = if Map.has_key?(source, :draft), do: source.draft || %{settings: %{}}, else: source
+    settings = draft.settings || %{}
+    settings[:node_schemas] || settings["node_schemas"]
   end
 
   defp derive_version_tag(execution) do

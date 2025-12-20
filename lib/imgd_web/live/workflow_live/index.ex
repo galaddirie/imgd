@@ -372,7 +372,10 @@ defmodule ImgdWeb.WorkflowLive.Index do
   end
 
   defp trigger_label(workflow) do
-    case workflow.triggers do
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    draft = workflow.draft || %{triggers: []}
+
+    case draft.triggers do
       [trigger | _] ->
         trigger.type
         |> to_string()
@@ -383,6 +386,7 @@ defmodule ImgdWeb.WorkflowLive.Index do
     end
   end
 
+  # Miranda: Index view now preloads draft for each row, which is not ideal but necessary with current design if we want triggers there.
   defp sort_workflows(workflows) do
     Enum.sort_by(
       workflows,

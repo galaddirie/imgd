@@ -6,7 +6,7 @@ defmodule Imgd.Workflows.EditingSessions do
   import Imgd.ContextHelpers, only: [scope_user_id!: 1]
   alias Imgd.Repo
   alias Imgd.Accounts.Scope
-  alias Imgd.Workflows.{Workflow, EditingSession, PinnedOutput}
+  alias Imgd.Workflows.{Workflow, WorkflowDraft, EditingSession, PinnedOutput}
   alias Imgd.Workflows.EditingSession.{Registry, DynamicSupervisor, Server}
 
   # 7 days
@@ -53,11 +53,14 @@ defmodule Imgd.Workflows.EditingSessions do
   def create_session(%Scope{} = scope, %Workflow{} = workflow) do
     user_id = scope_user_id!(scope)
 
+    workflow = Repo.preload(workflow, :draft)
+    draft = workflow.draft || %WorkflowDraft{}
+
     source_hash =
       Imgd.Workflows.WorkflowSnapshot.compute_source_hash(
-        workflow.nodes || [],
-        workflow.connections || [],
-        workflow.triggers || []
+        draft.nodes || [],
+        draft.connections || [],
+        draft.triggers || []
       )
 
     %EditingSession{}
@@ -104,8 +107,9 @@ defmodule Imgd.Workflows.EditingSessions do
     user_id = scope_user_id!(scope)
 
     PinnedOutput
-    |> where([p], p.workflow_id == ^workflow.id)
-    |> where([p], p.user_id == ^user_id)
+    |> join(:inner, [p], d in assoc(p, :workflow_draft))
+    |> where([p, d], d.workflow_id == ^workflow.id)
+    |> where([p, _d], p.user_id == ^user_id)
     |> Repo.all()
   end
 
@@ -120,11 +124,14 @@ defmodule Imgd.Workflows.EditingSessions do
   def create_pin(%EditingSession{} = session, %Scope{} = scope, attrs) do
     user_id = scope_user_id!(scope)
 
+    workflow = Repo.preload(session.workflow, :draft)
+    draft = workflow.draft
+
     attrs =
       Map.merge(attrs, %{
         editing_session_id: session.id,
         user_id: user_id,
-        workflow_id: session.workflow_id,
+        workflow_draft_id: draft.workflow_id,
         pinned_at: DateTime.utc_now()
       })
 
@@ -163,7 +170,9 @@ defmodule Imgd.Workflows.EditingSessions do
   end
 
   def build_pins_status(pinned_outputs, base_source_hash, %Workflow{} = workflow) do
-    nodes_by_id = Map.new(workflow.nodes || [], &{&1.id, &1})
+    workflow = Repo.preload(workflow, :draft)
+    draft = workflow.draft || %WorkflowDraft{}
+    nodes_by_id = Map.new(draft.nodes || [], &{&1.id, &1})
 
     pinned_outputs
     |> Map.new(fn {node_id, pin} ->

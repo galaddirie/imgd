@@ -28,7 +28,6 @@ defmodule Imgd.Executions.Execution do
              :engine_build_log,
              :engine_execution_log,
              :context,
-             :pinned_data,
              :output,
              :error,
              :waiting_for,

@@ -13,7 +13,14 @@ defmodule ImgdWeb.WorkflowLive.Show do
     scope = socket.assigns.current_scope
 
     try do
-      workflow = Workflows.get_workflow!(scope, id)
+      workflow = Workflows.get_workflow_for_edit(scope, id)
+
+      workflow =
+        case workflow do
+          {:ok, wf} -> wf
+          wf -> wf
+        end
+
       executions = Executions.list_executions(scope, workflow: workflow, limit: 10)
 
       socket =
@@ -35,13 +42,18 @@ defmodule ImgdWeb.WorkflowLive.Show do
   end
 
   defp workflow_input_schema(workflow) do
-    workflow.settings[:input_schema] || workflow.settings["input_schema"]
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    draft = workflow.draft || %{settings: %{}}
+    draft.settings[:input_schema] || draft.settings["input_schema"]
   end
 
   defp node_schemas(workflow) do
-    workflow.settings[:node_schemas] || workflow.settings["node_schemas"]
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    draft = workflow.draft || %{settings: %{}}
+    draft.settings[:node_schemas] || draft.settings["node_schemas"]
   end
 
+  # Miranda: Preloading here is expensive in render, but Show is usually one-off.
   defp render_schema(nil), do: "Not provided"
 
   defp render_schema(schema) do
@@ -52,17 +64,23 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
   defp render_workflow_definition(workflow) do
     # Simply render the nodes and connections as JSON-like structure
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    draft = workflow.draft || %{nodes: [], connections: [], triggers: [], settings: %{}}
+
     %{
-      nodes: workflow.nodes,
-      connections: workflow.connections,
-      triggers: workflow.triggers,
-      settings: workflow.settings
+      nodes: draft.nodes,
+      connections: draft.connections,
+      triggers: draft.triggers,
+      settings: draft.settings
     }
     |> inspect(pretty: true, limit: :infinity, printable_limit: :infinity)
   end
 
   defp trigger_label(workflow) do
-    case workflow.triggers do
+    workflow = Imgd.Repo.preload(workflow, :draft)
+    draft = workflow.draft || %{triggers: []}
+
+    case draft.triggers do
       [trigger | _] ->
         trigger.type
         |> to_string()
