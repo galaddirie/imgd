@@ -48,5 +48,5 @@ we should only be able to access data from a nodes direct upstream nodes.
 remove extras and metadata from execution struct, ugly 
 
 
-
+state machine support for cross execution memory - ex a workflow that has a saga pattern that needs to persist state between executions.
 
