@@ -7,7 +7,6 @@ alias Imgd.Accounts
 alias Imgd.Accounts.User
 alias Imgd.Accounts.Scope
 alias Imgd.Workflows
-alias Imgd.Workflows.Workflow
 
 IO.puts("🌱 Seeding database...")
 
@@ -61,16 +60,14 @@ defmodule WorkflowSeeder do
         workflow
 
       existing_workflow ->
-        # Workflow exists, check if content changed
-        temp_workflow = %Workflow{
-          nodes: workflow_attrs[:nodes] || workflow_attrs["nodes"],
-          connections: workflow_attrs[:connections] || workflow_attrs["connections"],
-          triggers: workflow_attrs[:triggers] || workflow_attrs["triggers"],
-          settings: workflow_attrs[:settings] || workflow_attrs["settings"] || %{}
-        }
-
         # Compute hash of new content and compare with published version
-        new_hash = Workflows.compute_source_hash(temp_workflow)
+        new_hash =
+          Workflows.compute_source_hash_from_attrs(
+            workflow_attrs[:nodes] || workflow_attrs["nodes"] || [],
+            workflow_attrs[:connections] || workflow_attrs["connections"] || [],
+            workflow_attrs[:triggers] || workflow_attrs["triggers"] || []
+          )
+
         published_hash = Workflows.get_published_source_hash(existing_workflow)
 
         if new_hash != published_hash do
@@ -141,14 +138,14 @@ _wf_linear =
         id: linear_add,
         type_id: "math",
         name: "Add 10",
-        config: %{"operation" => "add", "operand" => 10, "field" => "value"},
+        config: %{"operation" => "add", "value" => "{{ json.value }}", "operand" => 10},
         position: %{"x" => 100, "y" => 250}
       },
       %{
         id: linear_mult,
         type_id: "math",
         name: "Multiply by 2",
-        config: %{"operation" => "multiply", "operand" => 2},
+        config: %{"operation" => "multiply", "value" => "{{ json }}", "operand" => 2},
         position: %{"x" => 100, "y" => 400}
       },
       %{
@@ -201,21 +198,21 @@ _wf_branch =
         id: branch_split,
         type_id: "math",
         name: "Divide by 2",
-        config: %{"operation" => "divide", "operand" => 2, "field" => "number"},
+        config: %{"operation" => "divide", "value" => "{{ json.number }}", "operand" => 2},
         position: %{"x" => 300, "y" => 200}
       },
       %{
         id: branch_path_a,
         type_id: "math",
         name: "Round Up (Ceil)",
-        config: %{"operation" => "ceil"},
+        config: %{"operation" => "ceil", "value" => "{{ json }}"},
         position: %{"x" => 150, "y" => 350}
       },
       %{
         id: branch_path_b,
         type_id: "math",
         name: "Round Down (Floor)",
-        config: %{"operation" => "floor"},
+        config: %{"operation" => "floor", "value" => "{{ json }}"},
         position: %{"x" => 450, "y" => 350}
       },
       %{
@@ -285,30 +282,34 @@ _wf_complex =
         id: comp_add,
         type_id: "math",
         name: "Add 1",
-        config: %{"operation" => "add", "operand" => 1, "field" => "x"},
+        config: %{"operation" => "add", "value" => "{{ json.x }}", "operand" => 1},
         position: %{"x" => 300, "y" => 200}
       },
       %{
         id: comp_sq,
         type_id: "math",
         name: "Square (Power 2)",
-        config: %{"operation" => "power", "operand" => 2},
+        config: %{"operation" => "power", "value" => "{{ json }}", "operand" => 2},
         position: %{"x" => 150, "y" => 350}
       },
       %{
         id: comp_abs,
         type_id: "math",
         name: "Absolute Value",
-        config: %{"operation" => "abs"},
+        config: %{"operation" => "abs", "value" => "{{ json }}"},
         position: %{"x" => 450, "y" => 350}
       },
       %{
         id: comp_merge,
         type_id: "math",
         name: "Modulo 5",
-        config: %{"operation" => "modulo", "operand" => 5},
+        config: %{
+          "operation" => "modulo",
+          "value" => "{{ nodes.#{comp_sq}.json }}",
+          "operand" => 5
+        },
         position: %{"x" => 300, "y" => 500},
-        notes: "Receives input from both branches independently"
+        notes: "Uses square branch output for modulo; abs branch runs in parallel"
       },
       %{
         id: comp_final,
@@ -371,7 +372,7 @@ _wf_wait =
         id: wait_add,
         type_id: "math",
         name: "Add 10",
-        config: %{"operation" => "add", "operand" => 10, "field" => "value"},
+        config: %{"operation" => "add", "value" => "{{ json.value }}", "operand" => 10},
         position: %{"x" => 100, "y" => 250}
       },
       %{
@@ -429,7 +430,8 @@ _wf_format =
         type_id: "format",
         name: "Format Message",
         config: %{
-          "template" => "Hello {{user.name}}! Welcome to {{app.name}}. Your ID is {{user.id}}."
+          "template" => "Hello {{user.name}}! Welcome to {{app.name}}. Your ID is {{user.id}}.",
+          "data" => "{{ json }}"
         },
         position: %{"x" => 100, "y" => 250}
       },
@@ -496,28 +498,33 @@ _wf_string =
         id: string_concat,
         type_id: "string_concatenate",
         name: "Build Full Name",
-        config: %{"separator" => " ", "input_field" => "name_parts"},
+        config: %{"separator" => " ", "parts" => "{{ json.name_parts }}"},
         position: %{"x" => 100, "y" => 200}
       },
       %{
         id: string_case,
         type_id: "string_case",
         name: "Title Case",
-        config: %{"operation" => "title"},
+        config: %{"operation" => "title", "text" => "{{ json }}"},
         position: %{"x" => 100, "y" => 350}
       },
       %{
         id: string_trim,
         type_id: "string_trim",
         name: "Clean Spaces",
-        config: %{"side" => "both"},
+        config: %{"side" => "both", "text" => "{{ json }}"},
         position: %{"x" => 100, "y" => 500}
       },
       %{
         id: string_replace,
         type_id: "string_replace",
         name: "Fix Typos",
-        config: %{"pattern" => "jonh", "replacement" => "john", "global" => true},
+        config: %{
+          "pattern" => "jonh",
+          "replacement" => "john",
+          "global" => true,
+          "text" => "{{ json }}"
+        },
         position: %{"x" => 100, "y" => 650}
       },
       %{
@@ -565,7 +572,7 @@ IO.puts("\n" <> String.duplicate("=", 60))
 IO.puts("🎉 Seeding complete!")
 IO.puts(String.duplicate("=", 60))
 
-workflows = Workflows.list_workflows(scope)
+workflows = Workflows.list_workflows(scope, preload: [:draft, :published_version])
 by_status = Enum.group_by(workflows, & &1.status)
 
 IO.puts("\n📊 Workflow Summary:")
@@ -584,7 +591,14 @@ for wf <- workflows do
       :archived -> "📦"
     end
 
-  node_count = length(wf.nodes || [])
+  node_count =
+    if wf.draft do
+      length(wf.draft.nodes || [])
+    else
+      # If no draft (shouldn't happen with ensure_draft_exists), check published version
+      if wf.published_version, do: length(wf.published_version.nodes || []), else: 0
+    end
+
   IO.puts("  #{status_emoji} #{wf.name} (#{node_count} nodes)")
 end
 

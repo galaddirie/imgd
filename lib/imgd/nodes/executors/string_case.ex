@@ -13,13 +13,7 @@ defmodule Imgd.Nodes.Executors.StringCase do
     - `camel` - Convert to camelCase
     - `snake` - Convert to snake_case
     - `kebab` - Convert to kebab-case
-  - `input_field` (optional) - Field name containing the string to process (if input is a map)
-
-  ## Input
-
-  Accepts either:
-  - A string: `"hello world"`
-  - A map with a string field: `%{text: "hello world"}`
+  - `text` (required) - The text to convert. Supports expressions like `{{ json }}`.
 
   ## Output
 
@@ -36,7 +30,7 @@ defmodule Imgd.Nodes.Executors.StringCase do
 
   @config_schema %{
     "type" => "object",
-    "required" => ["operation"],
+    "required" => ["operation", "text"],
     "properties" => %{
       "operation" => %{
         "type" => "string",
@@ -44,16 +38,15 @@ defmodule Imgd.Nodes.Executors.StringCase do
         "enum" => ["upper", "lower", "title", "camel", "snake", "kebab"],
         "description" => "Type of case conversion to apply"
       },
-      "input_field" => %{
-        "type" => "string",
-        "title" => "Input Field",
-        "description" => "Field name containing the string to process"
+      "text" => %{
+        "title" => "Text",
+        "description" => "Text to convert (supports expressions)"
       }
     }
   }
 
   @input_schema %{
-    "description" => "String to convert, or map containing string field"
+    "description" => "Populates {{ json }} for expressions"
   }
 
   @output_schema %{
@@ -66,11 +59,9 @@ defmodule Imgd.Nodes.Executors.StringCase do
   @supported_operations ~w(upper lower title camel snake kebab)
 
   @impl true
-  def execute(config, input, _execution) do
+  def execute(config, _input, _execution) do
     operation = Map.fetch!(config, "operation")
-    input_field = Map.get(config, "input_field")
-
-    text = extract_text(input, input_field)
+    text = config |> Map.fetch!("text") |> to_string_safe()
 
     result = apply_case_operation(text, operation)
     {:ok, result}
@@ -78,18 +69,34 @@ defmodule Imgd.Nodes.Executors.StringCase do
 
   @impl true
   def validate_config(config) do
-    case Map.get(config, "operation") do
-      nil ->
-        {:error, [operation: "is required"]}
+    errors = []
 
-      op when op in @supported_operations ->
-        :ok
+    errors =
+      case Map.get(config, "operation") do
+        nil ->
+          [{:operation, "is required"} | errors]
 
-      op when is_binary(op) ->
-        {:error, [operation: "must be one of: #{Enum.join(@supported_operations, ", ")}"]}
+        op when op in @supported_operations ->
+          errors
 
-      _ ->
-        {:error, [operation: "must be a string"]}
+        op when is_binary(op) ->
+          [{:operation, "must be one of: #{Enum.join(@supported_operations, ", ")}"} | errors]
+
+        _ ->
+          [{:operation, "must be a string"} | errors]
+      end
+
+    errors =
+      if Map.get(config, "text") do
+        errors
+      else
+        [{:text, "is required"} | errors]
+      end
+
+    if errors == [] do
+      :ok
+    else
+      {:error, Enum.reverse(errors)}
     end
   end
 
@@ -137,21 +144,9 @@ defmodule Imgd.Nodes.Executors.StringCase do
     |> String.replace(~r/--+/, "-")
   end
 
-  # Extract text from input
-  defp extract_text(input, nil) when is_binary(input) do
-    input
-  end
-
-  defp extract_text(input, field) when is_map(input) and is_binary(field) do
-    case Map.get(input, field) do
-      value when is_binary(value) -> value
-      nil -> ""
-      value -> to_string(value)
-    end
-  end
-
-  defp extract_text(input, _field) do
-    # Fallback: convert input to string
-    to_string(input)
-  end
+  defp to_string_safe(nil), do: ""
+  defp to_string_safe(text) when is_binary(text), do: text
+  defp to_string_safe(text) when is_number(text), do: to_string(text)
+  defp to_string_safe(%{"value" => value}), do: to_string_safe(value)
+  defp to_string_safe(other), do: inspect(other)
 end

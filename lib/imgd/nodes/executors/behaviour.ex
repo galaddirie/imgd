@@ -12,11 +12,19 @@ defmodule Imgd.Nodes.Executors.Behaviour do
         @behaviour Imgd.Nodes.Executors.Behaviour
 
         @impl true
-        def execute(config, input, context) do
+        def execute(config, _input, context) do
           url = config["url"]
           method = config["method"] || "GET"
+          body = Map.get(config, "body")
 
-          case Req.request(method: method, url: url, json: input) do
+          req_opts =
+            if body do
+              [method: method, url: url, json: body]
+            else
+              [method: method, url: url]
+            end
+
+          case Req.request(req_opts) do
             {:ok, %{status: status, body: body}} when status in 200..299 ->
               {:ok, %{"status" => status, "body" => body}}
 

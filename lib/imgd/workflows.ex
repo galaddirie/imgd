@@ -482,11 +482,18 @@ defmodule Imgd.Workflows do
     workflow = Repo.preload(workflow, :draft)
     draft = workflow.draft || %WorkflowDraft{}
 
-    WorkflowVersion.compute_source_hash(
+    compute_source_hash_from_attrs(
       draft.nodes || [],
       draft.connections || [],
       draft.triggers || []
     )
+  end
+
+  @doc """
+  Computes a SHA-256 hash from raw attributes (nodes, connections, triggers).
+  """
+  def compute_source_hash_from_attrs(nodes, connections, triggers) do
+    WorkflowVersion.compute_source_hash(nodes, connections, triggers)
   end
 
   @doc """

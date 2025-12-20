@@ -7,6 +7,11 @@ defmodule Imgd.Nodes.Executors.Wait do
   ## Configuration
 
   - `seconds` (optional) - Number of seconds to wait. Default: 5
+
+  ## Input Handling
+
+  This node uses **automatic input wiring**. The previous node's output
+  is passed through unchanged after the delay.
   """
 
   use Imgd.Nodes.Definition,
@@ -32,7 +37,7 @@ defmodule Imgd.Nodes.Executors.Wait do
   }
 
   @input_schema %{
-    "description" => "Any data to pass through after waiting"
+    "description" => "Receives previous node output automatically"
   }
 
   @output_schema %{

@@ -11,13 +11,7 @@ defmodule Imgd.Nodes.Executors.StringTrim do
     - `both` - Trim from both ends (default)
     - `leading` - Trim from the beginning only
     - `trailing` - Trim from the end only
-  - `input_field` (optional) - Field name containing the string to trim (if input is a map)
-
-  ## Input
-
-  Accepts either:
-  - A string: `"  hello world  "`
-  - A map with a string field: `%{text: "  hello world  "}`
+  - `text` (required) - The text to trim. Supports expressions like `{{ json }}`.
 
   ## Output
 
@@ -34,7 +28,12 @@ defmodule Imgd.Nodes.Executors.StringTrim do
 
   @config_schema %{
     "type" => "object",
+    "required" => ["text"],
     "properties" => %{
+      "text" => %{
+        "title" => "Text",
+        "description" => "Text to trim (supports expressions)"
+      },
       "characters" => %{
         "type" => "string",
         "title" => "Characters to Trim",
@@ -46,17 +45,12 @@ defmodule Imgd.Nodes.Executors.StringTrim do
         "enum" => ["both", "leading", "trailing"],
         "description" => "Which side of the string to trim",
         "default" => "both"
-      },
-      "input_field" => %{
-        "type" => "string",
-        "title" => "Input Field",
-        "description" => "Field name containing the string to trim"
       }
     }
   }
 
   @input_schema %{
-    "description" => "String to trim, or map containing string field"
+    "description" => "Populates {{ json }} for expressions"
   }
 
   @output_schema %{
@@ -69,12 +63,17 @@ defmodule Imgd.Nodes.Executors.StringTrim do
   @supported_sides ~w(both leading trailing)
 
   @impl true
-  def execute(config, input, _execution) do
+  def execute(config, _input, _execution) do
+    text = config |> Map.fetch!("text") |> to_string_safe()
     characters = Map.get(config, "characters")
     side = Map.get(config, "side", "both")
-    input_field = Map.get(config, "input_field")
 
-    text = extract_text(input, input_field)
+    characters =
+      if is_nil(characters) do
+        nil
+      else
+        to_string_safe(characters)
+      end
 
     result = apply_trim(text, side, characters)
     {:ok, result}
@@ -82,18 +81,34 @@ defmodule Imgd.Nodes.Executors.StringTrim do
 
   @impl true
   def validate_config(config) do
-    case Map.get(config, "side") do
-      nil ->
-        :ok
+    errors = []
 
-      side when side in @supported_sides ->
-        :ok
+    errors =
+      if Map.get(config, "text") do
+        errors
+      else
+        [{:text, "is required"} | errors]
+      end
 
-      side when is_binary(side) ->
-        {:error, [side: "must be one of: #{Enum.join(@supported_sides, ", ")}"]}
+    errors =
+      case Map.get(config, "side") do
+        nil ->
+          errors
 
-      _ ->
-        {:error, [side: "must be a string"]}
+        side when side in @supported_sides ->
+          errors
+
+        side when is_binary(side) ->
+          [{:side, "must be one of: #{Enum.join(@supported_sides, ", ")}"} | errors]
+
+        _ ->
+          [{:side, "must be a string"} | errors]
+      end
+
+    if errors == [] do
+      :ok
+    else
+      {:error, Enum.reverse(errors)}
     end
   end
 
@@ -122,21 +137,9 @@ defmodule Imgd.Nodes.Executors.StringTrim do
     String.trim_trailing(text, characters)
   end
 
-  # Extract text from input
-  defp extract_text(input, nil) when is_binary(input) do
-    input
-  end
-
-  defp extract_text(input, field) when is_map(input) and is_binary(field) do
-    case Map.get(input, field) do
-      value when is_binary(value) -> value
-      nil -> ""
-      value -> to_string(value)
-    end
-  end
-
-  defp extract_text(input, _field) do
-    # Fallback: convert input to string
-    to_string(input)
-  end
+  defp to_string_safe(nil), do: ""
+  defp to_string_safe(text) when is_binary(text), do: text
+  defp to_string_safe(text) when is_number(text), do: to_string(text)
+  defp to_string_safe(%{"value" => value}), do: to_string_safe(value)
+  defp to_string_safe(other), do: inspect(other)
 end

@@ -7,13 +7,7 @@ defmodule Imgd.Nodes.Executors.StringConcatenate do
   ## Configuration
 
   - `separator` (optional) - String to join the parts with. Defaults to empty string.
-  - `input_field` (optional) - If input is a map, the field containing the list/array of strings to concatenate. If not specified, concatenates all string values from the input map.
-
-  ## Input
-
-  Accepts either:
-  - A list of strings: `["Hello", " ", "World"]`
-  - A map with string values: `%{first: "Hello", second: "World", separator: " "}`
+  - `parts` (required) - List of parts to concatenate. Supports expressions like `{{ json.name_parts }}`.
 
   ## Output
 
@@ -30,24 +24,23 @@ defmodule Imgd.Nodes.Executors.StringConcatenate do
 
   @config_schema %{
     "type" => "object",
+    "required" => ["parts"],
     "properties" => %{
+      "parts" => %{
+        "title" => "Parts",
+        "description" => "List of parts to concatenate (supports expressions)"
+      },
       "separator" => %{
         "type" => "string",
         "title" => "Separator",
         "description" => "String to insert between concatenated parts",
         "default" => ""
-      },
-      "input_field" => %{
-        "type" => "string",
-        "title" => "Input Field",
-        "description" =>
-          "Field name containing the list of strings (leave empty to concatenate all string values from input map)"
       }
     }
   }
 
   @input_schema %{
-    "description" => "List of strings to concatenate, or map containing string values"
+    "description" => "Populates {{ json }} for expressions"
   }
 
   @output_schema %{
@@ -58,54 +51,40 @@ defmodule Imgd.Nodes.Executors.StringConcatenate do
   @behaviour Imgd.Nodes.Executors.Behaviour
 
   @impl true
-  def execute(config, input, _execution) do
+  def execute(config, _input, _execution) do
     separator = Map.get(config, "separator", "")
-    input_field = Map.get(config, "input_field")
+    parts = Map.get(config, "parts")
+    strings = extract_strings(parts)
 
-    strings = extract_strings(input, input_field)
-
-    result = Enum.join(strings, separator)
+    result = Enum.join(strings, to_string_safe(separator))
     {:ok, result}
   end
 
   @impl true
-  def validate_config(_config) do
-    # Config is always valid since all fields are optional
-    :ok
-  end
-
-  # Extract strings from input based on configuration
-  defp extract_strings(input, nil) when is_list(input) do
-    # Input is a list, use all string elements
-    Enum.map(input, &to_string/1)
-  end
-
-  defp extract_strings(input, nil) when is_map(input) do
-    # Input is a map, concatenate all string values
-    input
-    |> Map.values()
-    |> Enum.filter(&is_binary/1)
-  end
-
-  defp extract_strings(input, field) when is_map(input) and is_binary(field) do
-    # Input is a map, get the specific field
-    case Map.get(input, field) do
-      list when is_list(list) ->
-        Enum.map(list, &to_string/1)
-
-      value when is_binary(value) ->
-        [value]
-
-      nil ->
-        []
-
-      value ->
-        [to_string(value)]
+  def validate_config(config) do
+    if Map.get(config, "parts") do
+      :ok
+    else
+      {:error, [parts: "is required"]}
     end
   end
 
-  defp extract_strings(input, _field) do
-    # Fallback: try to convert input to string
-    [to_string(input)]
+  defp extract_strings(parts) when is_list(parts) do
+    Enum.map(parts, &to_string_safe/1)
   end
+
+  defp extract_strings(parts) when is_map(parts) do
+    parts
+    |> Map.values()
+    |> Enum.map(&to_string_safe/1)
+  end
+
+  defp extract_strings(nil), do: []
+  defp extract_strings(parts), do: [to_string_safe(parts)]
+
+  defp to_string_safe(nil), do: ""
+  defp to_string_safe(text) when is_binary(text), do: text
+  defp to_string_safe(text) when is_number(text), do: to_string(text)
+  defp to_string_safe(%{"value" => value}), do: to_string_safe(value)
+  defp to_string_safe(other), do: inspect(other)
 end

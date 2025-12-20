@@ -2,14 +2,13 @@ defmodule Imgd.Nodes.Executors.Math do
   @moduledoc """
   Executor for Math nodes.
 
-  Performs arithmetic and mathematical operations on the input.
+  Performs arithmetic and mathematical operations on configured values.
 
   ## Configuration
 
   - `operation` (required) - One of: add, subtract, multiply, divide, modulo, power, square_root, abs, round, ceil, floor
-  - `operand` (required for binary operations: add, subtract, multiply, divide, modulo, power) - The number to operate with (right-hand side)
-  - `field` (optional) - If input is a map, the field to use as the left-hand value.
-                         If not provided, the entire input is treated as the number.
+  - `value` (required) - The left-hand value to operate on. Supports expressions like `{{ json.amount }}`.
+  - `operand` (required for binary operations: add, subtract, multiply, divide, modulo, power) - The right-hand value. Supports expressions.
   """
 
   use Imgd.Nodes.Definition,
@@ -22,7 +21,7 @@ defmodule Imgd.Nodes.Executors.Math do
 
   @config_schema %{
     "type" => "object",
-    "required" => ["operation"],
+    "required" => ["operation", "value"],
     "properties" => %{
       "operation" => %{
         "type" => "string",
@@ -42,22 +41,20 @@ defmodule Imgd.Nodes.Executors.Math do
         ],
         "description" => "The mathematical operation to perform"
       },
+      "value" => %{
+        "title" => "Value",
+        "description" => "The left-hand value to operate on (supports expressions)"
+      },
       "operand" => %{
-        "type" => "number",
         "title" => "Operand",
         "description" =>
           "The right-hand value for binary operations (not needed for unary operations like square_root, abs, etc.)"
-      },
-      "field" => %{
-        "type" => "string",
-        "title" => "Input Field",
-        "description" => "If input is an object, the field to use as the left-hand value"
       }
     }
   }
 
   @input_schema %{
-    "description" => "A number or object containing a numeric field"
+    "description" => "Populates {{ json }} for expressions"
   }
 
   @output_schema %{
@@ -70,17 +67,10 @@ defmodule Imgd.Nodes.Executors.Math do
   @supported_operations ~w(add subtract multiply divide modulo power square_root abs round ceil floor)
 
   @impl true
-  def execute(config, input, _execution) do
+  def execute(config, _input, _execution) do
     operation = Map.fetch!(config, "operation")
+    value = Map.get(config, "value")
     operand = Map.get(config, "operand")
-
-    # Extract value from input if needed
-    value =
-      if is_map(input) and Map.get(config, "field") do
-        get_nested(input, config["field"])
-      else
-        input
-      end
 
     unary_operations = ~w(square_root abs round ceil floor)
 
@@ -115,6 +105,28 @@ defmodule Imgd.Nodes.Executors.Math do
         _ -> [{:operation, "must be one of: #{Enum.join(@supported_operations, ", ")}"} | errors]
       end
 
+    errors =
+      case Map.get(config, "value") do
+        nil ->
+          [{:value, "is required"} | errors]
+
+        value when is_binary(value) ->
+          if expression_string?(value) do
+            errors
+          else
+            case validate_number(value) do
+              {:ok, _} -> errors
+              {:error, _} -> [{:value, "must be a number"} | errors]
+            end
+          end
+
+        value ->
+          case validate_number(value) do
+            {:ok, _} -> errors
+            {:error, _} -> [{:value, "must be a number"} | errors]
+          end
+      end
+
     operation = Map.get(config, "operation")
     unary_operations = ~w(square_root abs round ceil floor)
 
@@ -132,9 +144,13 @@ defmodule Imgd.Nodes.Executors.Math do
             errors
 
           val when is_binary(val) ->
-            case Float.parse(val) do
-              {_, ""} -> errors
-              _ -> [{:operand, "must be a number"} | errors]
+            if expression_string?(val) do
+              errors
+            else
+              case Float.parse(val) do
+                {_, ""} -> errors
+                _ -> [{:operand, "must be a number"} | errors]
+              end
             end
 
           _ ->
@@ -178,12 +194,9 @@ defmodule Imgd.Nodes.Executors.Math do
 
   defp validate_number(other), do: {:error, "expected a number, got: #{inspect(other)}"}
 
-  defp get_nested(map, path) do
-    path
-    |> String.split(".")
-    |> Enum.reduce(map, fn
-      key, acc when is_map(acc) -> Map.get(acc, key)
-      _key, _acc -> nil
-    end)
+  defp expression_string?(value) when is_binary(value) do
+    String.contains?(value, "{{") and String.contains?(value, "}}")
   end
+
+  defp expression_string?(_value), do: false
 end

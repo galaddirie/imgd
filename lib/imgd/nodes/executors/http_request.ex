@@ -15,8 +15,8 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
 
   ## Input
 
-  The input data can be used to interpolate values into the URL, headers, or body
-  using `{{input.field}}` syntax (handled by expression evaluation).
+  Configuration values support expressions like `{{ json }}` and `{{ nodes.NodeId.json }}`.
+  Use these expressions to interpolate upstream data into the URL, headers, or body.
 
   ## Output
 
@@ -54,12 +54,11 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
         "type" => "object",
         "title" => "Headers",
         "additionalProperties" => %{"type" => "string"},
-        "description" => "HTTP headers to include in the request"
+        "description" => "HTTP headers to include in the request (supports expressions)"
       },
       "body" => %{
-        "type" => "object",
         "title" => "Request Body",
-        "description" => "JSON body for POST/PUT/PATCH requests"
+        "description" => "JSON body for POST/PUT/PATCH requests (supports expressions)"
       },
       "timeout_ms" => %{
         "type" => "integer",
@@ -78,8 +77,7 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
   }
 
   @input_schema %{
-    "type" => "object",
-    "description" => "Data to pass to the request (can be referenced in URL, headers, body)"
+    "description" => "Populates {{ json }} for expressions"
   }
 
   @output_schema %{
@@ -100,7 +98,7 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
   @default_method "GET"
 
   @impl true
-  def execute(config, input, _execution) do
+  def execute(config, _input, _execution) do
     url = Map.fetch!(config, "url")
     method = Map.get(config, "method", @default_method) |> normalize_method()
     headers = Map.get(config, "headers", %{}) |> normalize_headers()
@@ -120,7 +118,7 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
     # Add body for methods that support it
     req_opts =
       if method in [:post, :put, :patch] and body != nil do
-        Keyword.put(req_opts, :json, maybe_merge_input(body, input))
+        Keyword.put(req_opts, :json, body)
       else
         req_opts
       end
@@ -159,9 +157,18 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
 
     errors =
       case Map.get(config, "url") do
-        nil -> [{:url, "is required"} | errors]
-        url when not is_binary(url) -> [{:url, "must be a string"} | errors]
-        url -> validate_url(url, errors)
+        nil ->
+          [{:url, "is required"} | errors]
+
+        url when is_binary(url) ->
+          if expression_string?(url) do
+            errors
+          else
+            validate_url(url, errors)
+          end
+
+        _ ->
+          [{:url, "must be a string"} | errors]
       end
 
     errors =
@@ -169,11 +176,17 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
         nil ->
           errors
 
-        method when method in ~w(GET POST PUT PATCH DELETE HEAD OPTIONS) ->
-          errors
-
         method when is_binary(method) ->
-          [{:method, "must be one of: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"} | errors]
+          cond do
+            expression_string?(method) ->
+              errors
+
+            method in ~w(GET POST PUT PATCH DELETE HEAD OPTIONS) ->
+              errors
+
+            true ->
+              [{:method, "must be one of: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"} | errors]
+          end
 
         _ ->
           [{:method, "must be a string"} | errors]
@@ -181,16 +194,59 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
 
     errors =
       case Map.get(config, "headers") do
-        nil -> errors
-        headers when is_map(headers) -> errors
-        _ -> [{:headers, "must be a map"} | errors]
+        nil ->
+          errors
+
+        headers when is_map(headers) ->
+          errors
+
+        headers when is_binary(headers) ->
+          if expression_string?(headers) do
+            errors
+          else
+            [{:headers, "must be a map"} | errors]
+          end
+
+        _ ->
+          [{:headers, "must be a map"} | errors]
       end
 
     errors =
       case Map.get(config, "timeout_ms") do
-        nil -> errors
-        timeout when is_integer(timeout) and timeout > 0 -> errors
-        _ -> [{:timeout_ms, "must be a positive integer"} | errors]
+        nil ->
+          errors
+
+        timeout when is_integer(timeout) and timeout > 0 ->
+          errors
+
+        timeout when is_binary(timeout) ->
+          if expression_string?(timeout) do
+            errors
+          else
+            [{:timeout_ms, "must be a positive integer"} | errors]
+          end
+
+        _ ->
+          [{:timeout_ms, "must be a positive integer"} | errors]
+      end
+
+    errors =
+      case Map.get(config, "follow_redirects") do
+        nil ->
+          errors
+
+        flag when is_boolean(flag) ->
+          errors
+
+        flag when is_binary(flag) ->
+          if expression_string?(flag) do
+            errors
+          else
+            [{:follow_redirects, "must be a boolean"} | errors]
+          end
+
+        _ ->
+          [{:follow_redirects, "must be a boolean"} | errors]
       end
 
     if errors == [] do
@@ -236,10 +292,9 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
     end
   end
 
-  defp maybe_merge_input(body, input) when is_map(body) and is_map(input) do
-    # Allow body to reference input fields
-    Map.merge(body, %{"_input" => input})
+  defp expression_string?(value) when is_binary(value) do
+    String.contains?(value, "{{") and String.contains?(value, "}}")
   end
 
-  defp maybe_merge_input(body, _input), do: body
+  defp expression_string?(_value), do: false
 end

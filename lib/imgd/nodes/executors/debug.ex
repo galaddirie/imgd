@@ -9,6 +9,11 @@ defmodule Imgd.Nodes.Executors.Debug do
 
   - `label` (optional) - A label to prefix the log message with
   - `level` (optional) - The log level (debug, info, warn, error). Default: info
+
+  ## Input Handling
+
+  This node uses **automatic input wiring**. The previous node's output
+  is logged and passed through unchanged.
   """
 
   use Imgd.Nodes.Definition,
@@ -39,7 +44,7 @@ defmodule Imgd.Nodes.Executors.Debug do
   }
 
   @input_schema %{
-    "description" => "Any data to inspect and pass through"
+    "description" => "Receives previous node output automatically"
   }
 
   @output_schema %{
@@ -52,7 +57,7 @@ defmodule Imgd.Nodes.Executors.Debug do
   @impl true
   def execute(config, input, _execution) do
     label = Map.get(config, "label", "Debug Node")
-    level = Map.get(config, "level", "info") |> String.to_atom()
+    level = normalize_level(Map.get(config, "level", "info"))
 
     message = "#{label}: #{inspect(input, pretty: true)}"
 
@@ -77,4 +82,20 @@ defmodule Imgd.Nodes.Executors.Debug do
       {:error, [level: "must be one of: debug, info, warn, error"]}
     end
   end
+
+  defp normalize_level(level) when is_atom(level) and level in [:debug, :info, :warn, :error] do
+    level
+  end
+
+  defp normalize_level(level) when is_binary(level) do
+    case String.downcase(level) do
+      "debug" -> :debug
+      "info" -> :info
+      "warn" -> :warn
+      "error" -> :error
+      _ -> :info
+    end
+  end
+
+  defp normalize_level(_level), do: :info
 end

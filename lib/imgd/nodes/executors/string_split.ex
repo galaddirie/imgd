@@ -9,13 +9,7 @@ defmodule Imgd.Nodes.Executors.StringSplit do
   - `delimiter` (optional) - String to split on. Defaults to whitespace.
   - `limit` (optional) - Maximum number of parts to split into. If not specified, splits all occurrences.
   - `trim_parts` (optional) - Whether to trim whitespace from each part. Defaults to false.
-  - `input_field` (optional) - Field name containing the string to split (if input is a map).
-
-  ## Input
-
-  Accepts either:
-  - A string: `"hello world"`
-  - A map with a string field: `%{text: "hello world"}`
+  - `text` (required) - The text to split. Supports expressions like `{{ json }}`.
 
   ## Output
 
@@ -32,7 +26,12 @@ defmodule Imgd.Nodes.Executors.StringSplit do
 
   @config_schema %{
     "type" => "object",
+    "required" => ["text"],
     "properties" => %{
+      "text" => %{
+        "title" => "Text",
+        "description" => "Text to split (supports expressions)"
+      },
       "delimiter" => %{
         "type" => "string",
         "title" => "Delimiter",
@@ -50,17 +49,12 @@ defmodule Imgd.Nodes.Executors.StringSplit do
         "title" => "Trim Parts",
         "description" => "Remove whitespace from each split part",
         "default" => false
-      },
-      "input_field" => %{
-        "type" => "string",
-        "title" => "Input Field",
-        "description" => "Field name containing the string to split"
       }
     }
   }
 
   @input_schema %{
-    "description" => "String to split, or map containing string field"
+    "description" => "Populates {{ json }} for expressions"
   }
 
   @output_schema %{
@@ -72,13 +66,13 @@ defmodule Imgd.Nodes.Executors.StringSplit do
   @behaviour Imgd.Nodes.Executors.Behaviour
 
   @impl true
-  def execute(config, input, _execution) do
+  def execute(config, _input, _execution) do
+    text = config |> Map.fetch!("text") |> to_string_safe()
     delimiter = Map.get(config, "delimiter", "")
-    limit = Map.get(config, "limit")
+    limit = normalize_limit(Map.get(config, "limit"))
     trim_parts = Map.get(config, "trim_parts", false)
-    input_field = Map.get(config, "input_field")
 
-    text = extract_text(input, input_field)
+    delimiter = to_string_safe(delimiter)
 
     # Handle empty delimiter (split on whitespace)
     parts =
@@ -108,9 +102,21 @@ defmodule Imgd.Nodes.Executors.StringSplit do
 
     errors =
       case Map.get(config, "limit") do
-        nil -> errors
-        n when is_integer(n) and n > 0 -> errors
-        n -> [{:limit, "must be a positive integer, got: #{inspect(n)}"} | errors]
+        nil ->
+          errors
+
+        n when is_integer(n) and n > 0 ->
+          errors
+
+        n when is_binary(n) ->
+          if expression_string?(n) do
+            errors
+          else
+            [{:limit, "must be a positive integer, got: #{inspect(n)}"} | errors]
+          end
+
+        n ->
+          [{:limit, "must be a positive integer, got: #{inspect(n)}"} | errors]
       end
 
     if errors == [] do
@@ -120,21 +126,27 @@ defmodule Imgd.Nodes.Executors.StringSplit do
     end
   end
 
-  # Extract text from input
-  defp extract_text(input, nil) when is_binary(input) do
-    input
-  end
+  defp normalize_limit(nil), do: nil
+  defp normalize_limit(limit) when is_integer(limit), do: limit
 
-  defp extract_text(input, field) when is_map(input) and is_binary(field) do
-    case Map.get(input, field) do
-      value when is_binary(value) -> value
-      nil -> ""
-      value -> to_string(value)
+  defp normalize_limit(limit) when is_binary(limit) do
+    case Integer.parse(limit) do
+      {parsed, ""} -> parsed
+      _ -> nil
     end
   end
 
-  defp extract_text(input, _field) do
-    # Fallback: convert input to string
-    to_string(input)
+  defp normalize_limit(_limit), do: nil
+
+  defp expression_string?(value) when is_binary(value) do
+    String.contains?(value, "{{") and String.contains?(value, "}}")
   end
+
+  defp expression_string?(_value), do: false
+
+  defp to_string_safe(nil), do: ""
+  defp to_string_safe(text) when is_binary(text), do: text
+  defp to_string_safe(text) when is_number(text), do: to_string(text)
+  defp to_string_safe(%{"value" => value}), do: to_string_safe(value)
+  defp to_string_safe(other), do: inspect(other)
 end

@@ -2,12 +2,13 @@ defmodule Imgd.Nodes.Executors.Format do
   @moduledoc """
   Executor for Format nodes.
 
-  Formats a string using a template and values from the input.
+  Formats a string using a template and configured data.
 
   ## Configuration
 
   - `template` (required) - The template string. Use {{key}} for placeholders.
     Example: "Hello {{user.name}}, your order {{order_id}} is ready."
+  - `data` (optional) - Data object used for placeholder replacement. Supports expressions like `{{ json }}`.
   """
 
   use Imgd.Nodes.Definition,
@@ -27,13 +28,16 @@ defmodule Imgd.Nodes.Executors.Format do
         "title" => "Template",
         "description" =>
           "Template string with {{field}} placeholders. Supports nested paths like {{user.name}}"
+      },
+      "data" => %{
+        "title" => "Data",
+        "description" => "Data object used for placeholder replacement (supports expressions)"
       }
     }
   }
 
   @input_schema %{
-    "type" => "object",
-    "description" => "Data to use for placeholder replacement"
+    "description" => "Populates {{ json }} for expressions"
   }
 
   @output_schema %{
@@ -44,14 +48,11 @@ defmodule Imgd.Nodes.Executors.Format do
   @behaviour Imgd.Nodes.Executors.Behaviour
 
   @impl true
-  def execute(config, input, _execution) do
-    template = Map.fetch!(config, "template")
+  def execute(config, _input, _execution) do
+    template = config |> Map.fetch!("template") |> to_string_safe()
+    data = Map.get(config, "data", %{})
 
-    # We treat the input as the data source.
-    # If input is not a map, we can only replace if there's a special placeholder or if we fail gracefully.
-    # Let's assume input is a map for now.
-
-    result = render_template(template, input)
+    result = render_template(template, data)
     {:ok, result}
   end
 
@@ -74,6 +75,12 @@ defmodule Imgd.Nodes.Executors.Format do
   end
 
   defp render_template(template, _data), do: template
+
+  defp to_string_safe(nil), do: ""
+  defp to_string_safe(text) when is_binary(text), do: text
+  defp to_string_safe(text) when is_number(text), do: to_string(text)
+  defp to_string_safe(%{"value" => value}), do: to_string_safe(value)
+  defp to_string_safe(other), do: inspect(other)
 
   defp get_nested(map, path) do
     path

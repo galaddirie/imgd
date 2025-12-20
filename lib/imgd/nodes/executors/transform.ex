@@ -16,6 +16,11 @@ defmodule Imgd.Nodes.Executors.Transform do
   - `rename` - Rename fields
   - `flatten` - Flatten nested arrays
   - `passthrough` - Pass input unchanged (useful for testing)
+
+  ## Input Handling
+
+  This node uses **automatic input wiring**. It transforms whatever data
+  is flowing into the node based on the configured operation.
   """
 
   use Imgd.Nodes.Definition,
@@ -72,7 +77,7 @@ defmodule Imgd.Nodes.Executors.Transform do
   }
 
   @input_schema %{
-    "description" => "Data to transform (object, array, or primitive)"
+    "description" => "Receives previous node output automatically"
   }
 
   @output_schema %{

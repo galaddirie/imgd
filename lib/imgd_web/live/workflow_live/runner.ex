@@ -785,6 +785,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
   defp workflow_demo_inputs(workflow) do
     workflow = Imgd.Repo.preload(workflow, :draft)
     settings = (workflow.draft && workflow.draft.settings) || %{}
+
     from_settings =
       settings
       |> fetch_setting(:demo_inputs)
@@ -836,6 +837,7 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     draft = workflow.draft || %Imgd.Workflows.WorkflowDraft{}
     nodes = draft.nodes || []
     type_ids = Enum.map(nodes, & &1.type_id)
+
     []
     |> maybe_add_math_demo(type_ids)
     |> maybe_add_template_demo(type_ids)
@@ -906,7 +908,6 @@ defmodule ImgdWeb.WorkflowLive.Runner do
         Map.get(trigger, "type") == to_string(type)
     end)
   end
-
 
   defp match_demo_input(value, demo_inputs) do
     normalized_value = normalize_demo_value(value)

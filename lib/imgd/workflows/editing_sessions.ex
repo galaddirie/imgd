@@ -57,7 +57,7 @@ defmodule Imgd.Workflows.EditingSessions do
     draft = workflow.draft || %WorkflowDraft{}
 
     source_hash =
-      Imgd.Workflows.WorkflowSnapshot.compute_source_hash(
+      Imgd.Workflows.compute_source_hash_from_attrs(
         draft.nodes || [],
         draft.connections || [],
         draft.triggers || []

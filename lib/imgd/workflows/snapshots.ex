@@ -20,7 +20,7 @@ defmodule Imgd.Workflows.Snapshots do
     draft = workflow.draft || %Imgd.Workflows.WorkflowDraft{}
 
     source_hash =
-      WorkflowSnapshot.compute_source_hash(
+      Imgd.Workflows.compute_source_hash_from_attrs(
         draft.nodes || [],
         draft.connections || [],
         draft.triggers || []
