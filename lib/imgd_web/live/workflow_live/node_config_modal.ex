@@ -10,7 +10,7 @@ defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
   """
   use ImgdWeb, :live_component
 
-  alias Imgd.Runtime.Expression
+  alias Imgd.Runtime.Core.Expression
 
   @impl true
   def mount(socket) do

@@ -144,6 +144,8 @@ defmodule Imgd.SandboxTest do
     test "emits start and stop events" do
       test_pid = self()
       ref = make_ref()
+      code = "return 1 + 1; // #{inspect(ref)}"
+      code_size = byte_size(code)
 
       handler_id = "test_telemetry_#{inspect(ref)}"
 
@@ -151,14 +153,16 @@ defmodule Imgd.SandboxTest do
         handler_id,
         [:sandbox, :eval, :stop],
         fn _event, measurements, metadata, _config ->
-          send(test_pid, {:telemetry_event, measurements, metadata})
+          if metadata.code_size == code_size do
+            send(test_pid, {:telemetry_event, measurements, metadata})
+          end
         end,
         nil
       )
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
-      Sandbox.eval("return 1 + 1;")
+      Sandbox.eval(code)
 
       assert_receive {:telemetry_event, measurements, metadata}
       assert is_integer(measurements.duration)

@@ -15,7 +15,7 @@ defmodule Imgd.Runtime.Expression.Cache do
 
   ## Usage
 
-  The cache is automatically used by `Imgd.Runtime.Expression.evaluate/3`.
+  The cache is automatically used by `Imgd.Runtime.Core.Expression.evaluate/3`.
   Direct usage:
 
       {:ok, compiled} = Cache.get_or_compile("Hello {{ name }}")

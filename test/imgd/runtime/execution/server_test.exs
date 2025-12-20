@@ -41,20 +41,22 @@ defmodule Imgd.Runtime.Execution.ServerTest do
       user = insert(:user)
       scope = Scope.for_user(user)
 
-      workflow =
-        insert(:workflow,
-          user: user,
-          nodes: [
-            %Imgd.Workflows.Embeds.Node{
-              id: "debug_1",
-              type_id: "debug",
-              name: "Debug Node",
-              config: %{label: "Test", level: "info"},
-              position: %{x: 0, y: 0}
-            }
-          ],
-          connections: []
-        )
+      workflow = insert(:workflow, user: user)
+
+      insert(:workflow_draft,
+        workflow_id: workflow.id,
+        nodes: [
+          %{
+            id: "debug_1",
+            type_id: "debug",
+            name: "Debug Node",
+            config: %{label: "Test", level: "info"},
+            position: %{x: 0, y: 0}
+          }
+        ],
+        connections: [],
+        triggers: []
+      )
 
       # Create execution WITHOUT a workflow_version (draft execution) using snapshots
       {:ok, execution} =
@@ -88,35 +90,37 @@ defmodule Imgd.Runtime.Execution.ServerTest do
       scope = Scope.for_user(user)
 
       # Create workflow with specific nodes
-      workflow =
-        insert(:workflow,
-          user: user,
-          nodes: [
-            %Imgd.Workflows.Embeds.Node{
-              id: "start_node",
-              type_id: "debug",
-              name: "Start",
-              config: %{label: "Start", level: "info"},
-              position: %{x: 0, y: 0}
-            },
-            %Imgd.Workflows.Embeds.Node{
-              id: "end_node",
-              type_id: "debug",
-              name: "End",
-              config: %{label: "End", level: "info"},
-              position: %{x: 0, y: 100}
-            }
-          ],
-          connections: [
-            %Imgd.Workflows.Embeds.Connection{
-              id: "conn_1",
-              source_node_id: "start_node",
-              target_node_id: "end_node",
-              source_output: "main",
-              target_input: "main"
-            }
-          ]
-        )
+      workflow = insert(:workflow, user: user)
+
+      insert(:workflow_draft,
+        workflow_id: workflow.id,
+        nodes: [
+          %{
+            id: "start_node",
+            type_id: "debug",
+            name: "Start",
+            config: %{label: "Start", level: "info"},
+            position: %{x: 0, y: 0}
+          },
+          %{
+            id: "end_node",
+            type_id: "debug",
+            name: "End",
+            config: %{label: "End", level: "info"},
+            position: %{x: 0, y: 100}
+          }
+        ],
+        connections: [
+          %{
+            id: "conn_1",
+            source_node_id: "start_node",
+            target_node_id: "end_node",
+            source_output: "main",
+            target_input: "main"
+          }
+        ],
+        triggers: []
+      )
 
       # Create execution without workflow_version using snapshots
       {:ok, execution} =

@@ -3,8 +3,6 @@ defmodule ImgdWeb.WorkflowLive.RunnerTest do
   import Phoenix.LiveViewTest
   import Imgd.Factory
 
-  alias Imgd.Executions
-
   setup %{conn: conn} do
     user = insert(:user)
     workflow = insert(:workflow, user: user)

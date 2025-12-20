@@ -1,7 +1,7 @@
-defmodule Imgd.Runtime.ExpressionTest do
+defmodule Imgd.Runtime.Core.ExpressionTest do
   use ExUnit.Case, async: true
 
-  alias Imgd.Runtime.Expression
+  alias Imgd.Runtime.Core.Expression
   alias Imgd.Runtime.Expression.{Context, Filters}
   alias Imgd.Executions.Execution
 
