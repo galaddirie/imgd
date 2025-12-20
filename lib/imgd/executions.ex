@@ -173,12 +173,14 @@ defmodule Imgd.Executions do
           %{
             "partial" => true,
             "target_node" => target_node_id,
+            "target_nodes" => [target_node_id],
             "pinned_nodes" => Map.keys(compatible_pins)
           },
           fn extras ->
             extras
             |> Map.put("partial", true)
             |> Map.put("target_node", target_node_id)
+            |> Map.put("target_nodes", [target_node_id])
             |> Map.put("pinned_nodes", Map.keys(compatible_pins))
           end
         )

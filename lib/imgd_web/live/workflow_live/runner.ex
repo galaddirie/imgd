@@ -380,10 +380,10 @@ defmodule ImgdWeb.WorkflowLive.Runner do
     trigger_data = get_trigger_data_from_form(socket)
     version_id = socket.assigns.selected_version_id
 
-    case Executions.start_partial_execution(scope, workflow, node_id, %{
-           trigger: %{type: :manual, data: trigger_data},
+    case Executions.execute_node(scope, workflow, node_id,
+           trigger_data: trigger_data,
            metadata: build_manual_metadata("Partial Run: #{node_id}")
-         }) do
+         ) do
       {:ok, execution} ->
         socket =
           socket

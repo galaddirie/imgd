@@ -225,11 +225,32 @@ defmodule Imgd.Runtime.Execution.Server do
   defp prepare_graph_and_state(graph, execution) do
     metadata = execution.metadata || %{}
     extras = Map.get(metadata, "extras") || Map.get(metadata, :extras) || %{}
-    is_partial = Map.get(extras, "partial") == true
+
+    is_partial =
+      Map.get(extras, "partial") == true or Map.get(extras, :partial) == true
 
     if is_partial do
-      target_nodes = Map.get(extras, "target_nodes", [])
-      pinned_ids = Map.get(extras, "pinned_nodes", [])
+      target_nodes =
+        case Map.get(extras, "target_nodes") || Map.get(extras, :target_nodes) do
+          nil ->
+            case Map.get(extras, "target_node") || Map.get(extras, :target_node) do
+              nil -> []
+              target_node -> [target_node]
+            end
+
+          target_nodes when is_list(target_nodes) ->
+            target_nodes
+
+          target_node ->
+            [target_node]
+        end
+
+      pinned_ids =
+        case Map.get(extras, "pinned_nodes") || Map.get(extras, :pinned_nodes) do
+          nil -> []
+          pinned_ids when is_list(pinned_ids) -> pinned_ids
+          pinned_id -> [pinned_id]
+        end
 
       # Use snapshotted pinned_data from the execution record
       pinned_outputs = Map.take(execution.pinned_data || %{}, pinned_ids)
