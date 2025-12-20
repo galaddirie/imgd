@@ -185,10 +185,14 @@ defmodule Imgd.Executions do
 
     with :ok <- authorize_workflow(scope, workflow),
          {:ok, _node} <- find_workflow_node(workflow, target_node_id),
-         {:ok, snapshot} <- Imgd.Workflows.Snapshots.get_or_create(scope, workflow),
-         {:ok, session} <- Imgd.Workflows.EditingSessions.get_or_create_session(scope, workflow) do
+         {:ok, pid} <- Imgd.Workflows.EditingSessions.get_or_start_session(scope, workflow) do
+      session_summary = Imgd.Workflows.EditingSession.Server.get_summary(pid)
+
+      {:ok, snapshot} =
+        Imgd.Workflows.Snapshots.get_or_create_with_hash(scope, workflow, session_summary.source_hash)
+
       compatible_pins =
-        Imgd.Workflows.EditingSessions.get_compatible_pins(session, snapshot.source_hash)
+        Imgd.Workflows.EditingSession.Server.get_compatible_pins(pid, session_summary.source_hash)
 
       metadata =
         attrs

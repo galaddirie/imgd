@@ -226,6 +226,9 @@ defmodule Imgd.Runtime.Execution.Server do
     metadata = execution.metadata || %{}
     extras = Map.get(metadata, "extras") || Map.get(metadata, :extras) || %{}
 
+    # Extract pinned_data once for both partial and full executions
+    pinned_data = execution.pinned_data || %{}
+
     is_partial =
       Map.get(extras, "partial") == true or Map.get(extras, :partial) == true
 
@@ -253,14 +256,15 @@ defmodule Imgd.Runtime.Execution.Server do
         end
 
       # Use snapshotted pinned_data from the execution record
-      pinned_outputs = Map.take(execution.pinned_data || %{}, pinned_ids)
+      pinned_outputs = Map.take(pinned_data, pinned_ids)
 
       subgraph =
         Graph.execution_subgraph(graph, target_nodes, pinned: pinned_ids, include_targets: true)
 
       {subgraph, pinned_outputs}
     else
-      {graph, %{}}
+      # For full preview/production executions, ALSO use pinned data
+      {graph, pinned_data}
     end
   end
 
