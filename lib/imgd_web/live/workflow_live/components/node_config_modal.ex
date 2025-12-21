@@ -1139,7 +1139,6 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
     |> Enum.join(" ")
   end
 
-
   defp format_json(nil), do: "null"
   defp format_json(data) when is_binary(data), do: data
 
@@ -1165,5 +1164,4 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
   end
 
   defp truncate(str, _), do: str
-
 end

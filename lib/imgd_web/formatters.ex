@@ -74,6 +74,7 @@ defmodule ImgdWeb.Formatters do
   Formats a datetime as relative time (e.g., "just now", "5m ago").
   """
   def format_relative_time(nil), do: "unknown time"
+
   def format_relative_time(datetime_str) when is_binary(datetime_str) do
     case DateTime.from_iso8601(datetime_str) do
       {:ok, dt, _} -> format_relative_time(dt)
