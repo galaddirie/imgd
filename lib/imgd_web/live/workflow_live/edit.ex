@@ -10,29 +10,40 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   """
   use ImgdWeb, :live_view
 
-  alias Imgd.Workflows
-  alias Imgd.Workflows.EditingSessions
+  alias Imgd.Collaboration.EditorState
+  alias Imgd.Collaboration.EditSession.{Operations, Presence, Server, Supervisor}
   alias Imgd.Executions
   alias Imgd.Executions.{Execution, NodeExecution, PubSub}
+  alias Imgd.Runtime.Execution.Supervisor, as: ExecutionSupervisor
+  alias Imgd.Workflows
   alias Imgd.Workflows.DagLayout
-  alias ImgdWeb.WorkflowLive.NodeConfigModal
+  alias ImgdWeb.WorkflowLive.Components.NodeConfigModal
   import ImgdWeb.WorkflowLive.RunnerComponents
 
   @trace_log_limit 500
+  @draft_operation_types [
+    :add_node,
+    :remove_node,
+    :update_node_config,
+    :update_node_position,
+    :update_node_metadata,
+    :add_connection,
+    :remove_connection
+  ]
 
   @impl true
   def mount(%{"id" => workflow_id}, _session, socket) do
     scope = socket.assigns.current_scope
 
-    case Workflows.get_workflow_for_edit(scope, workflow_id, preload: [:published_version]) do
-      nil ->
+    case Workflows.get_workflow_with_draft(workflow_id, scope) do
+      {:error, :not_found} ->
         {:ok,
          socket
          |> put_flash(:error, "Workflow not found")
          |> redirect(to: ~p"/workflows")}
 
       {:ok, workflow} ->
-        {:ok, versions} = Workflows.list_workflow_versions(scope, workflow)
+        versions = Workflows.list_workflow_versions(workflow, scope)
         versions_map = Map.new(versions, &{&1.id, &1})
 
         demo_inputs = workflow_demo_inputs(workflow)
@@ -40,48 +51,66 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         initial_payload = if(initial_demo, do: initial_demo.data, else: %{})
         run_form = build_run_form(initial_payload, version_id: "draft")
 
-        {:ok, pid} = EditingSessions.get_or_start_session(scope, workflow)
+        with {:ok, edit_session_pid} <- Supervisor.ensure_session(workflow.id),
+             {:ok, sync_state} <- Server.get_sync_state(workflow.id) do
+          {draft, edit_seq} = sync_state_to_draft(sync_state, workflow)
 
-        socket =
-          socket
-          |> assign(:page_title, "Run: #{workflow.name}")
-          |> assign(:workflow, workflow)
-          |> assign(:editing_session_pid, pid)
-          |> assign(:versions, versions)
-          |> assign(:versions_map, versions_map)
-          |> assign(:selected_version_id, "draft")
-          |> assign_source_graph(workflow)
-          |> assign(:execution, nil)
-          |> assign(
-            :node_states,
-            build_initial_pin_states(
-              workflow,
-              EditingSessions.get_pins_with_status_from_server(pid, workflow)
-            )
-          )
-          |> assign(:selected_node_id, nil)
-          |> assign(:running?, false)
-          |> assign(:can_run?, length((workflow.draft && workflow.draft.nodes) || []) > 0)
-          |> assign(:trace_log_count, 0)
-          |> assign(:subscribed_execution_id, nil)
-          |> assign(:demo_inputs, demo_inputs)
-          |> assign(:selected_demo, initial_demo)
-          |> assign(:run_form, run_form)
-          |> assign(:run_form_error, nil)
-          # Modal state
-          |> assign(:show_config_modal, false)
-          |> assign(:config_modal_node, nil)
-          # Context menu state
-          |> assign(:show_context_menu, false)
-          |> assign(:context_menu_node_id, nil)
-          |> assign(:context_menu_position, %{x: 0, y: 0})
-          |> assign(
-            :pins_with_status,
-            EditingSessions.get_pins_with_status_from_server(pid, workflow)
-          )
-          |> stream(:trace_log, [], dom_id: &"trace-#{&1.id}")
+          editor_state =
+            case Server.get_editor_state(workflow.id) do
+              {:ok, state} -> state
+              _ -> %EditorState{workflow_id: workflow.id}
+            end
 
-        {:ok, socket}
+          node_map = Map.new((draft && draft.nodes) || [], &{&1.id, &1})
+          pin_labels = %{}
+          pins_with_status = build_pins_with_status(editor_state, node_map, pin_labels)
+
+          socket =
+            socket
+            |> assign(:page_title, "Run: #{workflow.name}")
+            |> assign(:workflow, workflow)
+            |> assign(:draft, draft)
+            |> assign(:edit_session_pid, edit_session_pid)
+            |> assign(:edit_session_seq, edit_seq)
+            |> assign(:client_seq, 0)
+            |> assign(:editor_state, editor_state)
+            |> assign(:presence_tracked?, false)
+            |> assign(:locked_node_id, nil)
+            |> assign(:pin_labels, pin_labels)
+            |> assign(:versions, versions)
+            |> assign(:versions_map, versions_map)
+            |> assign(:selected_version_id, "draft")
+            |> assign_source_graph(draft)
+            |> assign(:execution, nil)
+            |> assign(:node_states, build_initial_pin_states(workflow, pins_with_status))
+            |> assign(:selected_node_id, nil)
+            |> assign(:running?, false)
+            |> assign(:can_run?, length((draft && draft.nodes) || []) > 0)
+            |> assign(:trace_log_count, 0)
+            |> assign(:subscribed_execution_id, nil)
+            |> assign(:demo_inputs, demo_inputs)
+            |> assign(:selected_demo, initial_demo)
+            |> assign(:run_form, run_form)
+            |> assign(:run_form_error, nil)
+            # Modal state
+            |> assign(:show_config_modal, false)
+            |> assign(:config_modal_node, nil)
+            # Context menu state
+            |> assign(:show_context_menu, false)
+            |> assign(:context_menu_node_id, nil)
+            |> assign(:context_menu_position, %{x: 0, y: 0})
+            |> assign(:pins_with_status, pins_with_status)
+            |> maybe_subscribe_to_edit_session(scope, workflow.id)
+            |> stream(:trace_log, [], dom_id: &"trace-#{&1.id}")
+
+          {:ok, socket}
+        else
+          _ ->
+            {:ok,
+             socket
+             |> put_flash(:error, "Unable to start collaborative session")
+             |> redirect(to: ~p"/workflows")}
+        end
     end
   end
 
@@ -119,19 +148,21 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_params(%{"execution_id" => execution_id}, _uri, socket) do
     scope = socket.assigns.current_scope
 
-    case Executions.get_execution(scope, execution_id,
-           preload: [:node_executions, :workflow_version, :workflow_snapshot]
-         ) do
-      nil ->
+    case Executions.get_execution_with_nodes(execution_id, scope) do
+      {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Execution not found")}
 
-      execution ->
-        # Source for graph rendering
-        source =
-          execution.workflow_version || execution.workflow_snapshot || socket.assigns.workflow
+      {:ok, execution} ->
+        version_id = execution_version_id(execution)
 
-        version_id =
-          if execution.workflow_version, do: execution.workflow_version.id, else: "draft"
+        source =
+          if version_id == "draft" do
+            socket.assigns.draft || socket.assigns.workflow
+          else
+            Map.get(socket.assigns.versions_map, version_id) ||
+              socket.assigns.draft ||
+              socket.assigns.workflow
+          end
 
         socket =
           socket
@@ -172,13 +203,25 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     node = Map.get(socket.assigns.node_map, node_id)
 
     if node do
-      socket =
-        socket
-        |> assign(:show_config_modal, true)
-        |> assign(:config_modal_node, node)
-        |> assign(:show_context_menu, false)
+      socket = release_node_lock(socket)
 
-      {:noreply, socket}
+      case acquire_node_lock(socket, node_id) do
+        {:ok, socket} ->
+          socket =
+            socket
+            |> assign(:show_config_modal, true)
+            |> assign(:config_modal_node, node)
+            |> assign(:show_context_menu, false)
+            |> maybe_update_presence_focus(node_id)
+
+          {:noreply, socket}
+
+        {:error, {:locked_by, _user_id}} ->
+          {:noreply, put_flash(socket, :error, "Node is currently being edited")}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Unable to lock node: #{inspect(reason)}")}
+      end
     else
       {:noreply, put_flash(socket, :error, "Node not found")}
     end
@@ -188,8 +231,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_event("close_config_modal", _, socket) do
     {:noreply,
      socket
+     |> release_node_lock()
      |> assign(:show_config_modal, false)
-     |> assign(:config_modal_node, nil)}
+     |> assign(:config_modal_node, nil)
+     |> maybe_update_presence_focus(nil)}
   end
 
   @impl true
@@ -207,7 +252,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         {:noreply,
          socket
          |> assign(:selected_demo, demo)
-         |> assign(:run_form, build_run_form(demo.data))
+         |> assign(
+           :run_form,
+           build_run_form(demo.data, version_id: socket.assigns.selected_version_id)
+         )
          |> assign(:run_form_error, nil)}
     end
   end
@@ -221,7 +269,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       if version_id != socket.assigns.selected_version_id do
         source =
           if version_id == "draft" do
-            socket.assigns.workflow
+            socket.assigns.draft || socket.assigns.workflow
           else
             Map.get(socket.assigns.versions_map, version_id)
           end
@@ -229,6 +277,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         socket
         |> assign(:selected_version_id, version_id)
         |> assign_source_graph(source)
+        |> assign(:can_run?, length(Map.get(source || %{}, :nodes) || []) > 0)
       else
         socket
       end
@@ -255,7 +304,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_event("select_node", %{"node-id" => node_id}, socket) do
     # Double-click opens modal, single click selects
     selected = if socket.assigns.selected_node_id == node_id, do: nil, else: node_id
-    {:noreply, assign(socket, :selected_node_id, selected)}
+
+    socket =
+      socket
+      |> assign(:selected_node_id, selected)
+      |> maybe_update_presence_selection(selected)
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -281,7 +336,12 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("clear_selection", _params, socket) do
-    {:noreply, assign(socket, :selected_node_id, nil)}
+    socket =
+      socket
+      |> assign(:selected_node_id, nil)
+      |> maybe_update_presence_selection(nil)
+
+    {:noreply, socket}
   end
 
   # ============================================================================
@@ -290,20 +350,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("clear_pin", %{"node-id" => node_id}, socket) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
-
-    case Workflows.unpin_node_output(scope, workflow, node_id) do
-      {:ok, _} ->
+    case apply_edit_operation(socket, :unpin_node_output, %{node_id: node_id}) do
+      {:ok, socket} ->
         socket =
           socket
-          |> assign(
-            :pins_with_status,
-            EditingSessions.get_pins_with_status_from_server(
-              socket.assigns.editing_session_pid,
-              workflow
-            )
-          )
           |> assign(:show_context_menu, false)
           |> put_flash(:info, "Pin removed")
           |> append_trace_log(:info, "Removed pin", %{node_id: node_id})
@@ -317,14 +367,20 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("clear_all_pins", _params, socket) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
-    {:ok, _} = Workflows.clear_all_pins(scope, workflow)
+    pins = socket.assigns.pins_with_status
+
+    {socket, errors} =
+      Enum.reduce(pins, {socket, []}, fn {node_id, _pin}, {socket, errors} ->
+        case apply_edit_operation(socket, :unpin_node_output, %{node_id: node_id}) do
+          {:ok, socket} -> {socket, errors}
+          {:error, reason} -> {socket, [reason | errors]}
+        end
+      end)
 
     socket =
       socket
-      |> assign(:pins_with_status, %{})
-      |> put_flash(:info, "All pins cleared")
+      |> assign(:show_context_menu, false)
+      |> put_flash(:info, if(errors == [], do: "All pins cleared", else: "Cleared some pins"))
 
     {:noreply, socket}
   end
@@ -343,48 +399,66 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     if socket.assigns.can_run? do
       with {:ok, parsed} <-
              parse_input_payload(input_string, socket.assigns.demo_inputs) do
-        run_task =
-          if version_id == "draft" do
-            Executions.start_and_run_fast_path(scope, workflow, %{
+        with :ok <- maybe_persist_draft_for_run(socket, version_id) do
+          execution_attrs =
+            %{
+              workflow_id: workflow.id,
+              execution_type: execution_type_for(version_id),
               trigger: %{type: :manual, data: parsed.trigger_data},
-              metadata: build_manual_metadata(parsed.demo_label)
-            })
-          else
-            Executions.start_and_enqueue_execution(scope, workflow, %{
-              workflow_version_id: version_id,
-              trigger: %{type: :manual, data: parsed.trigger_data},
-              metadata: build_manual_metadata(parsed.demo_label)
-            })
+              metadata: build_manual_metadata(parsed.demo_label, version_id: version_id)
+            }
+            |> maybe_put_workflow_version(version_id)
+
+          case Executions.create_execution(execution_attrs, scope) do
+            {:ok, execution} ->
+              case ExecutionSupervisor.start_execution(execution.id) do
+                {:ok, _pid} ->
+                  :ok
+
+                {:error, {:already_started, _pid}} ->
+                  :ok
+
+                {:error, reason} ->
+                  {:error, reason}
+              end
+              |> case do
+                :ok ->
+                  run_form = build_run_form(input_string, version_id: version_id)
+
+                  socket =
+                    socket
+                    |> maybe_subscribe_to_execution(execution.id)
+                    |> assign(:execution, execution)
+                    |> assign(:running?, true)
+                    |> assign(
+                      :node_states,
+                      build_initial_pin_states(workflow, socket.assigns.pins_with_status)
+                    )
+                    |> assign(:trace_log_count, 0)
+                    |> assign(:selected_demo, parsed.demo)
+                    |> assign(:run_form, run_form)
+                    |> assign(:run_form_error, nil)
+                    |> stream(:trace_log, [], reset: true)
+                    |> append_trace_log(:info, "Execution started", %{
+                      execution_id: short_id(execution.id),
+                      version: version_id
+                    })
+                    |> push_patch(
+                      to: ~p"/workflows/#{workflow.id}/edit?execution_id=#{execution.id}"
+                    )
+
+                  {:noreply, socket}
+
+                {:error, reason} ->
+                  {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
+              end
+
+            {:error, reason} ->
+              {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
           end
-
-        case run_task do
-          {:ok, %{execution: execution}} ->
-            run_form = build_run_form(input_string, version_id: version_id)
-
-            socket =
-              socket
-              |> maybe_subscribe_to_execution(execution.id)
-              |> assign(:execution, execution)
-              |> assign(:running?, true)
-              |> assign(
-                :node_states,
-                build_initial_pin_states(workflow, socket.assigns.pins_with_status)
-              )
-              |> assign(:trace_log_count, 0)
-              |> assign(:selected_demo, parsed.demo)
-              |> assign(:run_form, run_form)
-              |> assign(:run_form_error, nil)
-              |> stream(:trace_log, [], reset: true)
-              |> append_trace_log(:info, "Execution started", %{
-                execution_id: short_id(execution.id),
-                version: version_id
-              })
-              |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
-
-            {:noreply, socket}
-
+        else
           {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
+            {:noreply, put_flash(socket, :error, "Failed to sync draft: #{format_error(reason)}")}
         end
       else
         {:error, :invalid_payload, message} ->
@@ -407,32 +481,59 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     trigger_data = get_trigger_data_from_form(socket)
     version_id = socket.assigns.selected_version_id
 
-    case Executions.execute_node(scope, workflow, node_id,
-           trigger_data: trigger_data,
-           metadata: build_manual_metadata("Partial Run: #{node_id}")
-         ) do
-      {:ok, execution} ->
-        socket =
-          socket
-          |> maybe_subscribe_to_execution(execution.id)
-          |> assign(:execution, execution)
-          |> assign(:running?, true)
-          |> assign(
-            :node_states,
-            build_initial_pin_states(workflow, socket.assigns.pins_with_status)
-          )
-          |> assign(:trace_log_count, 0)
-          |> stream(:trace_log, [], reset: true)
-          |> append_trace_log(:info, "Partial execution started", %{
+    execution_attrs =
+      %{
+        workflow_id: workflow.id,
+        execution_type: :partial,
+        trigger: %{type: :manual, data: trigger_data},
+        metadata:
+          build_manual_metadata("Partial Run: #{node_id}",
+            version_id: version_id,
             partial: true,
-            target: node_id,
-            version: version_id
-          })
-          |> push_patch(to: ~p"/workflows/#{workflow.id}/run?execution_id=#{execution.id}")
-          |> assign(:show_context_menu, false)
+            target: node_id
+          )
+      }
+      |> maybe_put_workflow_version(version_id)
 
-        {:noreply, socket}
+    with :ok <- maybe_persist_draft_for_run(socket, version_id),
+         {:ok, execution} <- Executions.create_execution(execution_attrs, scope) do
+      case ExecutionSupervisor.start_execution(execution.id) do
+        {:ok, _pid} ->
+          :ok
 
+        {:error, {:already_started, _pid}} ->
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+      |> case do
+        :ok ->
+          socket =
+            socket
+            |> maybe_subscribe_to_execution(execution.id)
+            |> assign(:execution, execution)
+            |> assign(:running?, true)
+            |> assign(
+              :node_states,
+              build_initial_pin_states(workflow, socket.assigns.pins_with_status)
+            )
+            |> assign(:trace_log_count, 0)
+            |> stream(:trace_log, [], reset: true)
+            |> append_trace_log(:info, "Partial execution started", %{
+              partial: true,
+              target: node_id,
+              version: version_id
+            })
+            |> push_patch(to: ~p"/workflows/#{workflow.id}/edit?execution_id=#{execution.id}")
+            |> assign(:show_context_menu, false)
+
+          {:noreply, socket}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Execution failed: #{format_error(reason)}")}
+      end
+    else
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Execution failed: #{format_error(reason)}")}
     end
@@ -447,71 +548,61 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_info(:close_node_config_modal, socket) do
     {:noreply,
      socket
+     |> release_node_lock()
      |> assign(:show_config_modal, false)
-     |> assign(:config_modal_node, nil)}
+     |> assign(:config_modal_node, nil)
+     |> maybe_update_presence_focus(nil)}
   end
 
   @impl true
   def handle_info({:node_config_saved, node_id, new_config}, socket) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
+    node = Map.get(socket.assigns.node_map, node_id)
 
-    # Update the node's config in the workflow
-    workflow = Imgd.Repo.preload(workflow, :draft)
-    draft = workflow.draft || %Imgd.Workflows.WorkflowDraft{}
+    if node do
+      patch = build_config_patch(node.config || %{}, new_config || %{})
 
-    updated_nodes =
-      Enum.map(draft.nodes || [], fn node ->
-        # Convert struct to map so Ecto can cast it correctly in the changeset
-        node_params = Map.from_struct(node)
+      if patch == [] do
+        {:noreply,
+         socket
+         |> release_node_lock()
+         |> assign(:show_config_modal, false)
+         |> assign(:config_modal_node, nil)
+         |> maybe_update_presence_focus(nil)}
+      else
+        case apply_edit_operation(socket, :update_node_config, %{node_id: node_id, patch: patch}) do
+          {:ok, socket} ->
+            socket =
+              socket
+              |> release_node_lock()
+              |> assign(:show_config_modal, false)
+              |> assign(:config_modal_node, nil)
+              |> maybe_update_presence_focus(nil)
+              |> put_flash(:info, "Node configuration saved")
+              |> append_trace_log(:info, "Node config updated", %{node_id: short_id(node_id)})
 
-        if node.id == node_id do
-          %{node_params | config: new_config}
-        else
-          node_params
+            {:noreply, socket}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to save: #{format_error(reason)}")}
         end
-      end)
-
-    case Workflows.update_workflow(scope, workflow, %{nodes: updated_nodes}) do
-      {:ok, updated_workflow} ->
-        node_map = Map.new(updated_workflow.draft.nodes || [], &{&1.id, &1})
-
-        socket =
-          socket
-          |> assign(:workflow, updated_workflow)
-          |> assign(:node_map, node_map)
-          |> assign(:show_config_modal, false)
-          |> assign(:config_modal_node, nil)
-          |> put_flash(:info, "Node configuration saved")
-          |> append_trace_log(:info, "Node config updated", %{node_id: short_id(node_id)})
-
-        {:noreply, socket}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to save configuration")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Node not found")}
     end
   end
 
   @impl true
   def handle_info({:pin_node_output, node_id, output_data, label}, socket) do
-    scope = socket.assigns.current_scope
-    workflow = socket.assigns.workflow
-    execution_id = socket.assigns.execution && socket.assigns.execution.id
+    payload = %{
+      node_id: node_id,
+      output_data: output_data,
+      label: if(label == "", do: nil, else: label)
+    }
 
-    case Workflows.pin_node_output(scope, workflow, node_id, output_data,
-           execution_id: execution_id,
-           label: if(label == "", do: nil, else: label)
-         ) do
-      :ok ->
+    case apply_edit_operation(socket, :pin_node_output, payload) do
+      {:ok, socket} ->
         socket =
           socket
-          |> assign(
-            :pins_with_status,
-            EditingSessions.get_pins_with_status_from_server(
-              socket.assigns.editing_session_pid,
-              workflow
-            )
-          )
           |> put_flash(:info, "Output pinned successfully")
           |> append_trace_log(:info, "Pinned node output", %{node_id: node_id})
 
@@ -561,6 +652,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       |> append_trace_log(:error, "Execution failed", format_error_for_log(error))
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:operation_applied, operation}, socket) do
+    {:noreply, apply_operation_to_socket(socket, operation)}
   end
 
   @impl true
@@ -666,6 +762,109 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   defp short_id(id) when is_binary(id), do: String.slice(id, 0, 8)
   defp short_id(_), do: "-"
 
+  defp edit_session_topic(workflow_id), do: "edit_session:#{workflow_id}"
+
+  defp maybe_subscribe_to_edit_session(socket, scope, workflow_id) do
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(Imgd.PubSub, edit_session_topic(workflow_id))
+
+      _ =
+        case scope do
+          %{user: user} when not is_nil(user) -> Presence.track_user(workflow_id, user, socket)
+          _ -> :ok
+        end
+
+      assign(socket, :presence_tracked?, true)
+    else
+      socket
+    end
+  end
+
+  defp maybe_update_presence_selection(socket, selected_node_id) do
+    if socket.assigns.presence_tracked? do
+      node_ids = if selected_node_id, do: [selected_node_id], else: []
+
+      _ =
+        Presence.update_selection(
+          socket.assigns.workflow.id,
+          socket.assigns.current_scope.user.id,
+          node_ids
+        )
+    end
+
+    socket
+  end
+
+  defp maybe_update_presence_focus(socket, node_id) do
+    if socket.assigns.presence_tracked? do
+      user_id = socket.assigns.current_scope.user.id
+
+      case node_id do
+        nil -> Presence.clear_focus(socket.assigns.workflow.id, user_id)
+        _ -> Presence.update_focus(socket.assigns.workflow.id, user_id, node_id)
+      end
+    end
+
+    socket
+  end
+
+  defp acquire_node_lock(socket, node_id) do
+    workflow_id = socket.assigns.workflow.id
+    user_id = socket.assigns.current_scope.user.id
+
+    case Server.acquire_node_lock(workflow_id, node_id, user_id) do
+      :ok -> {:ok, assign(socket, :locked_node_id, node_id)}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp release_node_lock(socket) do
+    case socket.assigns.locked_node_id do
+      nil ->
+        socket
+
+      node_id ->
+        workflow_id = socket.assigns.workflow.id
+        user_id = socket.assigns.current_scope.user.id
+        Server.release_node_lock(workflow_id, node_id, user_id)
+        assign(socket, :locked_node_id, nil)
+    end
+  end
+
+  defp sync_state_to_draft(%{type: :full_sync, draft: draft, seq: seq}, _workflow) do
+    {draft, seq}
+  end
+
+  defp sync_state_to_draft(%{type: :incremental, seq: seq}, workflow) do
+    {workflow.draft || %Imgd.Workflows.WorkflowDraft{}, seq}
+  end
+
+  defp sync_state_to_draft(%{type: :up_to_date, seq: seq}, workflow) do
+    {workflow.draft || %Imgd.Workflows.WorkflowDraft{}, seq}
+  end
+
+  defp sync_state_to_draft(_state, workflow) do
+    {workflow.draft || %Imgd.Workflows.WorkflowDraft{}, 0}
+  end
+
+  defp build_pins_with_status(%EditorState{} = editor_state, node_map, pin_labels) do
+    editor_state.pinned_outputs
+    |> Enum.map(fn {node_id, output_data} ->
+      node = Map.get(node_map, node_id)
+      label = Map.get(pin_labels, node_id) || (node && node.name)
+
+      {node_id,
+       %{
+         "data" => output_data,
+         "label" => label,
+         "pinned_at" => nil,
+         "stale" => false,
+         "node_exists" => not is_nil(node)
+       }}
+    end)
+    |> Map.new()
+  end
+
   defp maybe_subscribe_to_execution(socket, execution_id) when is_binary(execution_id) do
     current_id = socket.assigns.subscribed_execution_id
 
@@ -684,6 +883,285 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   defp maybe_subscribe_to_execution(socket, _execution_id), do: socket
+
+  defp apply_edit_operation(socket, type, payload) do
+    workflow_id = socket.assigns.workflow.id
+    user_id = socket.assigns.current_scope.user.id
+    client_seq = socket.assigns.client_seq + 1
+
+    operation = %{
+      id: Ecto.UUID.generate(),
+      type: type,
+      payload: payload,
+      user_id: user_id,
+      client_seq: client_seq
+    }
+
+    case Server.apply_operation(workflow_id, operation) do
+      {:ok, _result} ->
+        {:ok, assign(socket, :client_seq, client_seq)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp apply_operation_to_socket(socket, operation) do
+    type = normalize_operation_type(Map.get(operation, :type) || Map.get(operation, "type"))
+    payload = Map.get(operation, :payload) || Map.get(operation, "payload") || %{}
+    seq = Map.get(operation, :seq) || Map.get(operation, "seq")
+
+    draft_source = socket.assigns.draft || %Imgd.Workflows.WorkflowDraft{}
+    {draft, draft_changed?} = apply_draft_operation(draft_source, type, payload)
+    editor_state = apply_editor_state_operation(socket.assigns.editor_state, type, payload)
+    pin_labels = update_pin_labels(socket.assigns.pin_labels, type, payload)
+
+    socket =
+      socket
+      |> assign(:editor_state, editor_state)
+      |> assign(:pin_labels, pin_labels)
+      |> assign(:edit_session_seq, seq || socket.assigns.edit_session_seq)
+
+    socket =
+      if draft_changed? do
+        socket
+        |> assign(:draft, draft)
+        |> assign_source_graph(draft)
+        |> assign(:can_run?, length((draft && draft.nodes) || []) > 0)
+        |> reconcile_node_refs()
+      else
+        assign(socket, :draft, draft)
+      end
+
+    pins_with_status = build_pins_with_status(editor_state, socket.assigns.node_map, pin_labels)
+    assign(socket, :pins_with_status, pins_with_status)
+  end
+
+  defp apply_draft_operation(draft, type, payload) do
+    if type in @draft_operation_types do
+      case Operations.apply(draft, %{type: type, payload: payload}) do
+        {:ok, updated_draft} -> {updated_draft, true}
+        {:error, _reason} -> {draft, false}
+      end
+    else
+      {draft, false}
+    end
+  end
+
+  defp apply_editor_state_operation(editor_state, :pin_node_output, payload) do
+    node_id = payload_value(payload, :node_id)
+    output_data = payload_value(payload, :output_data) || payload_value(payload, :data)
+
+    if node_id do
+      EditorState.pin_output(editor_state, node_id, output_data)
+    else
+      editor_state
+    end
+  end
+
+  defp apply_editor_state_operation(editor_state, :unpin_node_output, payload) do
+    case payload_value(payload, :node_id) do
+      nil -> editor_state
+      node_id -> EditorState.unpin_output(editor_state, node_id)
+    end
+  end
+
+  defp apply_editor_state_operation(editor_state, :disable_node, payload) do
+    node_id = payload_value(payload, :node_id)
+    mode = payload_value(payload, :mode) || :skip
+
+    if node_id do
+      EditorState.disable_node(editor_state, node_id, mode)
+    else
+      editor_state
+    end
+  end
+
+  defp apply_editor_state_operation(editor_state, :enable_node, payload) do
+    case payload_value(payload, :node_id) do
+      nil -> editor_state
+      node_id -> EditorState.enable_node(editor_state, node_id)
+    end
+  end
+
+  defp apply_editor_state_operation(editor_state, _type, _payload), do: editor_state
+
+  defp update_pin_labels(pin_labels, :pin_node_output, payload) do
+    node_id = payload_value(payload, :node_id)
+    label = payload_value(payload, :label)
+
+    cond do
+      is_nil(node_id) -> pin_labels
+      is_binary(label) and label != "" -> Map.put(pin_labels, node_id, label)
+      true -> pin_labels
+    end
+  end
+
+  defp update_pin_labels(pin_labels, :unpin_node_output, payload) do
+    case payload_value(payload, :node_id) do
+      nil -> pin_labels
+      node_id -> Map.delete(pin_labels, node_id)
+    end
+  end
+
+  defp update_pin_labels(pin_labels, _type, _payload), do: pin_labels
+
+  defp normalize_operation_type(type) when is_atom(type), do: type
+  defp normalize_operation_type("add_node"), do: :add_node
+  defp normalize_operation_type("remove_node"), do: :remove_node
+  defp normalize_operation_type("update_node_config"), do: :update_node_config
+  defp normalize_operation_type("update_node_position"), do: :update_node_position
+  defp normalize_operation_type("update_node_metadata"), do: :update_node_metadata
+  defp normalize_operation_type("add_connection"), do: :add_connection
+  defp normalize_operation_type("remove_connection"), do: :remove_connection
+  defp normalize_operation_type("pin_node_output"), do: :pin_node_output
+  defp normalize_operation_type("unpin_node_output"), do: :unpin_node_output
+  defp normalize_operation_type("disable_node"), do: :disable_node
+  defp normalize_operation_type("enable_node"), do: :enable_node
+  defp normalize_operation_type(type), do: type
+
+  defp payload_value(payload, key) do
+    case Map.fetch(payload, key) do
+      {:ok, value} -> value
+      :error -> Map.get(payload, to_string(key))
+    end
+  end
+
+  defp reconcile_node_refs(socket) do
+    node_map = socket.assigns.node_map
+
+    socket =
+      case socket.assigns.selected_node_id do
+        nil ->
+          socket
+
+        node_id ->
+          if Map.has_key?(node_map, node_id) do
+            socket
+          else
+            socket
+            |> assign(:selected_node_id, nil)
+            |> maybe_update_presence_selection(nil)
+          end
+      end
+
+    socket =
+      case socket.assigns.context_menu_node_id do
+        nil ->
+          socket
+
+        node_id ->
+          if Map.has_key?(node_map, node_id) do
+            socket
+          else
+            socket
+            |> assign(:show_context_menu, false)
+            |> assign(:context_menu_node_id, nil)
+          end
+      end
+
+    socket =
+      case socket.assigns.config_modal_node do
+        nil ->
+          socket
+
+        %{id: node_id} ->
+          case Map.get(node_map, node_id) do
+            nil ->
+              socket
+              |> release_node_lock()
+              |> assign(:show_config_modal, false)
+              |> assign(:config_modal_node, nil)
+              |> maybe_update_presence_focus(nil)
+
+            updated_node ->
+              assign(socket, :config_modal_node, updated_node)
+          end
+      end
+
+    socket
+  end
+
+  defp execution_version_id(execution) do
+    version_id =
+      Map.get(execution, :workflow_version_id) ||
+        (execution.workflow_version && execution.workflow_version.id)
+
+    extras =
+      case Map.get(execution, :metadata) do
+        %{extras: extras} when is_map(extras) -> extras
+        _ -> %{}
+      end
+
+    version_id || Map.get(extras, "version_id") || Map.get(extras, :version_id) || "draft"
+  end
+
+  defp execution_type_for("draft"), do: :preview
+  defp execution_type_for(nil), do: :preview
+  defp execution_type_for(_), do: :production
+
+  defp maybe_put_workflow_version(attrs, "draft"), do: attrs
+  defp maybe_put_workflow_version(attrs, nil), do: attrs
+
+  defp maybe_put_workflow_version(attrs, version_id),
+    do: Map.put(attrs, :workflow_version_id, version_id)
+
+  defp maybe_persist_draft_for_run(socket, "draft") do
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+    draft = socket.assigns.draft || %Imgd.Workflows.WorkflowDraft{}
+
+    attrs = %{
+      nodes: Enum.map(draft.nodes || [], &Map.from_struct/1),
+      connections: Enum.map(draft.connections || [], &Map.from_struct/1),
+      triggers: Enum.map(draft.triggers || [], &Map.from_struct/1),
+      settings: draft.settings || %{}
+    }
+
+    case Workflows.update_workflow_draft(workflow, attrs, scope) do
+      {:ok, _draft} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_persist_draft_for_run(_socket, _version_id), do: :ok
+
+  defp build_config_patch(old_config, new_config) do
+    old_config = normalize_config_keys(old_config)
+    new_config = normalize_config_keys(new_config)
+
+    keys =
+      old_config
+      |> Map.keys()
+      |> Kernel.++(Map.keys(new_config))
+      |> Enum.uniq()
+
+    Enum.reduce(keys, [], fn key, acc ->
+      old_value = Map.get(old_config, key)
+      new_value = Map.get(new_config, key)
+
+      cond do
+        is_nil(new_value) and Map.has_key?(old_config, key) ->
+          [%{"op" => "remove", "path" => "/#{key}"} | acc]
+
+        not Map.has_key?(old_config, key) ->
+          [%{"op" => "add", "path" => "/#{key}", "value" => new_value} | acc]
+
+        old_value != new_value ->
+          [%{"op" => "replace", "path" => "/#{key}", "value" => new_value} | acc]
+
+        true ->
+          acc
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp normalize_config_keys(config) when is_map(config) do
+    Map.new(config, fn {key, value} -> {to_string(key), value} end)
+  end
+
+  defp normalize_config_keys(_config), do: %{}
 
   defp format_error_for_log(nil), do: %{}
 
@@ -768,12 +1246,20 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
-  defp build_manual_metadata(nil), do: %{extras: %{"runner" => "manual_live"}}
+  defp build_manual_metadata(label, opts) do
+    extras =
+      %{"runner" => "manual_live"}
+      |> maybe_put_extra("demo_input", label)
+      |> maybe_put_extra("version_id", Keyword.get(opts, :version_id))
+      |> maybe_put_extra("partial", Keyword.get(opts, :partial))
+      |> maybe_put_extra("target_node_id", Keyword.get(opts, :target))
 
-  defp build_manual_metadata(label),
-    do: %{extras: %{"runner" => "manual_live", "demo_input" => label}}
+    %{extras: extras}
+  end
 
-  defp build_run_form(payload, opts \\ [])
+  defp maybe_put_extra(extras, _key, nil), do: extras
+  defp maybe_put_extra(extras, _key, ""), do: extras
+  defp maybe_put_extra(extras, key, value), do: Map.put(extras, key, value)
 
   defp build_run_form(payload, opts) when is_binary(payload) do
     version_id = Keyword.get(opts, :version_id, "draft")
