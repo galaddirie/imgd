@@ -14,6 +14,7 @@ defmodule Imgd.Workflows.Workflow do
   use Imgd.Schema
 
   alias Imgd.Workflows.WorkflowVersion
+  alias Imgd.Workflows.WorkflowShare
   alias Imgd.Executions.Execution
   alias Imgd.Accounts.User
 
@@ -32,9 +33,11 @@ defmodule Imgd.Workflows.Workflow do
           name: String.t(),
           description: String.t() | nil,
           status: status(),
+          public: boolean(),
           current_version_tag: String.t() | nil,
           published_version_id: Ecto.UUID.t() | nil,
           user_id: Ecto.UUID.t(),
+          shares: [WorkflowShare.t()] | Ecto.Association.NotLoaded.t(),
           inserted_at: DateTime.t(),
           updated_at: DateTime.t()
         }
@@ -45,6 +48,7 @@ defmodule Imgd.Workflows.Workflow do
              :name,
              :description,
              :status,
+             :public,
              :current_version_tag,
              :published_version_id,
              :user_id,
@@ -55,6 +59,7 @@ defmodule Imgd.Workflows.Workflow do
     field :name, :string
     field :description, :string
     field :status, Ecto.Enum, values: [:draft, :active, :archived], default: :draft
+    field :public, :boolean, default: false
 
     # What you're calling the current draft version (e.g., "1.3.0-dev", "next")
     field :current_version_tag, :string
@@ -65,6 +70,7 @@ defmodule Imgd.Workflows.Workflow do
     has_one :draft, Imgd.Workflows.WorkflowDraft
     has_many :versions, WorkflowVersion
     has_many :executions, Execution
+    has_many :shares, WorkflowShare
 
     belongs_to :user, User
 
@@ -77,6 +83,7 @@ defmodule Imgd.Workflows.Workflow do
       :name,
       :description,
       :status,
+      :public,
       :current_version_tag,
       :published_version_id,
       :user_id
