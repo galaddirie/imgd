@@ -51,3 +51,6 @@ remove extras and metadata from execution struct, ugly
 state machine support for cross execution memory - ex a workflow that has a saga pattern that needs to persist state between executions.
 
 How should we handle versioning node executors
+Version like this Nodes.V1.HttpRequest
+With some sort of label to identify it’s the latest (same with how we have auto discovery for nodes
+Only 1 node with the same name can have this label so V1.HTTP AND V2.HTTP conflict and throw either a test or compile error
