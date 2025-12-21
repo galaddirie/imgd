@@ -35,10 +35,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
     end
   end
 
-
-
-
-
   @impl true
   def render(assigns) do
     ~H"""
@@ -66,7 +62,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
               </div>
               <div class="flex items-center gap-3">
                 <.link
-                  navigate={~p"/workflows/#{@workflow.id}/run"}
+                  navigate={~p"/workflows/#{@workflow.id}/edit"}
                   class="btn btn-primary gap-2"
                 >
                   <.icon name="hero-play" class="size-4" />
@@ -152,7 +148,9 @@ defmodule ImgdWeb.WorkflowLive.Show do
                         </td>
                         <td>
                           <.link
-                            navigate={~p"/workflows/#{@workflow.id}/executions/#{execution.id}"}
+                            navigate={
+                              ~p"/workflows/#{@workflow.id}/edit?execution_id=#{execution.id}"
+                            }
                             class="btn btn-ghost btn-xs"
                             title="Inspect execution"
                           >
@@ -231,8 +229,6 @@ defmodule ImgdWeb.WorkflowLive.Show do
             </div>
           </div>
         </section>
-
-
       </div>
     </Layouts.app>
     """
