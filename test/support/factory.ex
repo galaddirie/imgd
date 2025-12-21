@@ -46,33 +46,12 @@ defmodule Imgd.Factory do
     }
   end
 
-  def workflow_snapshot_factory do
-    nodes = [
-      %{id: "node_1", type_id: "debug", name: "Debug 1", config: %{}, position: %{}}
-    ]
-
-    connections = []
-    triggers = []
-
-    %Imgd.Workflows.WorkflowSnapshot{
-      workflow: insert(:workflow),
-      created_by: insert(:user),
-      nodes: nodes,
-      connections: connections,
-      triggers: triggers,
-      source_hash:
-        Imgd.Workflows.WorkflowSnapshot.compute_source_hash(nodes, connections, triggers),
-      purpose: :preview
-    }
-  end
-
   def execution_factory do
     workflow = insert(:workflow)
 
     %Imgd.Executions.Execution{
       status: :pending,
       workflow: workflow,
-      workflow_version: insert(:workflow_version, workflow: workflow),
       trigger: %{type: :manual, data: %{}},
       context: %{}
     }

@@ -22,6 +22,7 @@ defmodule Imgd.Application do
         # Node type registry - must start before endpoint so types are available
         Imgd.Nodes.Registry,
         {Registry, keys: :unique, name: Imgd.Runtime.Execution.Registry},
+        {Task.Supervisor, name: Imgd.Runtime.Execution.TaskSupervisor},
         Imgd.Runtime.Execution.Supervisor,
         Imgd.Runtime.Expression.Cache,
         Imgd.Workflows.EditingSession.Registry,

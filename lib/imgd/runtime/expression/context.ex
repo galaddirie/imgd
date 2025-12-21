@@ -24,8 +24,7 @@ defmodule Imgd.Runtime.Expression.Context do
       ...
     },
     "workflow" => %{
-      "id" => "uuid",
-      "version_id" => "uuid"
+      "id" => "uuid"
     },
     "variables" => %{...workflow variables...},
     "metadata" => %{...execution metadata...},
@@ -51,7 +50,7 @@ defmodule Imgd.Runtime.Expression.Context do
 
   ## Parameters
 
-  - `execution` - The Execution struct (should have workflow_version preloaded for variables)
+  - `execution` - The Execution struct
   - `node_outputs` - Map of node_id -> output data
   - `current_input` - The input data for the current node (optional)
   """
@@ -142,8 +141,7 @@ defmodule Imgd.Runtime.Expression.Context do
 
   defp build_workflow_map(%Execution{} = execution) do
     %{
-      "id" => execution.workflow_id,
-      "version_id" => execution.workflow_version_id
+      "id" => execution.workflow_id
     }
   end
 
@@ -173,15 +171,16 @@ defmodule Imgd.Runtime.Expression.Context do
     Application.get_env(:imgd, :allowed_env_vars, @default_allowed_env_vars)
   end
 
-  defp extract_variables(%Execution{} = execution) do
-    case execution.workflow_version do
-      %{settings: settings} when is_map(settings) ->
-        Map.get(settings, "variables") || Map.get(settings, :variables) || %{}
-
-      _ ->
-        %{}
-    end
+  defp extract_variables(%Execution{metadata: %Execution.Metadata{extras: extras}})
+       when is_map(extras) do
+    Map.get(extras, "variables") || Map.get(extras, :variables) || %{}
   end
+
+  defp extract_variables(%Execution{metadata: %{} = metadata}) do
+    Map.get(metadata, "variables") || Map.get(metadata, :variables) || %{}
+  end
+
+  defp extract_variables(_), do: %{}
 
   defp get_metadata_field(%{} = metadata, key) when is_atom(key) do
     Map.get(metadata, key) || Map.get(metadata, Atom.to_string(key))

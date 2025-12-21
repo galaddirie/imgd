@@ -81,7 +81,6 @@ defmodule Imgd.Observability.Instrumentation do
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
-        workflow_version_id: execution.workflow_version_id,
         node_id: node_execution.node_id,
         node_type_id: node_execution.node_type_id,
         attempt: node_execution.attempt
@@ -105,7 +104,6 @@ defmodule Imgd.Observability.Instrumentation do
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
-        workflow_version_id: execution.workflow_version_id,
         node_id: node_execution.node_id,
         node_type_id: node_execution.node_type_id,
         attempt: node_execution.attempt,
@@ -133,7 +131,6 @@ defmodule Imgd.Observability.Instrumentation do
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
-        workflow_version_id: execution.workflow_version_id,
         node_id: node_execution.node_id,
         node_type_id: node_execution.node_type_id,
         attempt: node_execution.attempt,
@@ -363,7 +360,6 @@ defmodule Imgd.Observability.Instrumentation do
     %{
       execution_id: execution.id,
       workflow_id: execution.workflow_id,
-      workflow_version_id: execution.workflow_version_id,
       trace_id: trace_id,
       otel_ctx: Ctx.get_current()
     }
@@ -372,8 +368,7 @@ defmodule Imgd.Observability.Instrumentation do
   defp attach_logger_metadata(ctx) do
     Logger.metadata(
       execution_id: ctx.execution_id,
-      workflow_id: ctx.workflow_id,
-      workflow_version_id: ctx.workflow_version_id
+      workflow_id: ctx.workflow_id
     )
 
     # OpenTelemetry logger metadata is handled by opentelemetry_logger_metadata
@@ -382,7 +377,6 @@ defmodule Imgd.Observability.Instrumentation do
   defp execution_span_attributes(%Execution{} = execution) do
     %{
       "workflow.id": execution.workflow_id,
-      "workflow.version_id": execution.workflow_version_id,
       "execution.id": execution.id,
       "execution.trigger_type": Execution.trigger_type(execution) |> to_string(),
       "execution.triggered_by": execution.triggered_by_user_id
@@ -393,14 +387,9 @@ defmodule Imgd.Observability.Instrumentation do
     %{
       execution_id: execution.id,
       workflow_id: execution.workflow_id,
-      workflow_version_id: execution.workflow_version_id,
-      workflow_version_tag: get_version_tag(execution),
       trigger_type: Execution.trigger_type(execution)
     }
   end
-
-  defp get_version_tag(%Execution{workflow_version: %{version_tag: tag}}), do: tag
-  defp get_version_tag(_), do: nil
 
   defp monotonic_duration_ms(start_time) do
     (System.monotonic_time() - start_time)

@@ -40,16 +40,12 @@ defmodule Imgd.Observability.Telemetry do
        %{
          execution_id: :string,
          workflow_id: :string,
-         workflow_version_id: :string,
-         workflow_version_tag: :string,
          trigger_type: :atom
        }},
       {[:imgd, :engine, :execution, :stop], %{duration_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
-         workflow_version_id: :string,
-         workflow_version_tag: :string,
          trigger_type: :atom,
          status: :atom
        }},
@@ -57,8 +53,6 @@ defmodule Imgd.Observability.Telemetry do
        %{
          execution_id: :string,
          workflow_id: :string,
-         workflow_version_id: :string,
-         workflow_version_tag: :string,
          exception: :exception
        }},
 
@@ -69,7 +63,6 @@ defmodule Imgd.Observability.Telemetry do
        %{
          execution_id: :string,
          workflow_id: :string,
-         workflow_version_id: :string,
          node_id: :string,
          node_type_id: :string,
          attempt: :integer
@@ -78,7 +71,6 @@ defmodule Imgd.Observability.Telemetry do
        %{
          execution_id: :string,
          workflow_id: :string,
-         workflow_version_id: :string,
          node_id: :string,
          node_type_id: :string,
          attempt: :integer,
@@ -88,7 +80,6 @@ defmodule Imgd.Observability.Telemetry do
        %{
          execution_id: :string,
          workflow_id: :string,
-         workflow_version_id: :string,
          node_id: :string,
          node_type_id: :string,
          attempt: :integer,

@@ -18,7 +18,6 @@ defmodule Imgd.Workflows.EditingSession.Server do
       :workflow_id,
       :session_id,
       :source_hash,
-      :snapshot_id,
       :pinned_outputs,
       :dirty,
       :last_persisted_at,

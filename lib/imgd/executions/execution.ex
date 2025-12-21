@@ -8,8 +8,6 @@ defmodule Imgd.Executions.Execution do
   @derive {Jason.Encoder,
            only: [
              :id,
-             :workflow_version_id,
-             :workflow_snapshot_id,
              :workflow_id,
              :status,
              :execution_type,
@@ -22,6 +20,8 @@ defmodule Imgd.Executions.Execution do
              :completed_at,
              :expires_at,
              :metadata,
+             :runic_log,
+             :runic_snapshot,
              :triggered_by_user_id,
              :inserted_at,
              :updated_at
@@ -29,7 +29,7 @@ defmodule Imgd.Executions.Execution do
   use Imgd.Schema
   import Imgd.ChangesetHelpers
 
-  alias Imgd.Workflows.{Workflow, WorkflowVersion}
+  alias Imgd.Workflows.Workflow
   alias Imgd.Accounts.User
   alias Imgd.Executions.NodeExecution
 
@@ -84,8 +84,6 @@ defmodule Imgd.Executions.Execution do
 
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
-          workflow_version_id: Ecto.UUID.t() | nil,
-          workflow_snapshot_id: Ecto.UUID.t() | nil,
           workflow_id: Ecto.UUID.t(),
           status: status(),
           execution_type: execution_type(),
@@ -105,8 +103,6 @@ defmodule Imgd.Executions.Execution do
         }
 
   schema "executions" do
-    belongs_to :workflow_version, WorkflowVersion
-    belongs_to :workflow_snapshot, Imgd.Workflows.WorkflowSnapshot
     belongs_to :workflow, Workflow
 
     field :status, Ecto.Enum, values: @statuses, default: :pending
@@ -138,14 +134,16 @@ defmodule Imgd.Executions.Execution do
     belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
     has_many :node_executions, NodeExecution
 
+    # Runic dataflow state
+    field :runic_log, {:array, :map}, default: []
+    field :runic_snapshot, :binary
+
     timestamps()
   end
 
   def changeset(execution, attrs) do
     execution
     |> cast(attrs, [
-      :workflow_version_id,
-      :workflow_snapshot_id,
       :workflow_id,
       :status,
       :execution_type,
@@ -157,33 +155,18 @@ defmodule Imgd.Executions.Execution do
       :started_at,
       :completed_at,
       :expires_at,
-      :triggered_by_user_id
+      :triggered_by_user_id,
+      :runic_log,
+      :runic_snapshot
     ])
     |> cast_embed(:trigger, required: true, with: &trigger_changeset/2)
     |> cast_embed(:metadata, with: &metadata_changeset/2)
     |> validate_required([:workflow_id, :status, :execution_type])
-    |> validate_immutable_source()
     |> validate_map_field(:context)
     |> validate_map_field(:pinned_data)
     |> validate_map_field(:output, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
     |> validate_map_field(:waiting_for, allow_nil: true)
-  end
-
-  defp validate_immutable_source(changeset) do
-    version_id = get_field(changeset, :workflow_version_id)
-    snapshot_id = get_field(changeset, :workflow_snapshot_id)
-
-    cond do
-      is_nil(version_id) and is_nil(snapshot_id) ->
-        add_error(changeset, :base, "execution must reference a version or snapshot")
-
-      not is_nil(version_id) and not is_nil(snapshot_id) ->
-        add_error(changeset, :base, "execution cannot reference both version and snapshot")
-
-      true ->
-        changeset
-    end
   end
 
   defp trigger_changeset(trigger, attrs) do
