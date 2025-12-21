@@ -386,7 +386,7 @@ defmodule Imgd.Graph do
     include_targets = Keyword.get(opts, :include_targets, true)
 
     # Collect nodes to run by traversing upstream from targets,
-    nodes_to_run = collect_upstream_with_boundary(graph, target_ids, exclude)
+    nodes_to_run = collect_upstream_with_boundary(graph, target_ids, MapSet.new(), exclude)
 
     # Remove targets if explicitly requested
     nodes_to_run =
