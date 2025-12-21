@@ -259,6 +259,19 @@ defmodule Imgd.Workflows do
   end
 
   @doc """
+  Gets a workflow draft by workflow ID.
+
+  Returns `{:ok, draft}` if found, `{:error, :not_found}` otherwise.
+  """
+  @spec get_draft(String.t() | Ecto.UUID.t()) :: {:ok, WorkflowDraft.t()} | {:error, :not_found}
+  def get_draft(workflow_id) do
+    case Repo.get_by(WorkflowDraft, workflow_id: workflow_id) do
+      nil -> {:error, :not_found}
+      draft -> {:ok, draft}
+    end
+  end
+
+  @doc """
   Updates a workflow draft, checking edit permissions.
 
   Returns `{:ok, draft}` if successful, `{:error, changeset | :not_found | :access_denied}` otherwise.

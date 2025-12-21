@@ -26,6 +26,10 @@ defmodule Imgd.Application do
         Imgd.Runtime.Execution.Supervisor,
         Imgd.Runtime.Expression.Cache,
         Imgd.Sandbox.Supervisor,
+        # Collaboration modules
+        {Registry, keys: :unique, name: Imgd.Collaboration.EditSession.Registry},
+        Imgd.Collaboration.EditSession.Supervisor,
+        {Imgd.Collaboration.EditSession.Presence, []},
         ImgdWeb.Endpoint
       ]
       |> Enum.filter(& &1)
