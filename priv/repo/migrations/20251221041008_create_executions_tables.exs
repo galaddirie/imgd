@@ -8,9 +8,6 @@ defmodule Imgd.Repo.Migrations.CreateExecutionsTables do
       add :workflow_version_id,
           references(:workflow_versions, on_delete: :delete_all, type: :binary_id)
 
-      add :workflow_snapshot_id,
-          references(:workflow_snapshots, on_delete: :delete_all, type: :binary_id)
-
       add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id),
         null: false
 
@@ -34,14 +31,9 @@ defmodule Imgd.Repo.Migrations.CreateExecutionsTables do
 
     create index(:executions, [:workflow_id])
     create index(:executions, [:workflow_version_id])
-    create index(:executions, [:workflow_snapshot_id])
     create index(:executions, [:triggered_by_user_id])
     create index(:executions, [:status])
     create index(:executions, [:execution_type])
-
-    create constraint(:executions, :executions_require_version_or_snapshot,
-             check: "(workflow_version_id IS NULL) <> (workflow_snapshot_id IS NULL)"
-           )
 
     create table(:node_executions, primary_key: false) do
       add :id, :binary_id, primary_key: true

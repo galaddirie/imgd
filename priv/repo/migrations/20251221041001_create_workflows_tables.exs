@@ -52,31 +52,6 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowsTables do
       timestamps(type: :utc_datetime_usec)
     end
 
-    create table(:workflow_snapshots, primary_key: false) do
-      add :id, :binary_id, primary_key: true
-
-      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id),
-        null: false
-
-      add :created_by_user_id, references(:users, on_delete: :delete_all, type: :binary_id),
-        null: false
-
-      add :source_hash, :string, null: false
-      add :nodes, :map
-      add :connections, :map
-      add :triggers, :map
-      add :purpose, :string, null: false, default: "preview"
-      add :expires_at, :utc_datetime_usec
-
-      timestamps(type: :utc_datetime_usec, updated_at: false)
-    end
-
-    create index(:workflow_snapshots, [:workflow_id])
-    create index(:workflow_snapshots, [:created_by_user_id])
-    create index(:workflow_snapshots, [:expires_at])
-
-
-
 
     execute(
       """
