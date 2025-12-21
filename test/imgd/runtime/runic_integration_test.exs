@@ -117,8 +117,6 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       assert workflow.name == "execution_test_wf"
     end
 
-    @tag :skip
-    @tag :timeout
     test "builds workflow with linear pipeline" do
       source = %{
         id: "linear_wf",
@@ -143,8 +141,6 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       assert length(result) >= 2
     end
 
-    @tag :skip
-    @tag :timeout
     test "handles fan-out pattern (one parent, multiple children)" do
       source = %{
         id: "fanout_wf",
@@ -352,8 +348,6 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
   # ===========================================================================
 
   describe "Full workflow execution" do
-    @tag :skip
-    @tag :timeout
     test "executes multi-node workflow end to end" do
       # Create a simple 3-node pipeline
       source = %{

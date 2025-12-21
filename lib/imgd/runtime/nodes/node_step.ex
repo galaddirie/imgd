@@ -50,10 +50,16 @@ defmodule Imgd.Runtime.Nodes.NodeStep do
   def create(node, opts \\ []) do
     # Capture node and opts in the closure
     # Runic will call this function with the input from parent steps
-    Runic.step(
-      fn input -> execute_with_context(node, input, opts) end,
-      name: node.id
-    )
+    step =
+      Runic.step(
+        fn input -> execute_with_context(node, input, opts) end,
+        name: node.id
+      )
+
+    # Ensure unique hash for programmatic steps to avoid graph vertex collisions
+    # We use phash2 on the combination of the original hash and the node id
+    unique_hash = :erlang.phash2({step.hash, node.id}, 4_294_967_296)
+    %{step | hash: unique_hash}
   end
 
   @doc """
