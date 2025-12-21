@@ -64,7 +64,6 @@ defmodule Imgd.Workflows.Workflow do
 
     has_one :draft, Imgd.Workflows.WorkflowDraft
     has_many :versions, WorkflowVersion
-    has_many :editing_sessions, Imgd.Workflows.EditingSession
     has_many :executions, Execution
 
     belongs_to :user, User

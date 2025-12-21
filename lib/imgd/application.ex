@@ -25,8 +25,6 @@ defmodule Imgd.Application do
         {Task.Supervisor, name: Imgd.Runtime.Execution.TaskSupervisor},
         Imgd.Runtime.Execution.Supervisor,
         Imgd.Runtime.Expression.Cache,
-        Imgd.Workflows.EditingSession.Registry,
-        Imgd.Workflows.EditingSession.DynamicSupervisor,
         Imgd.Sandbox.Supervisor,
         ImgdWeb.Endpoint
       ]

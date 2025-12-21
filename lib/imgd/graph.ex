@@ -374,24 +374,19 @@ defmodule Imgd.Graph do
   Extracts the induced subgraph for executing to target nodes.
 
   Returns a subgraph containing the targets and all their upstream dependencies,
-  stopping at pinned nodes. Pinned nodes themselves are included in the subgraph
-  as leaf sources.
 
   ## Options
 
   - `:exclude` - List of vertex IDs to exclude completely
-  - `:pinned` - List of vertex IDs that are pinned (upstream traversal stops here)
   - `:include_targets` - Whether to include target nodes (default: true)
   """
   @spec execution_subgraph(t(), [vertex_id()], keyword()) :: t()
   def execution_subgraph(%__MODULE__{} = graph, target_ids, opts \\ []) do
     exclude = Keyword.get(opts, :exclude, []) |> MapSet.new()
-    pinned = Keyword.get(opts, :pinned, []) |> MapSet.new()
     include_targets = Keyword.get(opts, :include_targets, true)
 
     # Collect nodes to run by traversing upstream from targets,
-    # but stopping at pinned nodes.
-    nodes_to_run = collect_upstream_with_boundary(graph, target_ids, pinned, exclude)
+    nodes_to_run = collect_upstream_with_boundary(graph, target_ids, exclude)
 
     # Remove targets if explicitly requested
     nodes_to_run =

@@ -89,7 +89,6 @@ defmodule Imgd.Executions.Execution do
           execution_type: execution_type(),
           trigger: Trigger.t(),
           context: map(),
-          pinned_data: map(),
           output: map() | nil,
           error: map() | nil,
           waiting_for: map() | nil,
@@ -113,9 +112,6 @@ defmodule Imgd.Executions.Execution do
 
     # Accumulated outputs from all nodes: %{"node_id" => output_data}
     field :context, :map, default: %{}
-
-    # Snapshotted pinned data for partial/preview runs
-    field :pinned_data, :map, default: %{}
 
     # Final declared output (from an output node)
     field :output, :map
@@ -148,7 +144,6 @@ defmodule Imgd.Executions.Execution do
       :status,
       :execution_type,
       :context,
-      :pinned_data,
       :output,
       :error,
       :waiting_for,
@@ -163,7 +158,6 @@ defmodule Imgd.Executions.Execution do
     |> cast_embed(:metadata, with: &metadata_changeset/2)
     |> validate_required([:workflow_id, :status, :execution_type])
     |> validate_map_field(:context)
-    |> validate_map_field(:pinned_data)
     |> validate_map_field(:output, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
     |> validate_map_field(:waiting_for, allow_nil: true)

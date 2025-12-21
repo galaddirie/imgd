@@ -75,56 +75,8 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowsTables do
     create index(:workflow_snapshots, [:created_by_user_id])
     create index(:workflow_snapshots, [:expires_at])
 
-    create table(:editing_sessions, primary_key: false) do
-      add :id, :binary_id, primary_key: true
 
-      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id),
-        null: false
 
-      add :user_id, references(:users, on_delete: :delete_all, type: :binary_id), null: false
-      add :base_source_hash, :string
-      add :status, :string, null: false, default: "active"
-      add :last_activity_at, :utc_datetime_usec, null: false
-      add :expires_at, :utc_datetime_usec
-      add :local_nodes, {:array, :map}
-      add :local_connections, {:array, :map}
-
-      timestamps(type: :utc_datetime_usec)
-    end
-
-    create index(:editing_sessions, [:workflow_id, :user_id, :status])
-    create index(:editing_sessions, [:expires_at])
-
-    create table(:pinned_outputs, primary_key: false) do
-      add :id, :binary_id, primary_key: true
-
-      add :editing_session_id,
-          references(:editing_sessions, on_delete: :delete_all, type: :binary_id),
-          null: false
-
-      add :workflow_draft_id,
-          references(:workflow_drafts,
-            on_delete: :delete_all,
-            type: :binary_id,
-            column: :workflow_id
-          ),
-          null: false
-
-      add :user_id, references(:users, on_delete: :delete_all, type: :binary_id), null: false
-      add :node_id, :string, null: false
-      add :source_hash, :string, null: false
-      add :node_config_hash, :string, null: false
-      add :data, :map, null: false
-      add :source_execution_id, :binary_id
-      add :label, :string
-      add :pinned_at, :utc_datetime_usec, null: false
-
-      timestamps(type: :utc_datetime_usec)
-    end
-
-    create unique_index(:pinned_outputs, [:editing_session_id, :node_id])
-    create index(:pinned_outputs, [:workflow_draft_id])
-    create index(:pinned_outputs, [:user_id])
 
     execute(
       """

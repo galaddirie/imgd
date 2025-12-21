@@ -19,7 +19,6 @@ defmodule Imgd.Repo.Migrations.CreateExecutionsTables do
       add :trigger, :map, null: false
       add :metadata, :map
       add :context, :map, null: false, default: %{}
-      add :pinned_data, :map, null: false, default: %{}
       add :output, :map
       add :error, :map
       add :waiting_for, :map

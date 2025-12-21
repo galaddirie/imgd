@@ -1,4 +1,4 @@
-# defmodule ImgdWeb.WorkflowLive.NodeConfigModal do
+# defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
 #   @moduledoc """
 #   Modal component for configuring node inputs with expression support.
 

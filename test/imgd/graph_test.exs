@@ -105,19 +105,4 @@ defmodule Imgd.GraphTest do
     assert Graph.vertex_ids(subgraph) |> Enum.sort() == ["c"]
   end
 
-  test "execution_subgraph stops at pinned nodes" do
-    nodes = [%{id: "a"}, %{id: "b"}, %{id: "c"}]
-
-    connections = [
-      %{source_node_id: "a", target_node_id: "b"},
-      %{source_node_id: "b", target_node_id: "c"}
-    ]
-
-    graph = Graph.from_workflow!(nodes, connections)
-
-    subgraph = Graph.execution_subgraph(graph, ["c"], pinned: ["b"], include_targets: true)
-
-    # b is pinned, so it's included but traversal stops (a is not included)
-    assert Graph.vertex_ids(subgraph) |> Enum.sort() == ["b", "c"]
-  end
 end
