@@ -7,38 +7,25 @@ defmodule Imgd.Nodes.Registry do
   - Easy versioning through git
   - Fast lookups via ETS
 
+  ## Control Flow Nodes
+
+  The registry includes control flow nodes for branching and collection processing:
+  - `branch` - If/else conditional routing
+  - `switch` - Multi-way value-based routing
+  - `merge` - Combine branches with join semantics
+  - `split_items` - Fan-out array to items
+  - `aggregate_items` - Fan-in items to single result
+
   ## Usage
 
       # Get all node types
       Imgd.Nodes.Registry.all()
 
+      # Get control flow nodes
+      Imgd.Nodes.Registry.list_by_kind(:control_flow)
+
       # Get a specific node type
-      {:ok, type} = Imgd.Nodes.Registry.get("http_request")
-
-      # List by category
-      Imgd.Nodes.Registry.list_by_category("Integrations")
-
-      # List by kind
-      Imgd.Nodes.Registry.list_by_kind(:action)
-
-  ## Adding New Node Types
-
-  Create an executor module that uses `Imgd.Nodes.Definition`:
-
-      defmodule Imgd.Nodes.Executors.MyNode do
-        use Imgd.Nodes.Definition,
-          id: "my_node",
-          name: "My Node",
-          category: "Custom",
-          description: "Does something cool",
-          icon: "hero-sparkles",
-          kind: :action
-
-        @behaviour Imgd.Nodes.Executors.Behaviour
-        # ... implementation
-      end
-
-  The node type will be automatically discovered and registered on startup.
+      {:ok, type} = Imgd.Nodes.Registry.get("branch")
   """
 
   use GenServer
@@ -57,9 +44,6 @@ defmodule Imgd.Nodes.Registry do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @doc """
-  Returns all registered node types.
-  """
   @spec all() :: [Type.t()]
   def all do
     @ets_table
@@ -68,9 +52,6 @@ defmodule Imgd.Nodes.Registry do
     |> Enum.sort_by(& &1.name)
   end
 
-  @doc """
-  Gets a node type by ID.
-  """
   @spec get(String.t()) :: {:ok, Type.t()} | {:error, :not_found}
   def get(type_id) when is_binary(type_id) do
     case :ets.lookup(@ets_table, type_id) do
@@ -79,9 +60,6 @@ defmodule Imgd.Nodes.Registry do
     end
   end
 
-  @doc """
-  Gets a node type by ID or raises.
-  """
   @spec get!(String.t()) :: Type.t()
   def get!(type_id) do
     case get(type_id) do
@@ -90,35 +68,23 @@ defmodule Imgd.Nodes.Registry do
     end
   end
 
-  @doc """
-  Checks if a node type exists.
-  """
   @spec exists?(String.t()) :: boolean()
   def exists?(type_id) when is_binary(type_id) do
     :ets.member(@ets_table, type_id)
   end
 
-  @doc """
-  Lists node types by category.
-  """
   @spec list_by_category(String.t()) :: [Type.t()]
   def list_by_category(category) when is_binary(category) do
     all()
     |> Enum.filter(&(&1.category == category))
   end
 
-  @doc """
-  Lists node types by kind.
-  """
   @spec list_by_kind(Type.node_kind()) :: [Type.t()]
   def list_by_kind(kind) when kind in [:action, :trigger, :control_flow, :transform] do
     all()
     |> Enum.filter(&(&1.node_kind == kind))
   end
 
-  @doc """
-  Returns all unique categories.
-  """
   @spec categories() :: [String.t()]
   def categories do
     all()
@@ -127,21 +93,43 @@ defmodule Imgd.Nodes.Registry do
     |> Enum.sort()
   end
 
-  @doc """
-  Returns node types grouped by category.
-  """
   @spec grouped_by_category() :: %{String.t() => [Type.t()]}
   def grouped_by_category do
     all()
     |> Enum.group_by(& &1.category)
   end
 
-  @doc """
-  Returns the count of registered node types.
-  """
   @spec count() :: non_neg_integer()
   def count do
     :ets.info(@ets_table, :size)
+  end
+
+  @doc """
+  Returns true if the node type has join semantics (like Merge).
+  """
+  @spec has_join_semantics?(String.t()) :: boolean()
+  def has_join_semantics?(type_id) do
+    case get(type_id) do
+      {:ok, type} ->
+        type.id in ["merge"]
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
+  Returns true if the node type produces routed outputs (like Branch, Switch).
+  """
+  @spec has_routed_outputs?(String.t()) :: boolean()
+  def has_routed_outputs?(type_id) do
+    case get(type_id) do
+      {:ok, type} ->
+        type.id in ["branch", "switch"]
+
+      _ ->
+        false
+    end
   end
 
   # ============================================================================
@@ -150,10 +138,8 @@ defmodule Imgd.Nodes.Registry do
 
   @impl true
   def init(_opts) do
-    # Create ETS table for fast lookups
     :ets.new(@ets_table, [:named_table, :set, :protected, read_concurrency: true])
 
-    # Load all built-in node types
     types = discover_node_types()
 
     for type <- types do
@@ -167,7 +153,6 @@ defmodule Imgd.Nodes.Registry do
 
   @impl true
   def handle_call(:reload, _from, state) do
-    # Clear and reload all types
     :ets.delete_all_objects(@ets_table)
 
     types = discover_node_types()
@@ -186,7 +171,6 @@ defmodule Imgd.Nodes.Registry do
   # ============================================================================
 
   defp discover_node_types do
-    # Get all executor modules and load their definitions
     builtin_executor_modules()
     |> Enum.filter(&has_node_definition?/1)
     |> Enum.map(& &1.__node_definition__())
@@ -194,26 +178,29 @@ defmodule Imgd.Nodes.Registry do
   end
 
   # Explicit list of builtin executor modules.
-  # This ensures they are loaded before the registry tries to discover them.
   # Add new executor modules here as they are created.
   defp builtin_executor_modules do
     [
-      Imgd.Nodes.Executors.HttpRequest,
+      # Actions
+      Imgd.Nodes.Executors.Debug,
+
+      # Transforms
       Imgd.Nodes.Executors.Transform,
       Imgd.Nodes.Executors.Format,
-      Imgd.Nodes.Executors.Debug,
       Imgd.Nodes.Executors.Math,
-      Imgd.Nodes.Executors.Wait,
-      Imgd.Nodes.Executors.StringConcatenate,
-      Imgd.Nodes.Executors.StringSplit,
-      Imgd.Nodes.Executors.StringReplace,
-      Imgd.Nodes.Executors.StringCase,
-      Imgd.Nodes.Executors.StringTrim
+
+      # Control Flow
+      Imgd.Nodes.Executors.Branch,
+      Imgd.Nodes.Executors.Switch,
+      Imgd.Nodes.Executors.Merge,
+
+      # Collection Processing
+      Imgd.Nodes.Executors.SplitItems,
+      Imgd.Nodes.Executors.AggregateItems
     ]
   end
 
   defp has_node_definition?(module) do
-    # Ensure module is loaded
     Code.ensure_loaded(module)
     function_exported?(module, :__node_definition__, 0)
   end
@@ -224,7 +211,6 @@ defmodule Imgd.Nodes.Registry do
 
     if length(ids) != length(unique_ids) do
       duplicates = ids -- unique_ids
-
       raise "Duplicate node type IDs found: #{inspect(duplicates)}"
     end
 

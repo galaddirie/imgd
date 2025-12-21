@@ -1,7 +1,28 @@
 defmodule Imgd.Runtime.Execution.Server do
   @moduledoc """
   OTP process responsible for a single workflow execution.
-  Manages lifecycle, node orchestration, and state persistence.
+  Manages lifecycle, node orchestration, control flow, and state persistence.
+
+  ## Control Flow Support
+
+  This server supports:
+  - **Conditional branching**: Branch/Switch nodes route to specific outputs
+  - **Skip propagation**: Inactive branches receive skip signals
+  - **Join semantics**: Merge nodes with wait_any/wait_all modes
+  - **Items processing**: Map mode for parallel item execution (Phase 2)
+
+  ## Execution Model
+
+  Nodes are categorized by their connection routing needs:
+  - Standard nodes: Single "main" output, all children receive data
+  - Routing nodes (Branch, Switch): Multiple named outputs, children filtered by route
+  - Join nodes (Merge): Multiple parents, special input gathering
+
+  ## State Management
+
+  - `node_states`: Track status per node (:pending, :running, :completed, :failed, :skipped)
+  - `node_results`: Store output tokens per node
+  - `active_routes`: Map of node_id => active output routes
   """
 
   @behaviour :gen_statem
@@ -9,6 +30,7 @@ defmodule Imgd.Runtime.Execution.Server do
   require Logger
   alias Imgd.Graph
   alias Imgd.Runtime.Core.NodeRunner
+  alias Imgd.Runtime.Token
   alias Imgd.Executions.{Execution, NodeExecution}
 
   # Timing diagnostics for performance monitoring
@@ -23,37 +45,27 @@ defmodule Imgd.Runtime.Execution.Server do
   # Data structure for the server state
   defstruct [
     :execution_id,
-    # Loaded Execution struct
     :execution,
-    # Associated WorkflowVersion
     :workflow_version,
-    # Digraph of dependencies
     :graph,
-    # Map of node_id -> node_def
     :node_map,
-    # Map of node_id -> status (:pending, :running, :completed, :failed, :skipped)
+    :connection_map,
     :node_states,
-    # Map of node_id -> output/error
     :node_results,
-    # Map of ref -> {node_id, start_time, node_exec}
+    :active_routes,
     :running_tasks,
-    # Persistence adapter module
     :persistence,
-    # Notifier adapter module
     :notifier,
-    # Monotonic time
     :start_time
   ]
 
   @impl true
   def callback_mode, do: [:handle_event_function, :state_enter]
 
+  # ============================================================================
   # API
+  # ============================================================================
 
-  @doc """
-  Child specification for supervision tree.
-  Required because gen_statem doesn't auto-define this like GenServer.
-  """
   def child_spec(opts) do
     execution_id = Keyword.fetch!(opts, :execution_id)
 
@@ -77,7 +89,9 @@ defmodule Imgd.Runtime.Execution.Server do
     )
   end
 
+  # ============================================================================
   # Callbacks
+  # ============================================================================
 
   @impl true
   def init(opts) do
@@ -91,39 +105,34 @@ defmodule Imgd.Runtime.Execution.Server do
       notifier: notifier,
       node_states: %{},
       node_results: %{},
-      running_tasks: %{}
+      active_routes: %{},
+      running_tasks: %{},
+      connection_map: %{}
     }
 
-    # Use internal event to trigger loading so init is fast
     actions = [{:next_event, :internal, :load_execution}]
     {:ok, :initializing, data, actions}
   end
 
-  # State enter handlers (required for :state_enter callback mode)
   @impl true
-  def handle_event(:enter, _old_state, :initializing, _data) do
-    :keep_state_and_data
-  end
-
-  def handle_event(:enter, _old_state, :running, _data) do
-    :keep_state_and_data
-  end
+  def handle_event(:enter, _old_state, :initializing, _data), do: :keep_state_and_data
+  def handle_event(:enter, _old_state, :running, _data), do: :keep_state_and_data
+  def handle_event(:enter, _old_state, :terminating, _data), do: :keep_state_and_data
 
   @impl true
   def handle_event(:internal, :load_execution, :initializing, data) do
     case data.persistence.load_execution(data.execution_id) do
       {:ok, execution} ->
-        # Load nodes and connections from exactly one immutable source
         {nodes, connections} = load_immutable_source(execution)
         node_map = Map.new(nodes, &{&1.id, &1})
+        connection_map = build_connection_map(connections)
 
         case Graph.from_workflow(nodes, connections) do
           {:ok, graph} ->
-            # Handle Partial execution using snapshotted pins
             {graph, node_results} = prepare_graph_and_state(graph, execution)
-
-            # Initialize states for completed/pinned nodes
             node_states = Map.new(Map.keys(node_results), &{&1, :completed})
+            # Initialize active routes for pinned nodes
+            active_routes = Map.new(Map.keys(node_results), &{&1, ["main"]})
 
             data = %{
               data
@@ -131,16 +140,16 @@ defmodule Imgd.Runtime.Execution.Server do
                 workflow_version: execution.workflow_version,
                 graph: graph,
                 node_map: node_map,
+                connection_map: connection_map,
                 node_results: node_results,
-                node_states: node_states
+                node_states: node_states,
+                active_routes: active_routes
             }
 
-            # Mark running
             case data.persistence.mark_running(data.execution_id) do
               {:ok, updated_execution} ->
                 data = %{data | execution: updated_execution}
                 data.notifier.broadcast_execution_event(:started, updated_execution)
-
                 {:next_state, :running, data, [{:next_event, :internal, :check_runnable}]}
 
               {:error, reason} ->
@@ -156,48 +165,45 @@ defmodule Imgd.Runtime.Execution.Server do
     end
   end
 
+  # ============================================================================
   # RUNNING State
+  # ============================================================================
 
   def handle_event(:internal, :check_runnable, :running, data) do
-    # Determine nodes that can run
+    # First, propagate skips to nodes that can be determined as skipped
+    data = propagate_skips(data)
+
+    # Find nodes that are ready to run
     runnable = get_runnable_nodes(data)
 
     if Enum.empty?(runnable) and Enum.empty?(data.running_tasks) do
-      # No more work, check if we are done
-      if all_nodes_completed?(data) do
+      if execution_complete?(data) do
         finish_execution(data)
       else
-        # Graph might be stuck (should verify cyclic check on build), or just waiting
-        # In this simplified version, if nothing is running and nothing is runnable, we are done
-        # but maybe incomplete.
+        # Might be stuck - log and complete with partial results
+        Logger.warning("Execution stuck with nodes pending",
+          execution_id: data.execution_id,
+          pending: pending_nodes(data)
+        )
+
         finish_execution(data)
       end
     else
-      # Spawn tasks
-      data =
-        Enum.reduce(runnable, data, fn node_id, acc ->
-          spawn_node_task(node_id, acc)
-        end)
-
+      data = Enum.reduce(runnable, data, &spawn_node_task/2)
       {:keep_state, data}
     end
   end
 
   def handle_event(:info, {ref, result}, :running, data) do
-    # Task returned
     case Map.pop(data.running_tasks, ref) do
       {nil, _} ->
-        # Unknown task
         {:keep_state, data}
 
       {{_node_id, start_time, node_exec}, remaining_tasks} ->
         Process.demonitor(ref, [:flush])
         data = %{data | running_tasks: remaining_tasks}
-
-        # Calculate duration from stored start_time
         duration_us = System.monotonic_time(:microsecond) - start_time
         duration_ms = div(duration_us, 1000)
-
         handle_node_result(node_exec, result, duration_ms, data)
     end
   end
@@ -209,24 +215,376 @@ defmodule Imgd.Runtime.Execution.Server do
 
       {{_node_id, _start_time, node_exec}, remaining_tasks} ->
         data = %{data | running_tasks: remaining_tasks}
-        # Treat crash as failure (no duration available for crashes)
         handle_node_result(node_exec, {:error, {:process_crash, reason}}, 0, data)
     end
   end
 
-  # TERMINATING
+  # ============================================================================
+  # Control Flow Logic
+  # ============================================================================
 
-  def handle_event(:enter, _old_state, :terminating, _data) do
-    {:keep_state_and_data}
+  # Builds a map of connections indexed by source node for route-aware traversal.
+  defp build_connection_map(connections) do
+    Enum.group_by(connections, & &1.source_node_id)
   end
 
-  # Private Helpers
+  # Determines which nodes can be skipped because they're on inactive branches.
+  defp propagate_skips(data) do
+    # Find nodes that have all parents either completed or skipped,
+    # but are not reachable through any active route
+    pending = pending_nodes(data)
+
+    skippable =
+      Enum.filter(pending, fn node_id ->
+        should_skip_node?(node_id, data)
+      end)
+
+    Enum.reduce(skippable, data, fn node_id, acc ->
+      mark_node_skipped(node_id, acc, "inactive_branch")
+    end)
+  end
+
+  # Checks if a node should be skipped because it's on an inactive branch.
+  defp should_skip_node?(node_id, data) do
+    parents = Graph.parents(data.graph, node_id)
+
+    if Enum.empty?(parents) do
+      false
+    else
+      # All parents must have a terminal state
+      all_parents_done =
+        Enum.all?(parents, fn pid ->
+          Map.get(data.node_states, pid) in [:completed, :failed, :skipped]
+        end)
+
+      if not all_parents_done do
+        false
+      else
+        # Check if ANY parent has an active route to this node
+        has_active_route =
+          Enum.any?(parents, fn parent_id ->
+            parent_routes_to_node?(parent_id, node_id, data)
+          end)
+
+        not has_active_route
+      end
+    end
+  end
+
+  # Checks if parent's active routes include a connection to target node.
+  defp parent_routes_to_node?(parent_id, target_id, data) do
+    case Map.get(data.node_states, parent_id) do
+      :skipped ->
+        false
+
+      :completed ->
+        active_routes = Map.get(data.active_routes, parent_id, ["main"])
+        connections = Map.get(data.connection_map, parent_id, [])
+
+        Enum.any?(connections, fn conn ->
+          conn.target_node_id == target_id and
+            conn.source_output in active_routes
+        end)
+
+      _ ->
+        # Parent not done yet
+        true
+    end
+  end
+
+  defp mark_node_skipped(node_id, data, reason) do
+    token = Token.skip(reason, source_node_id: node_id)
+
+    data
+    |> put_node_state(node_id, :skipped)
+    |> put_node_result(node_id, token)
+  end
+
+  # ============================================================================
+  # Node Execution
+  # ============================================================================
+
+  defp get_runnable_nodes(data) do
+    Graph.vertex_ids(data.graph)
+    |> Enum.filter(fn id ->
+      status = Map.get(data.node_states, id)
+      is_nil(status) and parents_ready?(id, data) and has_active_path?(id, data)
+    end)
+  end
+
+  defp parents_ready?(node_id, data) do
+    node = Map.get(data.node_map, node_id)
+    parents = Graph.parents(data.graph, node_id)
+
+    if is_merge_node?(node) do
+      # Merge nodes with wait_any only need one active parent
+      join_mode = get_join_mode(node)
+      check_parents_for_join(parents, join_mode, data)
+    else
+      # Standard nodes need all parents done
+      Enum.all?(parents, fn pid ->
+        Map.get(data.node_states, pid) in [:completed, :skipped]
+      end)
+    end
+  end
+
+  defp check_parents_for_join(parents, "wait_any", data) do
+    # At least one parent completed (not skipped)
+    # Or all parents are terminal (even if all skipped)
+    Enum.any?(parents, fn pid ->
+      Map.get(data.node_states, pid) == :completed
+    end) or
+      Enum.all?(parents, fn pid ->
+        Map.get(data.node_states, pid) in [:completed, :skipped, :failed]
+      end)
+  end
+
+  defp check_parents_for_join(parents, _mode, data) do
+    # wait_all: all parents must be terminal
+    Enum.all?(parents, fn pid ->
+      Map.get(data.node_states, pid) in [:completed, :skipped, :failed]
+    end)
+  end
+
+  defp has_active_path?(node_id, data) do
+    parents = Graph.parents(data.graph, node_id)
+
+    # Root nodes always have active path
+    if Enum.empty?(parents) do
+      true
+    else
+      # At least one parent routes to us
+      Enum.any?(parents, fn pid ->
+        parent_routes_to_node?(pid, node_id, data)
+      end)
+    end
+  end
+
+  defp is_merge_node?(%{type_id: "merge"}), do: true
+  defp is_merge_node?(_), do: false
+
+  defp get_join_mode(node) do
+    Map.get(node.config, "mode", "wait_any")
+  end
+
+  defp spawn_node_task(node_id, data) do
+    node = Map.fetch!(data.node_map, node_id)
+    t0 = System.monotonic_time(:microsecond)
+
+    input = timed("gather_inputs", fn -> gather_inputs(node_id, data) end)
+
+    context_fun = fn ->
+      timed("build_context", fn -> build_context(data, input) end)
+    end
+
+    execution = data.execution
+    start_time = System.monotonic_time(:microsecond)
+
+    {:ok, node_exec} =
+      timed("record_node_start", fn ->
+        data.persistence.record_node_start(data.execution_id, node, input)
+      end)
+
+    data.notifier.broadcast_node_event(:started, execution, node_exec)
+
+    task =
+      Task.async(fn ->
+        timed("node_runner", fn ->
+          NodeRunner.run(node, input, context_fun, execution)
+        end)
+      end)
+
+    total_time = System.monotonic_time(:microsecond) - t0
+    Logger.debug("spawn_node_task total: #{total_time}μs for node #{node_id}")
+
+    data
+    |> put_node_state(node_id, :running)
+    |> Map.update!(:running_tasks, &Map.put(&1, task.ref, {node_id, start_time, node_exec}))
+  end
+
+  defp gather_inputs(node_id, data) do
+    node = Map.get(data.node_map, node_id)
+    parents = Graph.parents(data.graph, node_id)
+
+    cond do
+      # Root node - use trigger data
+      Enum.empty?(parents) ->
+        Execution.trigger_data(data.execution)
+
+      # Merge node - gather from all parents with IDs
+      is_merge_node?(node) ->
+        gather_merge_inputs(parents, data)
+
+      # Single parent - pass through
+      length(parents) == 1 ->
+        [parent_id] = parents
+        unwrap_result(Map.get(data.node_results, parent_id))
+
+      # Multiple parents (non-merge) - create keyed map
+      true ->
+        Map.new(parents, fn pid ->
+          {pid, unwrap_result(Map.get(data.node_results, pid))}
+        end)
+    end
+  end
+
+  defp gather_merge_inputs(parents, data) do
+    Map.new(parents, fn pid ->
+      result = Map.get(data.node_results, pid)
+      # Keep tokens for merge to inspect skip status
+      {pid, result}
+    end)
+  end
+
+  defp unwrap_result(%Token{} = token), do: Token.unwrap(token)
+  defp unwrap_result(other), do: other
+
+  defp handle_node_result(%NodeExecution{} = node_exec, result, duration_ms, data) do
+    node_id = node_exec.node_id
+
+    {status, output, routes} =
+      case result do
+        {:ok, %Token{} = token} ->
+          {:completed, token, [token.route]}
+
+        {:ok, out} ->
+          {:completed, Token.wrap(out), ["main"]}
+
+        {:skip, reason} ->
+          {:skipped, Token.skip(to_string(reason)), []}
+
+        {:error, reason} ->
+          {:failed, reason, []}
+      end
+
+    # Record finish
+    {:ok, node_exec} =
+      timed("record_node_finish", fn ->
+        result_for_db = if status == :failed, do: output, else: Token.unwrap(output)
+        data.persistence.record_node_finish(node_exec, status, result_for_db, duration_ms)
+      end)
+
+    # Notify
+    event_type = if status == :failed, do: :failed, else: :completed
+    data.notifier.broadcast_node_event(event_type, data.execution, node_exec)
+
+    # Update state with route information
+    data =
+      data
+      |> put_node_state(node_id, status)
+      |> put_node_result(node_id, output)
+      |> put_active_routes(node_id, routes)
+
+    if status == :failed do
+      fail_execution(data, output)
+    else
+      {:next_state, :running, data, [{:next_event, :internal, :check_runnable}]}
+    end
+  end
+
+  # ============================================================================
+  # Completion Logic
+  # ============================================================================
+
+  defp execution_complete?(data) do
+    Graph.vertex_ids(data.graph)
+    |> Enum.all?(fn id ->
+      Map.get(data.node_states, id) in [:completed, :skipped, :failed]
+    end)
+  end
+
+  defp pending_nodes(data) do
+    Graph.vertex_ids(data.graph)
+    |> Enum.filter(fn id ->
+      Map.get(data.node_states, id) not in [:completed, :skipped, :failed]
+    end)
+  end
+
+  defp finish_execution(data) do
+    leaves = Graph.leaves(data.graph)
+
+    # Filter to active leaves only
+    active_leaves =
+      Enum.filter(leaves, fn id ->
+        Map.get(data.node_states, id) == :completed
+      end)
+
+    output =
+      case active_leaves do
+        [] -> %{}
+        [one] -> unwrap_result(Map.get(data.node_results, one))
+        many -> Map.new(many, &{&1, unwrap_result(Map.get(data.node_results, &1))})
+      end
+
+    # Convert node_results to plain values for context storage
+    context =
+      Map.new(data.node_results, fn {k, v} ->
+        {k, unwrap_result(v)}
+      end)
+
+    case data.persistence.mark_completed(data.execution_id, output, context) do
+      {:ok, updated_execution} ->
+        data.notifier.broadcast_execution_event(:completed, updated_execution)
+        {:stop, :normal, %{data | execution: updated_execution}}
+
+      {:error, reason} ->
+        stop_with_error(data, reason)
+    end
+  end
+
+  defp fail_execution(data, error) do
+    case data.persistence.mark_failed(data.execution_id, error) do
+      {:ok, updated_execution} ->
+        data.notifier.broadcast_execution_event(:failed, updated_execution)
+        {:stop, :normal, %{data | execution: updated_execution}}
+
+      {:error, reason} ->
+        stop_with_error(data, reason)
+    end
+  end
+
+  defp stop_with_error(data, reason) do
+    data.persistence.mark_failed(data.execution_id, reason)
+    {:stop, reason, data}
+  end
+
+  # ============================================================================
+  # State Helpers
+  # ============================================================================
+
+  defp put_node_state(data, id, status), do: put_in(data.node_states[id], status)
+  defp put_node_result(data, id, result), do: put_in(data.node_results[id], result)
+
+  defp put_active_routes(data, id, routes) do
+    %{data | active_routes: Map.put(data.active_routes, id, routes)}
+  end
+
+  defp build_context(data, input) do
+    Imgd.Runtime.Expression.Context.build(
+      data.execution,
+      Map.new(data.node_results, fn {k, v} -> {k, unwrap_result(v)} end),
+      input
+    )
+  end
+
+  defp load_immutable_source(%Execution{} = execution) do
+    cond do
+      not is_nil(execution.workflow_version_id) ->
+        version = execution.workflow_version
+        {version.nodes, version.connections}
+
+      not is_nil(execution.workflow_snapshot_id) ->
+        snapshot = execution.workflow_snapshot
+        {snapshot.nodes, snapshot.connections}
+
+      true ->
+        raise "Execution #{execution.id} has no immutable source (version or snapshot)"
+    end
+  end
 
   defp prepare_graph_and_state(graph, execution) do
     metadata = execution.metadata || %{}
     extras = Map.get(metadata, "extras") || Map.get(metadata, :extras) || %{}
-
-    # Extract pinned_data once for both partial and full executions
     pinned_data = execution.pinned_data || %{}
 
     is_partial =
@@ -255,7 +613,6 @@ defmodule Imgd.Runtime.Execution.Server do
           pinned_id -> [pinned_id]
         end
 
-      # Use snapshotted pinned_data from the execution record
       pinned_outputs = Map.take(pinned_data, pinned_ids)
 
       subgraph =
@@ -263,191 +620,7 @@ defmodule Imgd.Runtime.Execution.Server do
 
       {subgraph, pinned_outputs}
     else
-      # For full preview/production executions, ALSO use pinned data
       {graph, pinned_data}
-    end
-  end
-
-  defp get_runnable_nodes(data) do
-    # Find nodes that correspond to:
-    # 1. Not started yet (status nil)
-    # 2. All parents completed successfully (or pinned)
-
-    Graph.vertex_ids(data.graph)
-    |> Enum.filter(fn id ->
-      status = Map.get(data.node_states, id)
-      is_nil(status) and parents_completed?(id, data)
-    end)
-  end
-
-  defp parents_completed?(id, data) do
-    parents = Graph.parents(data.graph, id)
-
-    Enum.all?(parents, fn p_id ->
-      Map.get(data.node_states, p_id) == :completed
-    end)
-  end
-
-  defp all_nodes_completed?(data) do
-    Graph.vertex_ids(data.graph)
-    # failed stops execution?
-    |> Enum.all?(fn id -> Map.get(data.node_states, id) in [:completed, :skipped] end)
-  end
-
-  defp spawn_node_task(node_id, data) do
-    node = Map.fetch!(data.node_map, node_id)
-
-    # TIMING: Track key operations
-    t0 = System.monotonic_time(:microsecond)
-
-    # 1. Gather inputs from parents
-    input = timed("gather_inputs", fn -> gather_inputs(node_id, data) end)
-
-    # 2. Build context lazily (only when needed)
-    context_fun = fn ->
-      timed("build_context", fn -> build_context(data, input) end)
-    end
-
-    execution = data.execution
-    start_time = System.monotonic_time(:microsecond)
-
-    # Record start (async persistence, but returns node_exec for broadcasting)
-    {:ok, node_exec} =
-      timed("record_node_start", fn ->
-        data.persistence.record_node_start(data.execution_id, node, input)
-      end)
-
-    # Notify synchronously (fast operation)
-    data.notifier.broadcast_node_event(:started, execution, node_exec)
-
-    # Single task for node execution
-    task =
-      Task.async(fn ->
-        timed("node_runner", fn ->
-          NodeRunner.run(node, input, context_fun, execution)
-        end)
-      end)
-
-    total_time = System.monotonic_time(:microsecond) - t0
-    Logger.debug("spawn_node_task total: #{total_time}μs for node #{node_id}")
-
-    data
-    |> put_node_state(node_id, :running)
-    |> Map.update!(:running_tasks, &Map.put(&1, task.ref, {node_id, start_time, node_exec}))
-  end
-
-  defp handle_node_result(%NodeExecution{} = node_exec, result, duration_ms, data) do
-    node_id = node_exec.node_id
-
-    {status, output} =
-      case result do
-        {:ok, out} -> {:completed, out}
-        {:skip, _reason} -> {:skipped, nil}
-        {:error, reason} -> {:failed, reason}
-      end
-
-    # Record finish (async persistence, but returns updated node_exec)
-    {:ok, node_exec} =
-      timed("record_node_finish", fn ->
-        data.persistence.record_node_finish(
-          node_exec,
-          status,
-          if(status == :failed, do: output, else: output),
-          duration_ms
-        )
-      end)
-
-    # Notify synchronously
-    event_type = if status == :failed, do: :failed, else: :completed
-    data.notifier.broadcast_node_event(event_type, data.execution, node_exec)
-
-    # Update internal state
-    data =
-      data
-      |> put_node_state(node_id, status)
-      |> put_node_result(node_id, output)
-
-    if status == :failed do
-      fail_execution(data, output)
-    else
-      {:next_state, :running, data, [{:next_event, :internal, :check_runnable}]}
-    end
-  end
-
-  defp gather_inputs(node_id, data) do
-    parents = Graph.parents(data.graph, node_id)
-
-    case parents do
-      [] ->
-        Execution.trigger_data(data.execution)
-
-      [single] ->
-        Map.get(data.node_results, single)
-
-      multiple ->
-        Map.new(multiple, fn pid -> {pid, Map.get(data.node_results, pid)} end)
-    end
-  end
-
-  defp build_context(data, input) do
-    # Use the pure Context builder with current input
-    Imgd.Runtime.Expression.Context.build(data.execution, data.node_results, input)
-  end
-
-  defp stop_with_error(data, reason) do
-    # Try to mark failed if we can
-    data.persistence.mark_failed(data.execution_id, reason)
-    {:stop, reason, data}
-  end
-
-  defp fail_execution(data, error) do
-    case data.persistence.mark_failed(data.execution_id, error) do
-      {:ok, updated_execution} ->
-        data.notifier.broadcast_execution_event(:failed, updated_execution)
-        {:stop, :normal, %{data | execution: updated_execution}}
-
-      {:error, reason} ->
-        stop_with_error(data, reason)
-    end
-  end
-
-  defp finish_execution(data) do
-    # Determine final output (leaves)
-    leaves = Graph.leaves(data.graph)
-
-    output =
-      case leaves do
-        [] -> %{}
-        [one] -> Map.get(data.node_results, one)
-        many -> Map.new(many, &{&1, Map.get(data.node_results, &1)})
-      end
-
-    case data.persistence.mark_completed(data.execution_id, output, data.node_results) do
-      {:ok, updated_execution} ->
-        data.notifier.broadcast_execution_event(:completed, updated_execution)
-        {:stop, :normal, %{data | execution: updated_execution}}
-
-      {:error, reason} ->
-        stop_with_error(data, reason)
-    end
-  end
-
-  defp put_node_state(data, id, status), do: put_in(data.node_states[id], status)
-  defp put_node_result(data, id, result), do: put_in(data.node_results[id], result)
-
-  defp load_immutable_source(%Execution{} = execution) do
-    cond do
-      not is_nil(execution.workflow_version_id) ->
-        version = execution.workflow_version
-        {version.nodes, version.connections}
-
-      not is_nil(execution.workflow_snapshot_id) ->
-        snapshot = execution.workflow_snapshot
-        {snapshot.nodes, snapshot.connections}
-
-      true ->
-        # This should be impossible due to database constraints
-        raise "Execution #{execution.id} has no immutable source (version or snapshot)"
     end
   end
 end
