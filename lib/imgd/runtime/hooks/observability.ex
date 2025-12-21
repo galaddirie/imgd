@@ -25,6 +25,33 @@ defmodule Imgd.Runtime.Hooks.Observability do
   @type hook_opts :: [execution_id: String.t(), workflow_id: String.t()]
 
   @doc """
+  Counts the number of items produced by a node.
+
+  For splitter nodes: returns the length of the output list (multiple items)
+  For aggregator nodes: returns 1 (single aggregated result)
+  For other nodes: returns 1 (single output)
+  For nil/skipped: returns 0
+
+  ## Examples
+
+      iex> count_output_items([1, 2, 3])
+      3
+
+      iex> count_output_items("single")
+      1
+
+      iex> count_output_items([])
+      0
+
+      iex> count_output_items(nil)
+      0
+  """
+  @spec count_output_items(term()) :: non_neg_integer()
+  def count_output_items(value) do
+    do_count_output_items(value)
+  end
+
+  @doc """
   Attaches all observability hooks to a Runic workflow.
   """
   @spec attach_all_hooks(Workflow.t(), hook_opts()) :: Workflow.t()
@@ -130,16 +157,21 @@ defmodule Imgd.Runtime.Hooks.Observability do
     duration_us = if start_time, do: System.monotonic_time() - start_time, else: 0
     duration_us = System.convert_time_unit(duration_us, :native, :microsecond)
 
+    # Count output items - splitter nodes can produce multiple items
+    output_item_count = do_count_output_items(result_fact.value)
+
     :telemetry.execute(
       [:imgd, :node, :stop],
       %{
         duration_us: duration_us,
-        system_time: System.system_time()
+        system_time: System.system_time(),
+        output_item_count: output_item_count
       },
       %{
         step_name: step_name,
         execution_id: execution_id,
-        result_type: get_result_type(result_fact.value)
+        result_type: get_result_type(result_fact.value),
+        output_item_count: output_item_count
       }
     )
 
@@ -148,6 +180,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
       node_id: step_name,
       status: :completed,
       output_data: sanitize_for_broadcast(result_fact.value),
+      output_item_count: output_item_count,
       duration_us: duration_us,
       completed_at: DateTime.utc_now()
     })
@@ -182,6 +215,12 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp get_result_type(value) when is_number(value), do: :number
   defp get_result_type(value) when is_boolean(value), do: :boolean
   defp get_result_type(_), do: :other
+
+  @spec do_count_output_items(term()) :: non_neg_integer()
+  defp do_count_output_items(nil), do: 0
+  defp do_count_output_items([]), do: 0
+  defp do_count_output_items(value) when is_list(value), do: length(value)
+  defp do_count_output_items(_), do: 1
 
   defp sanitize_for_broadcast(value) do
     Imgd.Runtime.Serializer.sanitize(value)
