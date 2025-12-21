@@ -71,5 +71,4 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
   defp step_status_icon(:running), do: "⟳"
   defp step_status_icon(:pending), do: "○"
   defp step_status_icon(_), do: "?"
-
 end
