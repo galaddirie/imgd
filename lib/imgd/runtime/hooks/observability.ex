@@ -95,7 +95,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
     workflow = put_step_start_time(workflow, step_name, start_time)
 
     :telemetry.execute(
-      [:imgd, :workflow, :step, :start],
+      [:imgd, :node, :start],
       %{system_time: System.system_time()},
       %{
         step_name: step_name,
@@ -127,12 +127,13 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
     # Calculate duration
     start_time = get_step_start_time(workflow, step_name)
-    duration = if start_time, do: System.monotonic_time() - start_time, else: 0
+    duration_us = if start_time, do: System.monotonic_time() - start_time, else: 0
+    duration_us = System.convert_time_unit(duration_us, :native, :microsecond)
 
     :telemetry.execute(
-      [:imgd, :workflow, :step, :stop],
+      [:imgd, :node, :stop],
       %{
-        duration: duration,
+        duration_us: duration_us,
         system_time: System.system_time()
       },
       %{
@@ -142,38 +143,16 @@ defmodule Imgd.Runtime.Hooks.Observability do
       }
     )
 
-    # Broadcast event for real-time updates
-    broadcast_step_completed(execution_id, step_name, result_fact.value)
+    # Broadcast event for real-time updates using the standardized PubSub
+    Imgd.Executions.PubSub.broadcast_node(:node_completed, execution_id, nil, %{
+      node_id: step_name,
+      status: :completed,
+      output_data: sanitize_for_broadcast(result_fact.value),
+      duration_us: duration_us,
+      completed_at: DateTime.utc_now()
+    })
 
     workflow
-  end
-
-  # ===========================================================================
-  # PubSub Integration
-  # ===========================================================================
-
-  defp broadcast_step_completed(execution_id, step_name, value) do
-    if pubsub_configured?() do
-      event = %{
-        type: :step_completed,
-        step_name: step_name,
-        output: sanitize_for_broadcast(value),
-        timestamp: DateTime.utc_now()
-      }
-
-      Phoenix.PubSub.broadcast(
-        Imgd.PubSub,
-        "executions:#{execution_id}",
-        {:execution_event, event}
-      )
-    end
-  rescue
-    # Don't fail execution if broadcast fails
-    e -> Logger.warning("Failed to broadcast step event: #{inspect(e)}")
-  end
-
-  defp pubsub_configured? do
-    !!Process.whereis(Imgd.PubSub)
   end
 
   # ===========================================================================

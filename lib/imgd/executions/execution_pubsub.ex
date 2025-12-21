@@ -85,12 +85,14 @@ defmodule Imgd.Executions.PubSub do
 
   @doc "Broadcast that a node has started executing."
   def broadcast_node_started(%Execution{} = execution, %NodeExecution{} = node_execution) do
-    broadcast_node(:node_started, execution, node_execution)
+    payload = build_node_payload(node_execution)
+    broadcast_node(:node_started, execution.id, execution.workflow_id, payload)
   end
 
   @doc "Broadcast that a node completed successfully."
   def broadcast_node_completed(%Execution{} = execution, %NodeExecution{} = node_execution) do
-    broadcast_node(:node_completed, execution, node_execution)
+    payload = build_node_payload(node_execution)
+    broadcast_node(:node_completed, execution.id, execution.workflow_id, payload)
   end
 
   @doc "Broadcast that a node failed."
@@ -104,22 +106,21 @@ defmodule Imgd.Executions.PubSub do
       |> build_node_payload()
       |> Map.put(:error, error || node_execution.error)
 
-    broadcast(execution.id, {:node_failed, payload})
-    broadcast_workflow(execution.workflow_id, {:node_failed, payload})
+    broadcast_node(:node_failed, execution.id, execution.workflow_id, payload)
+  end
+
+  @doc "Broadcast a node event with a raw payload."
+  def broadcast_node(event, execution_id, workflow_id, payload) do
+    message = {event, payload}
+
+    broadcast(execution_id, message)
+    broadcast_workflow(workflow_id, message)
   end
 
   # Private helpers
 
   defp broadcast_execution(event, %Execution{} = execution) do
     message = {event, execution}
-
-    broadcast(execution.id, message)
-    broadcast_workflow(execution.workflow_id, message)
-  end
-
-  defp broadcast_node(event, %Execution{} = execution, %NodeExecution{} = node_execution) do
-    payload = build_node_payload(node_execution)
-    message = {event, payload}
 
     broadcast(execution.id, message)
     broadcast_workflow(execution.workflow_id, message)
@@ -144,11 +145,15 @@ defmodule Imgd.Executions.PubSub do
     }
   end
 
+  defp build_node_payload(node_data) when is_map(node_data), do: node_data
+
   defp broadcast(execution_id, message) do
     Phoenix.PubSub.broadcast(@pubsub, execution_topic(execution_id), message)
   end
 
   defp broadcast_workflow(workflow_id, message) do
-    Phoenix.PubSub.broadcast(@pubsub, workflow_executions_topic(workflow_id), message)
+    if workflow_id do
+      Phoenix.PubSub.broadcast(@pubsub, workflow_executions_topic(workflow_id), message)
+    end
   end
 end

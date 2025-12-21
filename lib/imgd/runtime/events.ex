@@ -86,7 +86,7 @@ defmodule Imgd.Runtime.Events do
     }
   end
 
-  defp topic(execution_id), do: "executions:#{execution_id}"
+  defp topic(execution_id), do: "execution:#{execution_id}"
 
   defp broadcast(event) do
     if pubsub_available?() do

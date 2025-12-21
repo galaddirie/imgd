@@ -52,18 +52,18 @@ defmodule Imgd.Observability.Instrumentation do
   @doc """
   Records that an execution has completed successfully.
   """
-  def record_execution_completed(%Execution{} = execution, duration_ms) do
-    emit_execution_stop(execution, :completed, duration_ms)
+  def record_execution_completed(%Execution{} = execution, duration_us) do
+    emit_execution_stop(execution, :completed, duration_us)
     ExecutionPubSub.broadcast_execution_completed(execution)
   end
 
   @doc """
   Records that an execution has failed.
   """
-  def record_execution_failed(%Execution{} = execution, reason, duration_ms) do
+  def record_execution_failed(%Execution{} = execution, reason, duration_us) do
     error = Execution.format_error(reason)
     record_span_error(error)
-    emit_execution_stop(execution, :failed, duration_ms)
+    emit_execution_stop(execution, :failed, duration_us)
     ExecutionPubSub.broadcast_execution_failed(execution, error)
   end
 
@@ -76,8 +76,8 @@ defmodule Imgd.Observability.Instrumentation do
   """
   def record_node_started(%Execution{} = execution, %NodeExecution{} = node_execution) do
     :telemetry.execute(
-      [:imgd, :engine, :node, :start],
-      %{system_time: System.system_time(), queue_time_ms: nil},
+      [:imgd, :node, :start],
+      %{system_time: System.system_time(), queue_time_us: nil},
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
@@ -96,11 +96,11 @@ defmodule Imgd.Observability.Instrumentation do
   def record_node_completed(
         %Execution{} = execution,
         %NodeExecution{} = node_execution,
-        duration_ms
+        duration_us
       ) do
     :telemetry.execute(
-      [:imgd, :engine, :node, :stop],
-      %{duration_ms: duration_ms},
+      [:imgd, :node, :stop],
+      %{duration_us: duration_us},
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
@@ -121,13 +121,13 @@ defmodule Imgd.Observability.Instrumentation do
         %Execution{} = execution,
         %NodeExecution{} = node_execution,
         reason,
-        duration_ms
+        duration_us
       ) do
     error = Execution.format_error(reason)
 
     :telemetry.execute(
-      [:imgd, :engine, :node, :stop],
-      %{duration_ms: duration_ms},
+      [:imgd, :node, :stop],
+      %{duration_us: duration_us},
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
@@ -173,27 +173,28 @@ defmodule Imgd.Observability.Instrumentation do
 
       try do
         result = fun.(ctx)
-        duration_ms = monotonic_duration_ms(start_time)
+        duration_us = monotonic_duration_us(start_time)
 
         case result do
           {:ok, updated_execution} when is_struct(updated_execution, Execution) ->
-            emit_execution_stop(updated_execution, :completed, duration_ms)
+            emit_execution_stop(updated_execution, :completed, duration_us)
             result
 
           {:ok, _} = success ->
-            emit_execution_stop(execution, :completed, duration_ms)
+            emit_execution_stop(execution, :completed, duration_us)
             success
 
           {:error, reason} = error ->
             record_span_error(Execution.format_error(reason))
-            emit_execution_stop(execution, :failed, duration_ms)
+            emit_execution_stop(execution, :failed, duration_us)
             error
         end
       rescue
         e ->
-          duration_ms = monotonic_duration_ms(start_time)
+          duration_us = monotonic_duration_us(start_time)
           record_span_exception(e, __STACKTRACE__)
-          emit_execution_exception(execution, e, duration_ms)
+          emit_execution_stop(execution, :failed, duration_us)
+          emit_execution_exception(execution, e, duration_us)
           reraise e, __STACKTRACE__
       end
     end
@@ -215,10 +216,10 @@ defmodule Imgd.Observability.Instrumentation do
 
   Call this when scheduling a retry to track retry patterns.
   """
-  def record_node_retry(%Execution{} = execution, node_info, attempt, backoff_ms) do
+  def record_node_retry(%Execution{} = execution, node_info, attempt, backoff_us) do
     :telemetry.execute(
-      [:imgd, :engine, :node, :retry],
-      %{backoff_ms: backoff_ms},
+      [:imgd, :node, :retry],
+      %{backoff_us: backoff_us},
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
@@ -235,7 +236,7 @@ defmodule Imgd.Observability.Instrumentation do
       node_id: node_info.id,
       node_type_id: node_info.type_id,
       attempt: attempt,
-      backoff_ms: backoff_ms
+      backoff_us: backoff_us
     )
   end
 
@@ -259,7 +260,7 @@ defmodule Imgd.Observability.Instrumentation do
         (System.monotonic_time() - start_time) |> System.convert_time_unit(:native, :microsecond)
 
       :telemetry.execute(
-        [:imgd, :engine, :expression, :evaluate],
+        [:imgd, :expression, :evaluate],
         %{duration_us: duration_us},
         %{execution_id: execution_id, expression_type: expression_type, status: :ok}
       )
@@ -272,7 +273,7 @@ defmodule Imgd.Observability.Instrumentation do
           |> System.convert_time_unit(:native, :microsecond)
 
         :telemetry.execute(
-          [:imgd, :engine, :expression, :evaluate],
+          [:imgd, :expression, :evaluate],
           %{duration_us: duration_us},
           %{execution_id: execution_id, expression_type: expression_type, status: :error}
         )
@@ -326,24 +327,24 @@ defmodule Imgd.Observability.Instrumentation do
 
   defp emit_execution_start(%Execution{} = execution) do
     :telemetry.execute(
-      [:imgd, :engine, :execution, :start],
+      [:imgd, :execution, :start],
       %{system_time: System.system_time()},
       execution_metadata(execution)
     )
   end
 
-  defp emit_execution_stop(%Execution{} = execution, status, duration_ms) do
+  defp emit_execution_stop(%Execution{} = execution, status, duration_us) do
     :telemetry.execute(
-      [:imgd, :engine, :execution, :stop],
-      %{duration_ms: duration_ms},
+      [:imgd, :execution, :stop],
+      %{duration_us: duration_us},
       execution_metadata(execution) |> Map.put(:status, status)
     )
   end
 
-  defp emit_execution_exception(%Execution{} = execution, exception, duration_ms) do
+  defp emit_execution_exception(%Execution{} = execution, exception, duration_us) do
     :telemetry.execute(
-      [:imgd, :engine, :execution, :exception],
-      %{duration_ms: duration_ms},
+      [:imgd, :execution, :exception],
+      %{duration_us: duration_us},
       execution_metadata(execution) |> Map.put(:exception, exception)
     )
   end
@@ -391,9 +392,9 @@ defmodule Imgd.Observability.Instrumentation do
     }
   end
 
-  defp monotonic_duration_ms(start_time) do
+  defp monotonic_duration_us(start_time) do
     (System.monotonic_time() - start_time)
-    |> System.convert_time_unit(:native, :millisecond)
+    |> System.convert_time_unit(:native, :microsecond)
   end
 
   defp record_span_error(reason) do
