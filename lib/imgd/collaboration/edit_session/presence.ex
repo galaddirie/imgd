@@ -13,31 +13,28 @@ defmodule Imgd.Collaboration.EditSession.Presence do
     otp_app: :imgd,
     pubsub_server: Imgd.PubSub
 
-
   @type presence_meta :: %{
-    user: map(),
-    cursor: %{x: number(), y: number()} | nil,
-    selected_nodes: [String.t()],
-    focused_node: String.t() | nil,
-    joined_at: DateTime.t()
-  }
+          user: map(),
+          cursor: %{x: number(), y: number()} | nil,
+          selected_nodes: [String.t()],
+          focused_node: String.t() | nil,
+          joined_at: DateTime.t()
+        }
 
   @doc "Topic for a workflow's edit session presence."
   def topic(workflow_id), do: "edit_presence:#{workflow_id}"
 
   @doc "Track a user joining an edit session."
-  def track_user(workflow_id, user, socket_or_pid) do
-    track(socket_or_pid, topic(workflow_id), user.id, %{
-      user: %{
-        id: user.id,
-        email: user.email,
-        name: user.name || user.email
-      },
-      cursor: nil,
-      selected_nodes: [],
-      focused_node: nil,
-      joined_at: DateTime.utc_now()
-    })
+  def track_user(workflow_id, user, %Phoenix.LiveView.Socket{}) do
+    track(self(), topic(workflow_id), user.id, build_meta(user))
+  end
+
+  def track_user(workflow_id, user, %Phoenix.Socket{} = socket) do
+    track(socket, topic(workflow_id), user.id, build_meta(user))
+  end
+
+  def track_user(workflow_id, user, pid) when is_pid(pid) do
+    track(pid, topic(workflow_id), user.id, build_meta(user))
   end
 
   @doc "Update user's cursor position."
@@ -84,5 +81,21 @@ defmodule Imgd.Collaboration.EditSession.Presence do
     workflow_id
     |> list_users()
     |> Map.get(user_id)
+  end
+
+  defp build_meta(user) do
+    name = Map.get(user, :name) || user.email
+
+    %{
+      user: %{
+        id: user.id,
+        email: user.email,
+        name: name
+      },
+      cursor: nil,
+      selected_nodes: [],
+      focused_node: nil,
+      joined_at: DateTime.utc_now()
+    }
   end
 end

@@ -77,6 +77,8 @@ defmodule Imgd.Workflows do
   """
   @spec get_workflow(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
           {:ok, Workflow.t()} | {:error, :not_found}
+  def get_workflow(%Scope{} = scope, id), do: get_workflow(id, scope)
+
   def get_workflow(id, scope) do
     case Repo.get(Workflow, id) do
       nil ->
@@ -98,6 +100,9 @@ defmodule Imgd.Workflows do
   """
   @spec get_workflow_with_draft(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
           {:ok, Workflow.t()} | {:error, :not_found}
+  def get_workflow_with_draft(%Scope{} = scope, id),
+    do: get_workflow_with_draft(id, scope)
+
   def get_workflow_with_draft(id, scope) do
     case Repo.get(Workflow, id) |> Repo.preload(:draft) do
       nil ->
@@ -170,8 +175,69 @@ defmodule Imgd.Workflows do
   """
   @spec archive_workflow(Workflow.t(), Scope.t()) ::
           {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
+  def archive_workflow(%Scope{} = scope, %Workflow{} = workflow) do
+    archive_workflow(workflow, scope)
+  end
+
   def archive_workflow(%Workflow{} = workflow, scope) do
     update_workflow(workflow, %{status: :archived}, scope)
+  end
+
+  @doc """
+  Duplicates a workflow for the current user.
+
+  Returns `{:ok, workflow}` if successful, `{:error, reason}` otherwise.
+  """
+  @spec duplicate_workflow(Workflow.t(), Scope.t()) ::
+          {:ok, Workflow.t()} | {:error, :access_denied | term()}
+  def duplicate_workflow(%Scope{} = scope, %Workflow{} = workflow) do
+    duplicate_workflow(workflow, scope)
+  end
+
+  def duplicate_workflow(%Workflow{} = workflow, %Scope{} = scope) do
+    if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
+      Repo.transaction(fn ->
+        workflow = Repo.preload(workflow, :draft)
+
+        draft =
+          workflow.draft ||
+            %WorkflowDraft{nodes: [], connections: [], triggers: [], settings: %{}}
+
+        workflow_attrs = %{
+          name: "Copy of #{workflow.name}",
+          description: workflow.description,
+          status: :draft,
+          public: false,
+          current_version_tag: nil,
+          published_version_id: nil
+        }
+
+        {:ok, duplicated} =
+          %Workflow{user_id: scope.user.id}
+          |> Workflow.changeset(workflow_attrs)
+          |> Repo.insert()
+
+        draft_attrs = %{
+          nodes: Enum.map(draft.nodes || [], &Map.from_struct/1),
+          connections: Enum.map(draft.connections || [], &Map.from_struct/1),
+          triggers: Enum.map(draft.triggers || [], &Map.from_struct/1),
+          settings: draft.settings || %{}
+        }
+
+        {:ok, _draft} =
+          %WorkflowDraft{workflow_id: duplicated.id}
+          |> WorkflowDraft.changeset(draft_attrs)
+          |> Repo.insert()
+
+        duplicated
+      end)
+      |> case do
+        {:ok, duplicated} -> {:ok, duplicated}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, :access_denied}
+    end
   end
 
   @doc """

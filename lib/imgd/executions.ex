@@ -85,6 +85,8 @@ defmodule Imgd.Executions do
   """
   @spec get_execution(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
           {:ok, Execution.t()} | {:error, :not_found}
+  def get_execution(%Scope{} = scope, id), do: get_execution(id, scope)
+
   def get_execution(id, scope) do
     case Repo.get(Execution, id) |> Repo.preload([:workflow, :triggered_by_user]) do
       nil ->
@@ -131,37 +133,57 @@ defmodule Imgd.Executions do
   def create_execution(attrs, scope) do
     # Check if user can view the workflow
     workflow_id = attrs[:workflow_id]
+    execution_type = Map.get(attrs, :execution_type, :production)
 
     case Repo.get(Workflow, workflow_id) do
       nil ->
         {:error, :workflow_not_found}
 
       workflow ->
-        if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
-          # Get the published version for execution
-          published_version_id = workflow.published_version_id
+        can_view = Imgd.Workflows.Sharing.can_view?(workflow, scope)
+        can_edit = Imgd.Workflows.Sharing.can_edit?(workflow, scope)
 
-          if is_nil(published_version_id) do
-            {:error, :workflow_not_published}
-          else
-            # Add triggered_by_user_id if scope has user
-            attrs =
-              if scope && scope.user do
-                Map.put(attrs, :triggered_by_user_id, scope.user.id)
-              else
-                attrs
-              end
+        cond do
+          execution_type in [:preview, :partial] and not can_edit ->
+            {:error, :access_denied}
 
-            # Add workflow_version_id
-            attrs = Map.put(attrs, :workflow_version_id, published_version_id)
+          not can_view ->
+            {:error, :access_denied}
 
-            %Execution{}
-            |> Execution.changeset(attrs)
-            |> Repo.insert()
-          end
-        else
-          {:error, :access_denied}
+          true ->
+            # Get the published version for production executions
+            published_version_id = workflow.published_version_id
+
+            cond do
+              not is_nil(published_version_id) ->
+                attrs =
+                  attrs
+                  |> maybe_put_triggered_by_user(scope)
+                  |> Map.put(:workflow_version_id, published_version_id)
+
+                %Execution{}
+                |> Execution.changeset(attrs)
+                |> Repo.insert()
+
+              execution_type in [:preview, :partial] ->
+                attrs = maybe_put_triggered_by_user(attrs, scope)
+
+                %Execution{}
+                |> Execution.changeset(attrs)
+                |> Repo.insert()
+
+              true ->
+                {:error, :workflow_not_published}
+            end
         end
+    end
+  end
+
+  defp maybe_put_triggered_by_user(attrs, scope) do
+    if scope && scope.user do
+      Map.put(attrs, :triggered_by_user_id, scope.user.id)
+    else
+      attrs
     end
   end
 

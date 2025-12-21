@@ -10,7 +10,9 @@ defmodule Imgd.Repo.Migrations.CreateEditOperations do
       add :payload, :map, null: false
       add :user_id, references(:users, type: :binary_id), null: false
       add :client_seq, :integer
-      add :workflow_id, references(:workflows, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :workflow_id, references(:workflows, type: :binary_id, on_delete: :delete_all),
+        null: false
 
       add :inserted_at, :utc_datetime_usec, null: false
     end

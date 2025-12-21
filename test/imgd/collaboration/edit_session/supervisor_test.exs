@@ -19,6 +19,7 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
         %{id: "node_1", type_id: "debug", name: "Debug Node", position: %{x: 100, y: 100}}
       ]
     }
+
     {:ok, _} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
 
     %{workflow: workflow, scope: scope}
@@ -44,23 +45,25 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
 
     test "handles concurrent session requests", %{workflow: workflow} do
       # Simulate concurrent requests
-      tasks = for _ <- 1..5 do
-        Task.async(fn -> Supervisor.ensure_session(workflow.id) end)
-      end
+      tasks =
+        for _ <- 1..5 do
+          Task.async(fn -> Supervisor.ensure_session(workflow.id) end)
+        end
 
       results = Task.await_many(tasks)
 
       # All should succeed and return the same pid (or already_started)
       assert Enum.all?(results, fn
-        {:ok, pid} -> Process.alive?(pid)
-        {:error, {:already_started, pid}} -> Process.alive?(pid)
-      end)
+               {:ok, pid} -> Process.alive?(pid)
+               {:error, {:already_started, pid}} -> Process.alive?(pid)
+             end)
 
       # Extract pids from results
-      pids = Enum.map(results, fn
-        {:ok, pid} -> pid
-        {:error, {:already_started, pid}} -> pid
-      end)
+      pids =
+        Enum.map(results, fn
+          {:ok, pid} -> pid
+          {:error, {:already_started, pid}} -> pid
+        end)
 
       assert Enum.all?(pids, &(&1 == hd(pids)))
     end
@@ -113,6 +116,7 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
           %{id: "node_1", type_id: "debug", name: "Debug Node", position: %{x: 100, y: 100}}
         ]
       }
+
       {:ok, _} = Workflows.update_workflow_draft(workflow2, draft_attrs, scope)
 
       {:ok, pid1} = Supervisor.ensure_session(workflow.id)
@@ -133,7 +137,8 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
       refute Process.alive?(pid1)
 
       # Supervisor should restart it
-      :timer.sleep(100) # Allow restart
+      # Allow restart
+      :timer.sleep(100)
       {:ok, pid2} = Supervisor.ensure_session(workflow.id)
 
       assert Process.alive?(pid2)
@@ -147,26 +152,32 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
       # In practice, you'd want to monitor this in production
 
       # Create many workflows and sessions
-      workflows = for i <- 1..3 do  # Reduced to 3 to avoid too many processes
-        {:ok, user} = Accounts.register_user(%{email: "user#{i}@example.com", password: "password123"})
-        scope = Scope.for_user(user)
-        {:ok, wf} = Workflows.create_workflow(%{name: "Workflow #{i}"}, scope)
+      # Reduced to 3 to avoid too many processes
+      workflows =
+        for i <- 1..3 do
+          {:ok, user} =
+            Accounts.register_user(%{email: "user#{i}@example.com", password: "password123"})
 
-        # Create draft for each workflow
-        draft_attrs = %{
-          nodes: [
-            %{id: "node_1", type_id: "debug", name: "Debug Node", position: %{x: 100, y: 100}}
-          ]
-        }
-        {:ok, _} = Workflows.update_workflow_draft(wf, draft_attrs, scope)
-        wf
-      end
+          scope = Scope.for_user(user)
+          {:ok, wf} = Workflows.create_workflow(%{name: "Workflow #{i}"}, scope)
+
+          # Create draft for each workflow
+          draft_attrs = %{
+            nodes: [
+              %{id: "node_1", type_id: "debug", name: "Debug Node", position: %{x: 100, y: 100}}
+            ]
+          }
+
+          {:ok, _} = Workflows.update_workflow_draft(wf, draft_attrs, scope)
+          wf
+        end
 
       # Start sessions for all
-      pids = for wf <- workflows do
-        {:ok, pid} = Supervisor.ensure_session(wf.id)
-        pid
-      end
+      pids =
+        for wf <- workflows do
+          {:ok, pid} = Supervisor.ensure_session(wf.id)
+          pid
+        end
 
       # All should be alive
       assert Enum.all?(pids, &Process.alive?/1)

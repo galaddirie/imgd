@@ -11,7 +11,12 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       draft = %WorkflowDraft{
         workflow_id: Ecto.UUID.generate(),
         nodes: [
-          %Node{id: "node_1", type_id: "http_request", name: "HTTP Request", position: %{x: 100, y: 100}},
+          %Node{
+            id: "node_1",
+            type_id: "http_request",
+            name: "HTTP Request",
+            position: %{x: 100, y: 100}
+          },
           %Node{id: "node_2", type_id: "debug", name: "Debug Node", position: %{x: 300, y: 100}}
         ],
         connections: []
@@ -41,7 +46,8 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
         type: :add_node,
         payload: %{
           node: %{
-            id: "node_1", # Already exists
+            # Already exists
+            id: "node_1",
             type_id: "text_formatter",
             name: "Text Formatter"
           }
@@ -102,22 +108,27 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
     end
 
     test "rejects add_connection with duplicate id", %{draft: draft} do
-      draft_with_conn = %{draft | connections: [
-        %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
-      ]}
+      draft_with_conn = %{
+        draft
+        | connections: [
+            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+          ]
+      }
 
       operation = %{
         type: :add_connection,
         payload: %{
           connection: %{
-            id: "conn_1", # Duplicate
+            # Duplicate
+            id: "conn_1",
             source_node_id: "node_1",
             target_node_id: "node_2"
           }
         }
       }
 
-      assert {:error, {:connection_already_exists, "conn_1"}} = Operations.validate(draft_with_conn, operation)
+      assert {:error, {:connection_already_exists, "conn_1"}} =
+               Operations.validate(draft_with_conn, operation)
     end
 
     test "rejects add_connection with non-existent source node", %{draft: draft} do
@@ -126,25 +137,30 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
         payload: %{
           connection: %{
             id: "conn_1",
-            source_node_id: "node_999", # Doesn't exist
+            # Doesn't exist
+            source_node_id: "node_999",
             target_node_id: "node_2"
           }
         }
       }
 
-      assert {:error, {:source_node_not_found, "node_999"}} = Operations.validate(draft, operation)
+      assert {:error, {:source_node_not_found, "node_999"}} =
+               Operations.validate(draft, operation)
     end
 
     test "rejects add_connection that creates a cycle", %{draft: draft} do
       # Create a draft with a cycle: node_1 -> node_2 -> node_1
-      draft_with_cycle = %{draft |
-        nodes: draft.nodes ++ [
-          %Node{id: "node_3", type_id: "text_formatter", name: "Node 3"}
-        ],
-        connections: [
-          %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"},
-          %Connection{id: "conn_2", source_node_id: "node_2", target_node_id: "node_3"}
-        ]
+      draft_with_cycle = %{
+        draft
+        | nodes:
+            draft.nodes ++
+              [
+                %Node{id: "node_3", type_id: "text_formatter", name: "Node 3"}
+              ],
+          connections: [
+            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"},
+            %Connection{id: "conn_2", source_node_id: "node_2", target_node_id: "node_3"}
+          ]
       }
 
       # Try to add node_3 -> node_1, creating a cycle
@@ -169,7 +185,8 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
           connection: %{
             id: "conn_1",
             source_node_id: "node_1",
-            target_node_id: "node_1" # Same node
+            # Same node
+            target_node_id: "node_1"
           }
         }
       }
@@ -178,9 +195,12 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
     end
 
     test "validates remove_connection operation successfully", %{draft: draft} do
-      draft_with_conn = %{draft | connections: [
-        %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
-      ]}
+      draft_with_conn = %{
+        draft
+        | connections: [
+            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+          ]
+      }
 
       operation = %{
         type: :remove_connection,
@@ -219,8 +239,13 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       draft = %WorkflowDraft{
         workflow_id: Ecto.UUID.generate(),
         nodes: [
-          %Node{id: "node_1", type_id: "http_request", name: "HTTP Request",
-                position: %{x: 100, y: 100}, config: %{url: "https://api.example.com"}}
+          %Node{
+            id: "node_1",
+            type_id: "http_request",
+            name: "HTTP Request",
+            position: %{x: 100, y: 100},
+            config: %{url: "https://api.example.com"}
+          }
         ],
         connections: []
       }
@@ -254,13 +279,16 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
     end
 
     test "applies remove_node operation with connections", %{draft: draft} do
-      draft_with_connections = %{draft |
-        nodes: draft.nodes ++ [
-          %Node{id: "node_2", type_id: "debug", name: "Debug Node"}
-        ],
-        connections: [
-          %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
-        ]
+      draft_with_connections = %{
+        draft
+        | nodes:
+            draft.nodes ++
+              [
+                %Node{id: "node_2", type_id: "debug", name: "Debug Node"}
+              ],
+          connections: [
+            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+          ]
       }
 
       operation = %{type: :remove_node, payload: %{node_id: "node_1"}}
@@ -320,10 +348,13 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
     end
 
     test "applies add_connection operation", %{draft: draft} do
-      draft_with_node = %{draft |
-        nodes: draft.nodes ++ [
-          %Node{id: "node_2", type_id: "debug", name: "Debug Node"}
-        ]
+      draft_with_node = %{
+        draft
+        | nodes:
+            draft.nodes ++
+              [
+                %Node{id: "node_2", type_id: "debug", name: "Debug Node"}
+              ]
       }
 
       operation = %{
@@ -346,10 +377,11 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
     end
 
     test "applies remove_connection operation", %{draft: draft} do
-      draft_with_conn = %{draft |
-        connections: [
-          %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
-        ]
+      draft_with_conn = %{
+        draft
+        | connections: [
+            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+          ]
       }
 
       operation = %{type: :remove_connection, payload: %{connection_id: "conn_1"}}

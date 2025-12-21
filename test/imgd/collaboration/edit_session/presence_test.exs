@@ -39,10 +39,16 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
 
     test "handles multiple users in same session", %{workflow: workflow} do
       # Create another user
-      {:ok, user2} = Accounts.register_user(%{email: "user2@example.com", password: "password123"})
+      {:ok, user2} =
+        Accounts.register_user(%{email: "user2@example.com", password: "password123"})
 
       # Track both users
-      Presence.track_user(workflow.id, %{id: "user1", email: "user1@test.com", name: "User 1"}, self())
+      Presence.track_user(
+        workflow.id,
+        %{id: "user1", email: "user1@test.com", name: "User 1"},
+        self()
+      )
+
       Presence.track_user(workflow.id, user2, self())
 
       :timer.sleep(50)
@@ -168,17 +174,20 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
   describe "user disconnection" do
     test "removes user from presence on process death", %{workflow: workflow, user: user} do
       # Track user with a separate process
-      pid = spawn(fn ->
-        Presence.track_user(workflow.id, user, self())
-        :timer.sleep(1000) # Keep alive
-      end)
+      pid =
+        spawn(fn ->
+          Presence.track_user(workflow.id, user, self())
+          # Keep alive
+          :timer.sleep(1000)
+        end)
 
       :timer.sleep(50)
       assert Presence.count(workflow.id) == 1
 
       # Kill the process
       Process.exit(pid, :kill)
-      :timer.sleep(100) # Allow presence cleanup
+      # Allow presence cleanup
+      :timer.sleep(100)
 
       assert Presence.count(workflow.id) == 0
     end
@@ -218,11 +227,12 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
       Presence.track_user(workflow.id, %{id: "user1", email: "user1@test.com"}, self())
 
       # Simulate concurrent updates
-      tasks = for i <- 1..10 do
-        Task.async(fn ->
-          Presence.update_cursor(workflow.id, "user1", %{x: i * 10, y: i * 10})
-        end)
-      end
+      tasks =
+        for i <- 1..10 do
+          Task.async(fn ->
+            Presence.update_cursor(workflow.id, "user1", %{x: i * 10, y: i * 10})
+          end)
+        end
 
       # Wait for all updates
       Enum.each(tasks, &Task.await/1)

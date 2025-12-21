@@ -43,9 +43,10 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
   def persist(%{workflow_id: _workflow_id, draft: draft, op_buffer: ops, seq: seq}) do
     Repo.transaction(fn ->
       # 1. Batch insert any new operations
-      new_ops = Enum.filter(ops, fn op ->
-        not operation_persisted?(op)
-      end)
+      new_ops =
+        Enum.filter(ops, fn op ->
+          not operation_persisted?(op)
+        end)
 
       if new_ops != [] do
         entries = Enum.map(new_ops, &operation_to_entry/1)
@@ -60,7 +61,6 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
         settings: Map.put(draft.settings || %{}, "last_persisted_seq", seq)
       })
       |> Repo.update!()
-
     end)
     |> case do
       {:ok, _} -> :ok
@@ -76,7 +76,8 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
     persist(%{
       workflow_id: workflow_id,
       draft: draft,
-      op_buffer: [],  # Clear buffer since we're taking snapshot
+      # Clear buffer since we're taking snapshot
+      op_buffer: [],
       seq: seq
     })
   end

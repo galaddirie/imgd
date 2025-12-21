@@ -8,11 +8,11 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   alias Imgd.Graph
 
   @type operation :: %{
-    type: atom(),
-    payload: map(),
-    id: String.t(),
-    user_id: String.t()
-  }
+          type: atom(),
+          payload: map(),
+          id: String.t(),
+          user_id: String.t()
+        }
 
   @doc "Validate an operation against current draft state."
   @spec validate(WorkflowDraft.t(), operation()) :: :ok | {:error, term()}
@@ -40,8 +40,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
         validate_remove_connection(draft, operation.payload)
 
       # Editor operations don't need draft validation
-      type when type in [:pin_node_output, :unpin_node_output,
-                         :disable_node, :enable_node] ->
+      type when type in [:pin_node_output, :unpin_node_output, :disable_node, :enable_node] ->
         :ok
 
       _ ->
@@ -50,7 +49,8 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   end
 
   @doc "Apply an operation to a draft, returning updated draft."
-  @spec apply(WorkflowDraft.t(), operation() | map()) :: {:ok, WorkflowDraft.t()} | {:error, term()}
+  @spec apply(WorkflowDraft.t(), operation() | map()) ::
+          {:ok, WorkflowDraft.t()} | {:error, term()}
   def apply(draft, operation) do
     # Handle both operation structs and maps
     type = Map.get(operation, :type) || Map.get(operation, "type")
@@ -141,9 +141,11 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   defp do_apply(draft, :remove_node, %{node_id: node_id}) do
     # Remove node and all its connections
     new_nodes = Enum.reject(draft.nodes, &(&1.id == node_id))
-    new_connections = Enum.reject(draft.connections, fn conn ->
-      conn.source_node_id == node_id or conn.target_node_id == node_id
-    end)
+
+    new_connections =
+      Enum.reject(draft.connections, fn conn ->
+        conn.source_node_id == node_id or conn.target_node_id == node_id
+      end)
 
     {:ok, %{draft | nodes: new_nodes, connections: new_connections}}
   end
@@ -216,13 +218,14 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   end
 
   defp update_node(draft, node_id, update_fn) do
-    new_nodes = Enum.map(draft.nodes, fn node ->
-      if node.id == node_id do
-        update_fn.(node)
-      else
-        node
-      end
-    end)
+    new_nodes =
+      Enum.map(draft.nodes, fn node ->
+        if node.id == node_id do
+          update_fn.(node)
+        else
+          node
+        end
+      end)
 
     {:ok, %{draft | nodes: new_nodes}}
   end
@@ -287,6 +290,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
     case Map.get(map, key) do
       nested when is_map(nested) ->
         Map.put(map, key, remove_at_path(nested, rest))
+
       _ ->
         map
     end

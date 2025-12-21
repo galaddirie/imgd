@@ -29,7 +29,1020 @@ user =
       user
   end
 
+scope = %Scope{user: user}
+
 IO.puts("\n🔐 Login Credentials:")
 IO.puts("  Email: temp@imgd.io")
 IO.puts("  Password: password123456")
 IO.puts("")
+
+IO.puts("📋 Creating example workflows...")
+
+# Helper function to create workflow with draft
+create_workflow_with_draft = fn attrs, nodes, connections, triggers ->
+  {:ok, workflow} = Workflows.create_workflow(attrs, scope)
+
+  draft_attrs = %{
+    nodes: nodes,
+    connections: connections,
+    triggers: triggers,
+    settings: %{timeout_ms: 300_000, max_retries: 3}
+  }
+
+  {:ok, _draft} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+  workflow
+end
+
+# ============================================================================
+# Example 1: Linear Workflow - Simple sequential data processing
+# ============================================================================
+IO.puts("Creating Linear Workflow...")
+
+linear_nodes = [
+  %{
+    id: "start",
+    type_id: "debug",
+    name: "Start",
+    config: %{"message" => "Starting linear workflow"},
+    position: %{"x" => 100, "y" => 100}
+  },
+  %{
+    id: "format_greeting",
+    type_id: "format",
+    name: "Format Greeting",
+    config: %{"template" => "Hello {{json.name}}! Welcome to the workflow."},
+    position: %{"x" => 300, "y" => 100}
+  },
+  %{
+    id: "add_timestamp",
+    type_id: "format",
+    name: "Add Timestamp",
+    config: %{"template" => "{{json.greeting}} Processed at {{json.timestamp}}"},
+    position: %{"x" => 500, "y" => 100}
+  },
+  %{
+    id: "end",
+    type_id: "debug",
+    name: "End",
+    config: %{"message" => "Linear workflow completed"},
+    position: %{"x" => 700, "y" => 100}
+  }
+]
+
+linear_connections = [
+  %{
+    id: "start_to_format",
+    source_node_id: "start",
+    source_output: "main",
+    target_node_id: "format_greeting",
+    target_input: "main"
+  },
+  %{
+    id: "format_to_add_timestamp",
+    source_node_id: "format_greeting",
+    source_output: "main",
+    target_node_id: "add_timestamp",
+    target_input: "main"
+  },
+  %{
+    id: "add_timestamp_to_end",
+    source_node_id: "add_timestamp",
+    source_output: "main",
+    target_node_id: "end",
+    target_input: "main"
+  }
+]
+
+linear_triggers = [
+  %{
+    id: "manual_trigger",
+    type: "manual",
+    name: "Manual Start",
+    config: %{"input_schema" => %{"name" => "string", "timestamp" => "string"}}
+  }
+]
+
+linear_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "Linear Data Processing",
+      description: "A simple linear workflow that processes data sequentially",
+      public: true
+    },
+    linear_nodes,
+    linear_connections,
+    linear_triggers
+  )
+
+IO.puts("✅ Created Linear Workflow: #{linear_workflow.name}")
+
+# ============================================================================
+# Example 2: Branching Workflow - Conditional processing with if/else
+# ============================================================================
+IO.puts("Creating Branching Workflow...")
+
+branching_nodes = [
+  %{
+    id: "input",
+    type_id: "debug",
+    name: "Input",
+    config: %{"message" => "Received input data"},
+    position: %{"x" => 100, "y" => 150}
+  },
+  %{
+    id: "check_status",
+    type_id: "condition",
+    name: "Check Status",
+    config: %{"condition" => "{{json.status}} == 'active'"},
+    position: %{"x" => 300, "y" => 150}
+  },
+  %{
+    id: "active_path",
+    type_id: "format",
+    name: "Active User",
+    config: %{"template" => "✅ User {{json.name}} is active"},
+    position: %{"x" => 500, "y" => 100}
+  },
+  %{
+    id: "inactive_path",
+    type_id: "format",
+    name: "Inactive User",
+    config: %{"template" => "❌ User {{json.name}} is inactive"},
+    position: %{"x" => 500, "y" => 200}
+  },
+  %{
+    id: "output",
+    type_id: "debug",
+    name: "Output",
+    config: %{"message" => "Branching workflow completed"},
+    position: %{"x" => 700, "y" => 150}
+  }
+]
+
+branching_connections = [
+  %{
+    id: "input_to_check",
+    source_node_id: "input",
+    source_output: "main",
+    target_node_id: "check_status",
+    target_input: "main"
+  },
+  %{
+    id: "check_to_active",
+    source_node_id: "check_status",
+    source_output: "true",
+    target_node_id: "active_path",
+    target_input: "main"
+  },
+  %{
+    id: "check_to_inactive",
+    source_node_id: "check_status",
+    source_output: "false",
+    target_node_id: "inactive_path",
+    target_input: "main"
+  },
+  %{
+    id: "active_to_output",
+    source_node_id: "active_path",
+    source_output: "main",
+    target_node_id: "output",
+    target_input: "main"
+  },
+  %{
+    id: "inactive_to_output",
+    source_node_id: "inactive_path",
+    source_output: "main",
+    target_node_id: "output",
+    target_input: "main"
+  }
+]
+
+branching_triggers = [
+  %{
+    id: "user_trigger",
+    type: "manual",
+    name: "Process User",
+    config: %{"input_schema" => %{"name" => "string", "status" => "string"}}
+  }
+]
+
+branching_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "Branching User Status",
+      description: "Conditional workflow that routes based on user status",
+      public: true
+    },
+    branching_nodes,
+    branching_connections,
+    branching_triggers
+  )
+
+IO.puts("✅ Created Branching Workflow: #{branching_workflow.name}")
+
+# ============================================================================
+# Example 3: Diamond Workflow - Switch-based multi-branch routing
+# ============================================================================
+IO.puts("Creating Diamond Workflow...")
+
+diamond_nodes = [
+  %{
+    id: "start",
+    type_id: "debug",
+    name: "Start",
+    config: %{"message" => "Starting diamond workflow"},
+    position: %{"x" => 100, "y" => 200}
+  },
+  %{
+    id: "route_by_type",
+    type_id: "switch",
+    name: "Route by Type",
+    config: %{
+      "value" => "{{json.type}}",
+      "cases" => [
+        %{"match" => "user", "output" => "user_branch"},
+        %{"match" => "admin", "output" => "admin_branch"},
+        %{"match" => "guest", "output" => "guest_branch"}
+      ],
+      "default_output" => "other_branch"
+    },
+    position: %{"x" => 300, "y" => 200}
+  },
+  %{
+    id: "user_processing",
+    type_id: "format",
+    name: "Process User",
+    config: %{"template" => "👤 Processing user: {{json.name}}"},
+    position: %{"x" => 500, "y" => 100}
+  },
+  %{
+    id: "admin_processing",
+    type_id: "format",
+    name: "Process Admin",
+    config: %{"template" => "👑 Processing admin: {{json.name}} (Level: {{json.level}})"},
+    position: %{"x" => 500, "y" => 200}
+  },
+  %{
+    id: "guest_processing",
+    type_id: "format",
+    name: "Process Guest",
+    config: %{"template" => "👋 Processing guest: {{json.name}}"},
+    position: %{"x" => 500, "y" => 300}
+  },
+  %{
+    id: "other_processing",
+    type_id: "format",
+    name: "Process Other",
+    config: %{"template" => "❓ Processing unknown type: {{json.type}}"},
+    position: %{"x" => 500, "y" => 400}
+  },
+  %{
+    id: "merge",
+    type_id: "debug",
+    name: "Merge Point",
+    config: %{"message" => "All branches merged"},
+    position: %{"x" => 700, "y" => 200}
+  }
+]
+
+diamond_connections = [
+  %{
+    id: "start_to_route",
+    source_node_id: "start",
+    source_output: "main",
+    target_node_id: "route_by_type",
+    target_input: "main"
+  },
+  %{
+    id: "route_to_user",
+    source_node_id: "route_by_type",
+    source_output: "user_branch",
+    target_node_id: "user_processing",
+    target_input: "main"
+  },
+  %{
+    id: "route_to_admin",
+    source_node_id: "route_by_type",
+    source_output: "admin_branch",
+    target_node_id: "admin_processing",
+    target_input: "main"
+  },
+  %{
+    id: "route_to_guest",
+    source_node_id: "route_by_type",
+    source_output: "guest_branch",
+    target_node_id: "guest_processing",
+    target_input: "main"
+  },
+  %{
+    id: "route_to_other",
+    source_node_id: "route_by_type",
+    source_output: "other_branch",
+    target_node_id: "other_processing",
+    target_input: "main"
+  },
+  %{
+    id: "user_to_merge",
+    source_node_id: "user_processing",
+    source_output: "main",
+    target_node_id: "merge",
+    target_input: "main"
+  },
+  %{
+    id: "admin_to_merge",
+    source_node_id: "admin_processing",
+    source_output: "main",
+    target_node_id: "merge",
+    target_input: "main"
+  },
+  %{
+    id: "guest_to_merge",
+    source_node_id: "guest_processing",
+    source_output: "main",
+    target_node_id: "merge",
+    target_input: "main"
+  },
+  %{
+    id: "other_to_merge",
+    source_node_id: "other_processing",
+    source_output: "main",
+    target_node_id: "merge",
+    target_input: "main"
+  }
+]
+
+diamond_triggers = [
+  %{
+    id: "type_trigger",
+    type: "manual",
+    name: "Process by Type",
+    config: %{"input_schema" => %{"type" => "string", "name" => "string", "level" => "number"}}
+  }
+]
+
+diamond_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "Diamond User Routing",
+      description: "Multi-branch routing based on user type with diamond pattern",
+      public: true
+    },
+    diamond_nodes,
+    diamond_connections,
+    diamond_triggers
+  )
+
+IO.puts("✅ Created Diamond Workflow: #{diamond_workflow.name}")
+
+# ============================================================================
+# Example 4: Simple Workflow - Basic format and math operations
+# ============================================================================
+IO.puts("Creating Simple Workflow...")
+
+simple_nodes = [
+  %{
+    id: "input_data",
+    type_id: "debug",
+    name: "Input Data",
+    config: %{"message" => "Received calculation input"},
+    position: %{"x" => 100, "y" => 100}
+  },
+  %{
+    id: "format_message",
+    type_id: "format",
+    name: "Format Message",
+    config: %{"template" => "Calculating {{json.operation}} for {{json.a}} and {{json.b}}"},
+    position: %{"x" => 300, "y" => 100}
+  },
+  %{
+    id: "perform_calc",
+    type_id: "math",
+    name: "Calculate",
+    config: %{
+      "operation" => "add",
+      "value" => "{{json.a}}",
+      "operand" => "{{json.b}}"
+    },
+    position: %{"x" => 500, "y" => 100}
+  },
+  %{
+    id: "format_result",
+    type_id: "format",
+    name: "Format Result",
+    config: %{"template" => "Result: {{json.result}}"},
+    position: %{"x" => 700, "y" => 100}
+  }
+]
+
+simple_connections = [
+  %{
+    id: "input_to_format",
+    source_node_id: "input_data",
+    source_output: "main",
+    target_node_id: "format_message",
+    target_input: "main"
+  },
+  %{
+    id: "format_to_calc",
+    source_node_id: "format_message",
+    source_output: "main",
+    target_node_id: "perform_calc",
+    target_input: "main"
+  },
+  %{
+    id: "calc_to_result",
+    source_node_id: "perform_calc",
+    source_output: "main",
+    target_node_id: "format_result",
+    target_input: "main"
+  }
+]
+
+simple_triggers = [
+  %{
+    id: "calc_trigger",
+    type: "manual",
+    name: "Simple Calculator",
+    config: %{"input_schema" => %{"a" => "number", "b" => "number", "operation" => "string"}}
+  }
+]
+
+simple_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "Simple Calculator",
+      description: "Basic arithmetic operations with formatting",
+      public: true
+    },
+    simple_nodes,
+    simple_connections,
+    simple_triggers
+  )
+
+IO.puts("✅ Created Simple Workflow: #{simple_workflow.name}")
+
+# ============================================================================
+# Example 5: Complex Workflow - Multi-step data transformation pipeline
+# ============================================================================
+IO.puts("Creating Complex Workflow...")
+
+complex_nodes = [
+  %{
+    id: "receive_order",
+    type_id: "debug",
+    name: "Receive Order",
+    config: %{"message" => "New order received"},
+    position: %{"x" => 100, "y" => 150}
+  },
+  %{
+    id: "validate_order",
+    type_id: "condition",
+    name: "Validate Order",
+    config: %{"condition" => "{{json.total}} > 0"},
+    position: %{"x" => 300, "y" => 150}
+  },
+  %{
+    id: "invalid_order",
+    type_id: "format",
+    name: "Invalid Order",
+    config: %{"template" => "❌ Invalid order: total must be > 0"},
+    position: %{"x" => 300, "y" => 250}
+  },
+  %{
+    id: "calculate_tax",
+    type_id: "math",
+    name: "Calculate Tax",
+    config: %{
+      "operation" => "multiply",
+      "value" => "{{json.subtotal}}",
+      "operand" => "0.08"
+    },
+    position: %{"x" => 500, "y" => 100}
+  },
+  %{
+    id: "calculate_total",
+    type_id: "math",
+    name: "Calculate Total",
+    config: %{
+      "operation" => "add",
+      "value" => "{{json.subtotal}}",
+      "operand" => "{{json.tax}}"
+    },
+    position: %{"x" => 700, "y" => 100}
+  },
+  %{
+    id: "apply_discount",
+    type_id: "condition",
+    name: "Apply Discount",
+    config: %{"condition" => "{{json.subtotal}} > 100"},
+    position: %{"x" => 500, "y" => 200}
+  },
+  %{
+    id: "calculate_discount",
+    type_id: "math",
+    name: "Calculate Discount",
+    config: %{
+      "operation" => "multiply",
+      "value" => "{{json.total}}",
+      "operand" => "0.1"
+    },
+    position: %{"x" => 700, "y" => 200}
+  },
+  %{
+    id: "apply_discount_total",
+    type_id: "math",
+    name: "Apply Discount",
+    config: %{
+      "operation" => "subtract",
+      "value" => "{{json.total}}",
+      "operand" => "{{json.discount}}"
+    },
+    position: %{"x" => 900, "y" => 200}
+  },
+  %{
+    id: "format_invoice",
+    type_id: "format",
+    name: "Format Invoice",
+    config: %{
+      "template" =>
+        "Invoice for {{json.customer}}\nSubtotal: ${{json.subtotal}}\nTax: ${{json.tax}}\nDiscount: ${{json.discount || 0}}\nTotal: ${{json.final_total}}"
+    },
+    position: %{"x" => 1100, "y" => 150}
+  },
+  %{
+    id: "complete_order",
+    type_id: "debug",
+    name: "Order Complete",
+    config: %{"message" => "Order processing completed"},
+    position: %{"x" => 1300, "y" => 150}
+  }
+]
+
+complex_connections = [
+  %{
+    id: "receive_to_validate",
+    source_node_id: "receive_order",
+    source_output: "main",
+    target_node_id: "validate_order",
+    target_input: "main"
+  },
+  %{
+    id: "validate_to_invalid",
+    source_node_id: "validate_order",
+    source_output: "false",
+    target_node_id: "invalid_order",
+    target_input: "main"
+  },
+  %{
+    id: "validate_to_tax",
+    source_node_id: "validate_order",
+    source_output: "true",
+    target_node_id: "calculate_tax",
+    target_input: "main"
+  },
+  %{
+    id: "tax_to_total",
+    source_node_id: "calculate_tax",
+    source_output: "main",
+    target_node_id: "calculate_total",
+    target_input: "main"
+  },
+  %{
+    id: "total_to_discount_check",
+    source_node_id: "calculate_total",
+    source_output: "main",
+    target_node_id: "apply_discount",
+    target_input: "main"
+  },
+  %{
+    id: "discount_check_to_calc_discount",
+    source_node_id: "apply_discount",
+    source_output: "true",
+    target_node_id: "calculate_discount",
+    target_input: "main"
+  },
+  %{
+    id: "calc_discount_to_apply",
+    source_node_id: "calculate_discount",
+    source_output: "main",
+    target_node_id: "apply_discount_total",
+    target_input: "main"
+  },
+  %{
+    id: "apply_discount_to_format",
+    source_node_id: "apply_discount_total",
+    source_output: "main",
+    target_node_id: "format_invoice",
+    target_input: "main"
+  },
+  %{
+    id: "total_to_format",
+    source_node_id: "calculate_total",
+    source_output: "main",
+    target_node_id: "format_invoice",
+    target_input: "main"
+  },
+  %{
+    id: "format_to_complete",
+    source_node_id: "format_invoice",
+    source_output: "main",
+    target_node_id: "complete_order",
+    target_input: "main"
+  }
+]
+
+complex_triggers = [
+  %{
+    id: "order_trigger",
+    type: "manual",
+    name: "Process Order",
+    config: %{"input_schema" => %{"customer" => "string", "subtotal" => "number"}}
+  }
+]
+
+complex_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "Complex Order Processing",
+      description: "Multi-step order processing with validation, calculations, and discounts",
+      public: true
+    },
+    complex_nodes,
+    complex_connections,
+    complex_triggers
+  )
+
+IO.puts("✅ Created Complex Workflow: #{complex_workflow.name}")
+
+# ============================================================================
+# Example 6: Map/Aggregate Workflow - Split and aggregate pattern
+# ============================================================================
+IO.puts("Creating Map/Aggregate Workflow...")
+
+map_aggregate_nodes = [
+  %{
+    id: "input_list",
+    type_id: "debug",
+    name: "Input List",
+    config: %{"message" => "Received list of numbers"},
+    position: %{"x" => 100, "y" => 150}
+  },
+  %{
+    id: "split_items",
+    type_id: "splitter",
+    name: "Split Items",
+    config: %{"field" => "numbers"},
+    position: %{"x" => 300, "y" => 150}
+  },
+  %{
+    id: "double_value",
+    type_id: "math",
+    name: "Double Value",
+    config: %{
+      "operation" => "multiply",
+      "value" => "{{json}}",
+      "operand" => "2"
+    },
+    position: %{"x" => 500, "y" => 100}
+  },
+  %{
+    id: "square_value",
+    type_id: "math",
+    name: "Square Value",
+    config: %{
+      "operation" => "power",
+      "value" => "{{json}}",
+      "operand" => "2"
+    },
+    position: %{"x" => 500, "y" => 200}
+  },
+  %{
+    id: "aggregate_doubled",
+    type_id: "aggregator",
+    name: "Aggregate Doubled",
+    config: %{"operation" => "sum"},
+    position: %{"x" => 700, "y" => 100}
+  },
+  %{
+    id: "aggregate_squared",
+    type_id: "aggregator",
+    name: "Aggregate Squared",
+    config: %{"operation" => "sum"},
+    position: %{"x" => 700, "y" => 200}
+  },
+  %{
+    id: "format_results",
+    type_id: "format",
+    name: "Format Results",
+    config: %{
+      "template" =>
+        "Original: {{json.original_numbers}}\nDoubled Sum: {{json.doubled_sum}}\nSquared Sum: {{json.squared_sum}}"
+    },
+    position: %{"x" => 900, "y" => 150}
+  },
+  %{
+    id: "output",
+    type_id: "debug",
+    name: "Output",
+    config: %{"message" => "Map/aggregate processing completed"},
+    position: %{"x" => 1100, "y" => 150}
+  }
+]
+
+map_aggregate_connections = [
+  %{
+    id: "input_to_split",
+    source_node_id: "input_list",
+    source_output: "main",
+    target_node_id: "split_items",
+    target_input: "main"
+  },
+  %{
+    id: "split_to_double",
+    source_node_id: "split_items",
+    source_output: "main",
+    target_node_id: "double_value",
+    target_input: "main"
+  },
+  %{
+    id: "split_to_square",
+    source_node_id: "split_items",
+    source_output: "main",
+    target_node_id: "square_value",
+    target_input: "main"
+  },
+  %{
+    id: "double_to_aggregate",
+    source_node_id: "double_value",
+    source_output: "main",
+    target_node_id: "aggregate_doubled",
+    target_input: "main"
+  },
+  %{
+    id: "square_to_aggregate",
+    source_node_id: "square_value",
+    source_output: "main",
+    target_node_id: "aggregate_squared",
+    target_input: "main"
+  },
+  %{
+    id: "aggregate_doubled_to_format",
+    source_node_id: "aggregate_doubled",
+    source_output: "main",
+    target_node_id: "format_results",
+    target_input: "doubled_sum"
+  },
+  %{
+    id: "aggregate_squared_to_format",
+    source_node_id: "aggregate_squared",
+    source_output: "main",
+    target_node_id: "format_results",
+    target_input: "squared_sum"
+  },
+  %{
+    id: "input_to_format",
+    source_node_id: "input_list",
+    source_output: "main",
+    target_node_id: "format_results",
+    target_input: "original_numbers"
+  },
+  %{
+    id: "format_to_output",
+    source_node_id: "format_results",
+    source_output: "main",
+    target_node_id: "output",
+    target_input: "main"
+  }
+]
+
+map_aggregate_triggers = [
+  %{
+    id: "numbers_trigger",
+    type: "manual",
+    name: "Process Numbers",
+    config: %{"input_schema" => %{"numbers" => "array"}}
+  }
+]
+
+map_aggregate_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "Map/Aggregate Numbers",
+      description: "Split numbers, process in parallel (double & square), then aggregate results",
+      public: true
+    },
+    map_aggregate_nodes,
+    map_aggregate_connections,
+    map_aggregate_triggers
+  )
+
+IO.puts("✅ Created Map/Aggregate Workflow: #{map_aggregate_workflow.name}")
+
+# ============================================================================
+# Example 7: Conditional Workflow - Multiple condition checks
+# ============================================================================
+IO.puts("Creating Conditional Workflow...")
+
+conditional_nodes = [
+  %{
+    id: "user_input",
+    type_id: "debug",
+    name: "User Input",
+    config: %{"message" => "Received user data"},
+    position: %{"x" => 100, "y" => 150}
+  },
+  %{
+    id: "check_age",
+    type_id: "condition",
+    name: "Check Age",
+    config: %{"condition" => "{{json.age}} >= 18"},
+    position: %{"x" => 300, "y" => 100}
+  },
+  %{
+    id: "underage",
+    type_id: "format",
+    name: "Underage",
+    config: %{"template" => "❌ User {{json.name}} is underage ({{json.age}})"},
+    position: %{"x" => 300, "y" => 200}
+  },
+  %{
+    id: "check_membership",
+    type_id: "condition",
+    name: "Check Membership",
+    config: %{"condition" => "{{json.membership}} == 'premium'"},
+    position: %{"x" => 500, "y" => 100}
+  },
+  %{
+    id: "premium_user",
+    type_id: "format",
+    name: "Premium User",
+    config: %{"template" => "⭐ Premium user {{json.name}} - VIP access granted"},
+    position: %{"x" => 700, "y" => 50}
+  },
+  %{
+    id: "check_activity",
+    type_id: "condition",
+    name: "Check Activity",
+    config: %{"condition" => "{{json.last_login_days}} < 30"},
+    position: %{"x" => 500, "y" => 150}
+  },
+  %{
+    id: "active_regular",
+    type_id: "format",
+    name: "Active Regular",
+    config: %{"template" => "✅ Regular user {{json.name}} - active member"},
+    position: %{"x" => 700, "y" => 100}
+  },
+  %{
+    id: "inactive_regular",
+    type_id: "format",
+    name: "Inactive Regular",
+    config: %{
+      "template" => "⚠️ Regular user {{json.name}} - inactive ({{json.last_login_days}} days)"
+    },
+    position: %{"x" => 700, "y" => 200}
+  },
+  %{
+    id: "inactive_premium",
+    type_id: "format",
+    name: "Inactive Premium",
+    config: %{
+      "template" => "⭐ Premium user {{json.name}} - inactive ({{json.last_login_days}} days)"
+    },
+    position: %{"x" => 900, "y" => 50}
+  },
+  %{
+    id: "final_output",
+    type_id: "debug",
+    name: "Final Output",
+    config: %{"message" => "User classification completed"},
+    position: %{"x" => 1100, "y" => 150}
+  }
+]
+
+conditional_connections = [
+  %{
+    id: "input_to_age_check",
+    source_node_id: "user_input",
+    source_output: "main",
+    target_node_id: "check_age",
+    target_input: "main"
+  },
+  %{
+    id: "age_to_underage",
+    source_node_id: "check_age",
+    source_output: "false",
+    target_node_id: "underage",
+    target_input: "main"
+  },
+  %{
+    id: "age_to_membership",
+    source_node_id: "check_age",
+    source_output: "true",
+    target_node_id: "check_membership",
+    target_input: "main"
+  },
+  %{
+    id: "membership_to_premium",
+    source_node_id: "check_membership",
+    source_output: "true",
+    target_node_id: "premium_user",
+    target_input: "main"
+  },
+  %{
+    id: "membership_to_activity",
+    source_node_id: "check_membership",
+    source_output: "false",
+    target_node_id: "check_activity",
+    target_input: "main"
+  },
+  %{
+    id: "activity_to_active_regular",
+    source_node_id: "check_activity",
+    source_output: "true",
+    target_node_id: "active_regular",
+    target_input: "main"
+  },
+  %{
+    id: "activity_to_inactive_regular",
+    source_node_id: "check_activity",
+    source_output: "false",
+    target_node_id: "inactive_regular",
+    target_input: "main"
+  },
+  %{
+    id: "premium_to_inactive_check",
+    source_node_id: "premium_user",
+    source_output: "main",
+    target_node_id: "check_activity",
+    target_input: "main"
+  },
+  %{
+    id: "inactive_premium_to_output",
+    source_node_id: "inactive_premium",
+    source_output: "main",
+    target_node_id: "final_output",
+    target_input: "main"
+  },
+  %{
+    id: "active_regular_to_output",
+    source_node_id: "active_regular",
+    source_output: "main",
+    target_node_id: "final_output",
+    target_input: "main"
+  },
+  %{
+    id: "inactive_regular_to_output",
+    source_node_id: "inactive_regular",
+    source_output: "main",
+    target_node_id: "final_output",
+    target_input: "main"
+  },
+  %{
+    id: "underage_to_output",
+    source_node_id: "underage",
+    source_output: "main",
+    target_node_id: "final_output",
+    target_input: "main"
+  }
+]
+
+conditional_triggers = [
+  %{
+    id: "user_trigger",
+    type: "manual",
+    name: "Classify User",
+    config: %{
+      "input_schema" => %{
+        "name" => "string",
+        "age" => "number",
+        "membership" => "string",
+        "last_login_days" => "number"
+      }
+    }
+  }
+]
+
+conditional_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "Multi-Conditional User Classification",
+      description: "Complex conditional logic with multiple branching paths",
+      public: true
+    },
+    conditional_nodes,
+    conditional_connections,
+    conditional_triggers
+  )
+
+IO.puts("✅ Created Conditional Workflow: #{conditional_workflow.name}")
+
+IO.puts("\n🎉 All example workflows created successfully!")
+IO.puts("You can now log in and explore these workflow patterns:")
+IO.puts("  - Linear Data Processing")
+IO.puts("  - Branching User Status")
+IO.puts("  - Diamond User Routing")
+IO.puts("  - Simple Calculator")
+IO.puts("  - Complex Order Processing")
+IO.puts("  - Map/Aggregate Numbers")
+IO.puts("  - Multi-Conditional User Classification")

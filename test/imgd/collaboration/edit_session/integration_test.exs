@@ -22,18 +22,31 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
     # Create initial draft
     draft_attrs = %{
       nodes: [
-        %{id: "input_node", type_id: "manual_input", name: "Manual Input",
-          position: %{x: 100, y: 100}},
-        %{id: "transform_node", type_id: "data_transform", name: "Data Transform",
-          position: %{x: 300, y: 100}},
-        %{id: "output_node", type_id: "data_output", name: "Data Output",
-          position: %{x: 500, y: 100}}
+        %{
+          id: "input_node",
+          type_id: "manual_input",
+          name: "Manual Input",
+          position: %{x: 100, y: 100}
+        },
+        %{
+          id: "transform_node",
+          type_id: "data_transform",
+          name: "Data Transform",
+          position: %{x: 300, y: 100}
+        },
+        %{
+          id: "output_node",
+          type_id: "data_output",
+          name: "Data Output",
+          position: %{x: 500, y: 100}
+        }
       ],
       connections: [
         %{id: "conn_1", source_node_id: "input_node", target_node_id: "transform_node"},
         %{id: "conn_2", source_node_id: "transform_node", target_node_id: "output_node"}
       ]
     }
+
     {:ok, _} = Workflows.update_workflow_draft(workflow, draft_attrs, scope1)
 
     %{workflow: workflow, user1: user1, user2: user2, scope1: scope1, scope2: scope2}
@@ -41,7 +54,9 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
 
   describe "full collaborative editing workflow" do
     test "multiple users can collaboratively edit a workflow", %{
-      workflow: workflow, user1: user1, user2: user2
+      workflow: workflow,
+      user1: user1,
+      user2: user2
     } do
       # Start collaborative session
       {:ok, _session_pid} = Supervisor.ensure_session(workflow.id)
@@ -132,8 +147,10 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       # Verify final state
       {:ok, state} = Server.get_sync_state(workflow.id)
       assert state.seq == 5
-      assert length(state.draft.nodes) == 4  # 3 original + 1 added
-      assert length(state.draft.connections) == 3  # 2 original + 1 added
+      # 3 original + 1 added
+      assert length(state.draft.nodes) == 4
+      # 2 original + 1 added
+      assert length(state.draft.connections) == 3
 
       # Check editor state
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
@@ -160,7 +177,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       # In real scenario, this would happen when LiveView disconnects
 
       # User reconnects and gets sync
-      {:ok, sync_state} = Server.get_sync_state(workflow.id, 0)  # Simulate reconnecting client
+      # Simulate reconnecting client
+      {:ok, sync_state} = Server.get_sync_state(workflow.id, 0)
 
       assert sync_state.type == :incremental
       assert length(sync_state.ops) == 1
@@ -168,29 +186,58 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       assert hd(sync_state.ops).type == :update_node_metadata
     end
 
-    test "maintains operation order across concurrent users", %{workflow: workflow, user1: user1, user2: user2} do
+    test "maintains operation order across concurrent users", %{
+      workflow: workflow,
+      user1: user1,
+      user2: user2
+    } do
       {:ok, _session_pid} = Supervisor.ensure_session(workflow.id)
 
       # Simulate concurrent operations from different users
       operations = [
-        {user1.id, %{type: :update_node_metadata, payload: %{node_id: "input_node", changes: %{name: "Name 1"}}, id: "op_1", user_id: user1.id}},
-        {user2.id, %{type: :update_node_position, payload: %{node_id: "input_node", position: %{x: 200, y: 150}}, id: "op_2", user_id: user2.id}},
-        {user1.id, %{type: :update_node_metadata, payload: %{node_id: "input_node", changes: %{notes: "Note 1"}}, id: "op_3", user_id: user1.id}},
-        {user2.id, %{type: :pin_node_output, payload: %{node_id: "input_node", output_data: %{}}, id: "op_4", user_id: user2.id}}
+        {user1.id,
+         %{
+           type: :update_node_metadata,
+           payload: %{node_id: "input_node", changes: %{name: "Name 1"}},
+           id: "op_1",
+           user_id: user1.id
+         }},
+        {user2.id,
+         %{
+           type: :update_node_position,
+           payload: %{node_id: "input_node", position: %{x: 200, y: 150}},
+           id: "op_2",
+           user_id: user2.id
+         }},
+        {user1.id,
+         %{
+           type: :update_node_metadata,
+           payload: %{node_id: "input_node", changes: %{notes: "Note 1"}},
+           id: "op_3",
+           user_id: user1.id
+         }},
+        {user2.id,
+         %{
+           type: :pin_node_output,
+           payload: %{node_id: "input_node", output_data: %{}},
+           id: "op_4",
+           user_id: user2.id
+         }}
       ]
 
       # Apply operations (they will be serialized by GenServer)
-      results = Enum.map(operations, fn {_user_id, op} ->
-        Server.apply_operation(workflow.id, op)
-      end)
+      results =
+        Enum.map(operations, fn {_user_id, op} ->
+          Server.apply_operation(workflow.id, op)
+        end)
 
       # All should succeed with sequential sequence numbers
       assert [
-        {:ok, %{seq: 1, status: :applied}},
-        {:ok, %{seq: 2, status: :applied}},
-        {:ok, %{seq: 3, status: :applied}},
-        {:ok, %{seq: 4, status: :applied}}
-      ] = results
+               {:ok, %{seq: 1, status: :applied}},
+               {:ok, %{seq: 2, status: :applied}},
+               {:ok, %{seq: 3, status: :applied}},
+               {:ok, %{seq: 4, status: :applied}}
+             ] = results
 
       # Verify final sequence number
       {:ok, state} = Server.get_sync_state(workflow.id)
@@ -216,9 +263,12 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       })
 
       # Run preview execution
-      assert {:ok, execution} = Imgd.Collaboration.PreviewExecution.run(
-        workflow.id, scope1, mode: :full
-      )
+      assert {:ok, execution} =
+               Imgd.Collaboration.PreviewExecution.run(
+                 workflow.id,
+                 scope1,
+                 mode: :full
+               )
 
       # Verify execution includes editor state
       assert execution.metadata["pinned_nodes"] == ["input_node"]
@@ -250,8 +300,12 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       :sys.get_state(Server.via_tuple(workflow.id))
 
       # Check database
-      operations = Repo.all(from o in Imgd.Collaboration.EditOperation,
-                           where: o.workflow_id == ^workflow.id)
+      operations =
+        Repo.all(
+          from o in Imgd.Collaboration.EditOperation,
+            where: o.workflow_id == ^workflow.id
+        )
+
       assert length(operations) == 1
 
       op = hd(operations)
@@ -263,7 +317,11 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
   end
 
   describe "conflict resolution and locking" do
-    test "prevents concurrent config edits on same node", %{workflow: workflow, user1: user1, user2: user2} do
+    test "prevents concurrent config edits on same node", %{
+      workflow: workflow,
+      user1: user1,
+      user2: user2
+    } do
       {:ok, _session_pid} = Supervisor.ensure_session(workflow.id)
 
       # User 1 acquires lock
@@ -271,7 +329,9 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
 
       # User 2 cannot acquire lock
       user1_id = user1.id
-      assert {:error, {:locked_by, ^user1_id}} = Server.acquire_node_lock(workflow.id, "input_node", user2.id)
+
+      assert {:error, {:locked_by, ^user1_id}} =
+               Server.acquire_node_lock(workflow.id, "input_node", user2.id)
 
       # User 1 can still modify the node
       operation = %{
@@ -300,7 +360,11 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       # In real scenario, this would happen after 30 seconds
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
       old_timestamp = DateTime.add(DateTime.utc_now(), -40, :second)
-      updated_state = %{editor_state | lock_timestamps: %{editor_state.lock_timestamps | "input_node" => old_timestamp}}
+
+      updated_state = %{
+        editor_state
+        | lock_timestamps: %{editor_state.lock_timestamps | "input_node" => old_timestamp}
+      }
 
       # Directly update state (normally done internally)
       GenServer.call(Server.via_tuple(workflow.id), {:update_editor_state, updated_state})
@@ -349,14 +413,15 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       {:ok, _session_pid} = Supervisor.ensure_session(workflow.id)
 
       # Apply many operations
-      operations = for i <- 1..50 do
-        %{
-          type: :update_node_metadata,
-          payload: %{node_id: "input_node", changes: %{name: "Update #{i}"}},
-          id: "bulk_op_#{i}",
-          user_id: user1.id
-        }
-      end
+      operations =
+        for i <- 1..50 do
+          %{
+            type: :update_node_metadata,
+            payload: %{node_id: "input_node", changes: %{name: "Update #{i}"}},
+            id: "bulk_op_#{i}",
+            user_id: user1.id
+          }
+        end
 
       start_time = System.monotonic_time(:millisecond)
 

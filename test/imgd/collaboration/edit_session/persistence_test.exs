@@ -19,9 +19,15 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
     # Create a basic draft
     draft_attrs = %{
       nodes: [
-        %{id: "node_1", type_id: "http_request", name: "HTTP Request", position: %{x: 100, y: 100}}
+        %{
+          id: "node_1",
+          type_id: "http_request",
+          name: "HTTP Request",
+          position: %{x: 100, y: 100}
+        }
       ]
     }
+
     {:ok, _} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
 
     %{workflow: workflow, scope: scope}
@@ -67,7 +73,12 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
 
       # Update draft to indicate last snapshot at seq 1
       draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
-      updated_draft = Ecto.Changeset.change(draft, settings: Map.put(draft.settings || %{}, "last_persisted_seq", 1))
+
+      updated_draft =
+        Ecto.Changeset.change(draft,
+          settings: Map.put(draft.settings || %{}, "last_persisted_seq", 1)
+        )
+
       Repo.update!(updated_draft)
 
       # Should load operations after seq 1
@@ -106,6 +117,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       ]
 
       draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
+
       state = %{
         workflow_id: workflow.id,
         draft: draft,
@@ -136,14 +148,17 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
         client_seq: 1,
         workflow_id: workflow.id
       }
+
       Repo.insert!(op)
 
       # Try to persist again - should not fail
       draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
+
       state = %{
         workflow_id: workflow.id,
         draft: draft,
-        op_buffer: [op], # Same operation
+        # Same operation
+        op_buffer: [op],
         seq: 1
       }
 
@@ -154,10 +169,13 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
 
       # Modify draft
-      modified_draft = %{draft |
-        nodes: draft.nodes ++ [
-          %Node{id: "node_2", type_id: "json_parser", name: "JSON Parser"}
-        ]
+      modified_draft = %{
+        draft
+        | nodes:
+            draft.nodes ++
+              [
+                %Node{id: "node_2", type_id: "json_parser", name: "JSON Parser"}
+              ]
       }
 
       state = %{
@@ -181,10 +199,13 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
 
       # Modify draft
-      modified_draft = %{draft |
-        nodes: draft.nodes ++ [
-          %Node{id: "node_2", type_id: "json_parser", name: "JSON Parser"}
-        ]
+      modified_draft = %{
+        draft
+        | nodes:
+            draft.nodes ++
+              [
+                %Node{id: "node_2", type_id: "json_parser", name: "JSON Parser"}
+              ]
       }
 
       assert :ok = Persistence.snapshot(workflow.id, modified_draft, 5)
@@ -201,7 +222,8 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       # Corrupt the draft somehow (invalid JSON)
       draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
       # This would be caught by normal validation, but let's test error handling
-      corrupted_draft = %{draft | nodes: nil} # Invalid
+      # Invalid
+      corrupted_draft = %{draft | nodes: nil}
 
       state = %{
         workflow_id: workflow.id,

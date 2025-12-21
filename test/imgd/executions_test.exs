@@ -75,6 +75,30 @@ defmodule Imgd.ExecutionsTest do
                Executions.create_execution(execution_attrs, scope)
     end
 
+    test "create_execution/2 allows preview execution on draft workflow for editors", %{
+      scope: scope
+    } do
+      {:ok, draft_workflow} = Workflows.create_workflow(%{name: "Draft Preview"}, scope)
+
+      draft_attrs = %{
+        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        connections: [],
+        triggers: [%{type: :manual, config: %{}}]
+      }
+
+      {:ok, _draft} = Workflows.update_workflow_draft(draft_workflow, draft_attrs, scope)
+
+      execution_attrs = %{
+        workflow_id: draft_workflow.id,
+        trigger: %{type: :manual, data: %{}},
+        execution_type: :preview
+      }
+
+      assert {:ok, execution} = Executions.create_execution(execution_attrs, scope)
+      assert execution.workflow_id == draft_workflow.id
+      assert execution.execution_type == :preview
+    end
+
     test "create_execution/2 fails when user lacks access", %{workflow: workflow} do
       {:ok, other_user} =
         Accounts.register_user(%{email: "other@example.com", password: "password123"})

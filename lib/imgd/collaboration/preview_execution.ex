@@ -14,10 +14,10 @@ defmodule Imgd.Collaboration.PreviewExecution do
   @type execution_mode :: :full | :from_node | :to_node | :selected
 
   @type preview_opts :: [
-    mode: execution_mode(),
-    target_nodes: [String.t()],
-    input_data: map()
-  ]
+          mode: execution_mode(),
+          target_nodes: [String.t()],
+          input_data: map()
+        ]
 
   @doc """
   Run a preview execution with editor state applied.
@@ -30,7 +30,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
   5. Runs the execution
   """
   @spec run(String.t(), Scope.t(), preview_opts()) ::
-    {:ok, Executions.Execution.t()} | {:error, term()}
+          {:ok, Executions.Execution.t()} | {:error, term()}
   def run(workflow_id, scope, opts \\ []) do
     mode = Keyword.get(opts, :mode, :full)
     target_nodes = Keyword.get(opts, :target_nodes, [])
@@ -39,8 +39,8 @@ defmodule Imgd.Collaboration.PreviewExecution do
     with {:ok, draft} <- get_draft(workflow_id),
          {:ok, editor_state} <- get_editor_state(workflow_id),
          {:ok, effective_draft} <- apply_editor_state(draft, editor_state, mode, target_nodes),
-         {:ok, execution} <- create_preview_execution(workflow_id, scope, effective_draft, editor_state, input_data) do
-
+         {:ok, execution} <-
+           create_preview_execution(workflow_id, scope, effective_draft, editor_state, input_data) do
       # Run synchronously for preview (could also queue)
       run_execution(execution, effective_draft, editor_state, scope)
     end
@@ -66,10 +66,12 @@ defmodule Imgd.Collaboration.PreviewExecution do
 
     # 2. Filter connections for remaining nodes
     node_ids = MapSet.new(Enum.map(nodes, & &1.id))
-    connections = Enum.filter(draft.connections, fn conn ->
-      MapSet.member?(node_ids, conn.source_node_id) and
-      MapSet.member?(node_ids, conn.target_node_id)
-    end)
+
+    connections =
+      Enum.filter(draft.connections, fn conn ->
+        MapSet.member?(node_ids, conn.source_node_id) and
+          MapSet.member?(node_ids, conn.target_node_id)
+      end)
 
     # 3. Build subgraph based on execution mode
     {nodes, connections} = build_subgraph(nodes, connections, mode, target_nodes)
@@ -95,10 +97,12 @@ defmodule Imgd.Collaboration.PreviewExecution do
     keep_ids = MapSet.new([target_id | downstream])
 
     filtered_nodes = Enum.filter(nodes, &MapSet.member?(keep_ids, &1.id))
-    filtered_connections = Enum.filter(connections, fn conn ->
-      MapSet.member?(keep_ids, conn.source_node_id) and
-      MapSet.member?(keep_ids, conn.target_node_id)
-    end)
+
+    filtered_connections =
+      Enum.filter(connections, fn conn ->
+        MapSet.member?(keep_ids, conn.source_node_id) and
+          MapSet.member?(keep_ids, conn.target_node_id)
+      end)
 
     {filtered_nodes, filtered_connections}
   end
@@ -109,10 +113,12 @@ defmodule Imgd.Collaboration.PreviewExecution do
     keep_ids = MapSet.new([target_id | upstream])
 
     filtered_nodes = Enum.filter(nodes, &MapSet.member?(keep_ids, &1.id))
-    filtered_connections = Enum.filter(connections, fn conn ->
-      MapSet.member?(keep_ids, conn.source_node_id) and
-      MapSet.member?(keep_ids, conn.target_node_id)
-    end)
+
+    filtered_connections =
+      Enum.filter(connections, fn conn ->
+        MapSet.member?(keep_ids, conn.source_node_id) and
+          MapSet.member?(keep_ids, conn.target_node_id)
+      end)
 
     {filtered_nodes, filtered_connections}
   end
@@ -121,10 +127,12 @@ defmodule Imgd.Collaboration.PreviewExecution do
     keep_ids = MapSet.new(target_ids)
 
     filtered_nodes = Enum.filter(nodes, &MapSet.member?(keep_ids, &1.id))
-    filtered_connections = Enum.filter(connections, fn conn ->
-      MapSet.member?(keep_ids, conn.source_node_id) and
-      MapSet.member?(keep_ids, conn.target_node_id)
-    end)
+
+    filtered_connections =
+      Enum.filter(connections, fn conn ->
+        MapSet.member?(keep_ids, conn.source_node_id) and
+          MapSet.member?(keep_ids, conn.target_node_id)
+      end)
 
     {filtered_nodes, filtered_connections}
   end
@@ -135,26 +143,30 @@ defmodule Imgd.Collaboration.PreviewExecution do
       editor_state.pinned_outputs
       |> Enum.into(%{}, fn {node_id, data} -> {node_id, data} end)
 
-    Executions.create_execution(%{
-      workflow_id: workflow_id,
-      execution_type: :preview,
-      trigger: %{type: :manual, data: input_data},
-      context: initial_context,
-      triggered_by_user_id: scope.user.id,
-      metadata: %{
-        preview: true,
-        pinned_nodes: Map.keys(editor_state.pinned_outputs),
-        disabled_nodes: MapSet.to_list(editor_state.disabled_nodes)
-      }
-    }, scope)
+    Executions.create_execution(
+      %{
+        workflow_id: workflow_id,
+        execution_type: :preview,
+        trigger: %{type: :manual, data: input_data},
+        context: initial_context,
+        triggered_by_user_id: scope.user.id,
+        metadata: %{
+          preview: true,
+          pinned_nodes: Map.keys(editor_state.pinned_outputs),
+          disabled_nodes: MapSet.to_list(editor_state.disabled_nodes)
+        }
+      },
+      scope
+    )
   end
 
   defp run_execution(execution, draft, editor_state, scope) do
     # Build Runic workflow with pinned outputs injected
-    runic_workflow = RunicAdapter.to_runic_workflow(draft,
-      execution_id: execution.id,
-      pinned_outputs: editor_state.pinned_outputs
-    )
+    runic_workflow =
+      RunicAdapter.to_runic_workflow(draft,
+        execution_id: execution.id,
+        pinned_outputs: editor_state.pinned_outputs
+      )
 
     # Execute synchronously for preview
     case Runic.Workflow.react_until_satisfied(runic_workflow, %{}) do

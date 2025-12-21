@@ -5,17 +5,35 @@ defmodule Imgd.Collaboration.EditOperation do
   use Imgd.Schema
 
   @type op_type ::
-    :add_node | :remove_node | :update_node_config | :update_node_position |
-    :update_node_metadata | :add_connection | :remove_connection |
-    :pin_node_output | :unpin_node_output | :disable_node | :enable_node
+          :add_node
+          | :remove_node
+          | :update_node_config
+          | :update_node_position
+          | :update_node_metadata
+          | :add_connection
+          | :remove_connection
+          | :pin_node_output
+          | :unpin_node_output
+          | :disable_node
+          | :enable_node
 
   schema "edit_operations" do
-    field :operation_id, :string  # Client-generated UUID
-    field :seq, :integer          # Server-assigned sequence
-    field :type, Ecto.Enum, values: [
-      :add_node, :remove_node, :update_node_config, :update_node_position,
-      :update_node_metadata, :add_connection, :remove_connection
-    ]
+    # Client-generated UUID
+    field :operation_id, :string
+    # Server-assigned sequence
+    field :seq, :integer
+
+    field :type, Ecto.Enum,
+      values: [
+        :add_node,
+        :remove_node,
+        :update_node_config,
+        :update_node_position,
+        :update_node_metadata,
+        :add_connection,
+        :remove_connection
+      ]
+
     field :payload, :map
     field :user_id, :binary_id
     field :client_seq, :integer

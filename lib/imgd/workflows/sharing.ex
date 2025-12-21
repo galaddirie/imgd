@@ -118,6 +118,10 @@ defmodule Imgd.Workflows.Sharing do
   Returns true if the user has editor or owner access.
   """
   @spec can_edit?(Workflow.t(), Scope.t() | nil) :: boolean()
+  def can_edit?(%Scope{} = scope, %Workflow{} = workflow) do
+    can_edit?(workflow, scope)
+  end
+
   def can_edit?(%Workflow{} = workflow, scope) do
     can_access?(workflow, scope, :editor)
   end
@@ -194,6 +198,10 @@ defmodule Imgd.Workflows.Sharing do
   Returns the role (:owner, :editor, :viewer) or nil if no access.
   """
   @spec get_user_role(Workflow.t(), Scope.t() | nil) :: share_role() | nil
+  def get_user_role(%Scope{} = scope, %Workflow{} = workflow) do
+    get_user_role(workflow, scope)
+  end
+
   def get_user_role(%Workflow{} = workflow, nil), do: if(workflow.public, do: :viewer, else: nil)
 
   def get_user_role(%Workflow{} = workflow, %Scope{} = scope) do

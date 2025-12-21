@@ -103,6 +103,7 @@ defmodule Imgd.Collaboration.EditorStateTest do
 
     test "allows same user to refresh their lock" do
       initial_time = DateTime.add(DateTime.utc_now(), -10, :second)
+
       state = %EditorState{
         workflow_id: "wf_1",
         node_locks: %{"node_1" => "user_1"},
@@ -128,7 +129,9 @@ defmodule Imgd.Collaboration.EditorStateTest do
     end
 
     test "allows lock acquisition after timeout" do
-      expired_time = DateTime.add(DateTime.utc_now(), -40, :second) # > 30 second timeout
+      # > 30 second timeout
+      expired_time = DateTime.add(DateTime.utc_now(), -40, :second)
+
       state = %EditorState{
         workflow_id: "wf_1",
         node_locks: %{"node_1" => "user_1"},

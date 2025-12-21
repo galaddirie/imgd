@@ -20,9 +20,15 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     # Create a basic draft
     draft_attrs = %{
       nodes: [
-        %{id: "node_1", type_id: "http_request", name: "HTTP Request", position: %{x: 100, y: 100}}
+        %{
+          id: "node_1",
+          type_id: "http_request",
+          name: "HTTP Request",
+          position: %{x: 100, y: 100}
+        }
       ]
     }
+
     {:ok, _} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
 
     %{workflow: workflow, scope: scope, user: user}
@@ -102,7 +108,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
         type: :add_node,
         payload: %{
           node: %{
-            id: "node_1", # Duplicate ID
+            # Duplicate ID
+            id: "node_1",
             type_id: "json_parser",
             name: "Duplicate Node"
           }
@@ -111,7 +118,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
         user_id: "user_1"
       }
 
-      assert {:error, {:node_already_exists, "node_1"}} = Server.apply_operation(workflow.id, operation)
+      assert {:error, {:node_already_exists, "node_1"}} =
+               Server.apply_operation(workflow.id, operation)
     end
 
     test "handles operation deduplication", %{workflow: workflow} do
@@ -145,18 +153,33 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
     test "maintains operation sequence numbers", %{workflow: workflow} do
       operations = [
-        %{type: :update_node_metadata, payload: %{node_id: "node_1", changes: %{name: "Updated Name"}}, id: "op_1", user_id: "user_1"},
-        %{type: :update_node_position, payload: %{node_id: "node_1", position: %{x: 200, y: 150}}, id: "op_2", user_id: "user_1"},
-        %{type: :update_node_metadata, payload: %{node_id: "node_1", changes: %{notes: "Added notes"}}, id: "op_3", user_id: "user_1"}
+        %{
+          type: :update_node_metadata,
+          payload: %{node_id: "node_1", changes: %{name: "Updated Name"}},
+          id: "op_1",
+          user_id: "user_1"
+        },
+        %{
+          type: :update_node_position,
+          payload: %{node_id: "node_1", position: %{x: 200, y: 150}},
+          id: "op_2",
+          user_id: "user_1"
+        },
+        %{
+          type: :update_node_metadata,
+          payload: %{node_id: "node_1", changes: %{notes: "Added notes"}},
+          id: "op_3",
+          user_id: "user_1"
+        }
       ]
 
       results = Enum.map(operations, &Server.apply_operation(workflow.id, &1))
 
       assert [
-        {:ok, %{seq: 1, status: :applied}},
-        {:ok, %{seq: 2, status: :applied}},
-        {:ok, %{seq: 3, status: :applied}}
-      ] = results
+               {:ok, %{seq: 1, status: :applied}},
+               {:ok, %{seq: 2, status: :applied}},
+               {:ok, %{seq: 3, status: :applied}}
+             ] = results
 
       {:ok, state} = Server.get_sync_state(workflow.id)
       assert state.seq == 3
@@ -217,12 +240,15 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
     test "rejects lock for already locked node", %{workflow: workflow} do
       :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
-      assert {:error, {:locked_by, "user_1"}} = Server.acquire_node_lock(workflow.id, "node_1", "user_2")
+
+      assert {:error, {:locked_by, "user_1"}} =
+               Server.acquire_node_lock(workflow.id, "node_1", "user_2")
     end
 
     test "allows same user to refresh lock", %{workflow: workflow} do
       :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
-      :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1") # Should succeed
+      # Should succeed
+      :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
 
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
       assert editor_state.node_locks["node_1"] == "user_1"
@@ -253,15 +279,26 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
       assert sync_state.type == :full_sync
       assert sync_state.draft.workflow_id == workflow.id
-      assert sync_state.seq == 0 # No operations applied yet
+      # No operations applied yet
+      assert sync_state.seq == 0
       assert sync_state.editor_state.pinned_outputs == %{}
     end
 
     test "provides incremental sync when client has some operations", %{workflow: workflow} do
       # Apply some operations first
       operations = [
-        %{type: :update_node_metadata, payload: %{node_id: "node_1", changes: %{name: "Updated"}}, id: "op_1", user_id: "user_1"},
-        %{type: :update_node_position, payload: %{node_id: "node_1", position: %{x: 200, y: 150}}, id: "op_2", user_id: "user_1"}
+        %{
+          type: :update_node_metadata,
+          payload: %{node_id: "node_1", changes: %{name: "Updated"}},
+          id: "op_1",
+          user_id: "user_1"
+        },
+        %{
+          type: :update_node_position,
+          payload: %{node_id: "node_1", position: %{x: 200, y: 150}},
+          id: "op_2",
+          user_id: "user_1"
+        }
       ]
 
       Enum.each(operations, &Server.apply_operation(workflow.id, &1))
@@ -276,7 +313,13 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
     test "provides up-to-date sync when client is current", %{workflow: workflow} do
       # Apply operation, then sync with current seq
-      operation = %{type: :update_node_metadata, payload: %{node_id: "node_1", changes: %{name: "Updated"}}, id: "op_1", user_id: "user_1"}
+      operation = %{
+        type: :update_node_metadata,
+        payload: %{node_id: "node_1", changes: %{name: "Updated"}},
+        id: "op_1",
+        user_id: "user_1"
+      }
+
       {:ok, %{seq: seq}} = Server.apply_operation(workflow.id, operation)
 
       {:ok, sync_state} = Server.get_sync_state(workflow.id, seq)
@@ -295,9 +338,24 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     test "serializes concurrent operations correctly", %{workflow: workflow} do
       # Simulate concurrent operations from different users
       operations = [
-        %{type: :update_node_metadata, payload: %{node_id: "node_1", changes: %{name: "Name 1"}}, id: "op_1", user_id: "user_1"},
-        %{type: :update_node_metadata, payload: %{node_id: "node_1", changes: %{name: "Name 2"}}, id: "op_2", user_id: "user_2"},
-        %{type: :update_node_position, payload: %{node_id: "node_1", position: %{x: 300, y: 200}}, id: "op_3", user_id: "user_1"}
+        %{
+          type: :update_node_metadata,
+          payload: %{node_id: "node_1", changes: %{name: "Name 1"}},
+          id: "op_1",
+          user_id: "user_1"
+        },
+        %{
+          type: :update_node_metadata,
+          payload: %{node_id: "node_1", changes: %{name: "Name 2"}},
+          id: "op_2",
+          user_id: "user_2"
+        },
+        %{
+          type: :update_node_position,
+          payload: %{node_id: "node_1", position: %{x: 300, y: 200}},
+          id: "op_3",
+          user_id: "user_1"
+        }
       ]
 
       # Apply concurrently (in practice they'd come from different processes)
@@ -305,10 +363,10 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
       # All should succeed with increasing sequence numbers
       assert [
-        {:ok, %{seq: 1, status: :applied}},
-        {:ok, %{seq: 2, status: :applied}},
-        {:ok, %{seq: 3, status: :applied}}
-      ] = results
+               {:ok, %{seq: 1, status: :applied}},
+               {:ok, %{seq: 2, status: :applied}},
+               {:ok, %{seq: 3, status: :applied}}
+             ] = results
 
       # Final state should reflect the last operation (position change)
       {:ok, state} = Server.get_sync_state(workflow.id)

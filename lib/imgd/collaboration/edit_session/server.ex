@@ -25,14 +25,22 @@ defmodule Imgd.Collaboration.EditSession.Server do
     @moduledoc false
     defstruct [
       :workflow_id,
-      :draft,              # Current WorkflowDraft
-      :editor_state,       # EditorState struct
-      :seq,                # Current sequence number
-      :op_buffer,          # Recent operations for sync
-      :applied_ops,        # Set of applied operation IDs (dedup)
-      :dirty,              # Has unpersisted changes
-      :persist_timer,      # Timer ref for periodic persistence
-      :idle_timer          # Timer ref for idle shutdown
+      # Current WorkflowDraft
+      :draft,
+      # EditorState struct
+      :editor_state,
+      # Current sequence number
+      :seq,
+      # Recent operations for sync
+      :op_buffer,
+      # Set of applied operation IDs (dedup)
+      :applied_ops,
+      # Has unpersisted changes
+      :dirty,
+      # Timer ref for periodic persistence
+      :persist_timer,
+      # Timer ref for idle shutdown
+      :idle_timer
     ]
   end
 
@@ -147,6 +155,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
           :ok ->
             Logger.debug("Persisted edit session state")
             %{state | dirty: false}
+
           {:error, reason} ->
             Logger.error("Failed to persist: #{inspect(reason)}")
             state
@@ -187,7 +196,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
   defp load_initial_state(workflow_id) do
     with {:ok, draft} <- Workflows.get_draft(workflow_id),
          {:ok, last_seq, ops} <- Persistence.load_pending_ops(workflow_id) do
-
       # Replay any pending operations
       {draft, seq} = replay_operations(draft, ops, last_seq)
 
@@ -242,13 +250,14 @@ defmodule Imgd.Collaboration.EditSession.Server do
         }
 
         # 6. Update state
-        new_state = %{state |
-          draft: new_draft,
-          editor_state: new_editor_state,
-          seq: new_seq,
-          op_buffer: append_to_buffer(state.op_buffer, op_record),
-          applied_ops: MapSet.put(state.applied_ops, operation.id),
-          dirty: true
+        new_state = %{
+          state
+          | draft: new_draft,
+            editor_state: new_editor_state,
+            seq: new_seq,
+            op_buffer: append_to_buffer(state.op_buffer, op_record),
+            applied_ops: MapSet.put(state.applied_ops, operation.id),
+            dirty: true
         }
 
         # 7. Broadcast to all clients
@@ -262,15 +271,23 @@ defmodule Imgd.Collaboration.EditSession.Server do
   defp apply_to_state(draft, editor_state, operation) do
     case operation.type do
       # Workflow structure operations - modify draft
-      type when type in [:add_node, :remove_node, :update_node_config,
-                         :update_node_position, :update_node_metadata,
-                         :add_connection, :remove_connection] ->
+      type
+      when type in [
+             :add_node,
+             :remove_node,
+             :update_node_config,
+             :update_node_position,
+             :update_node_metadata,
+             :add_connection,
+             :remove_connection
+           ] ->
         {:ok, new_draft} = Operations.apply(draft, operation)
 
         # Clean up editor state if node was removed
         new_editor_state =
           if type == :remove_node do
             node_id = operation.payload.node_id
+
             editor_state
             |> EditorState.unpin_output(node_id)
             |> EditorState.enable_node(node_id)
@@ -282,33 +299,41 @@ defmodule Imgd.Collaboration.EditSession.Server do
 
       # Editor-only operations - modify editor state only
       :pin_node_output ->
-        new_editor_state = EditorState.pin_output(
-          editor_state,
-          operation.payload.node_id,
-          operation.payload.output_data
-        )
+        new_editor_state =
+          EditorState.pin_output(
+            editor_state,
+            operation.payload.node_id,
+            operation.payload.output_data
+          )
+
         {draft, new_editor_state}
 
       :unpin_node_output ->
-        new_editor_state = EditorState.unpin_output(
-          editor_state,
-          operation.payload.node_id
-        )
+        new_editor_state =
+          EditorState.unpin_output(
+            editor_state,
+            operation.payload.node_id
+          )
+
         {draft, new_editor_state}
 
       :disable_node ->
-        new_editor_state = EditorState.disable_node(
-          editor_state,
-          operation.payload.node_id,
-          operation.payload[:mode] || :skip
-        )
+        new_editor_state =
+          EditorState.disable_node(
+            editor_state,
+            operation.payload.node_id,
+            operation.payload[:mode] || :skip
+          )
+
         {draft, new_editor_state}
 
       :enable_node ->
-        new_editor_state = EditorState.enable_node(
-          editor_state,
-          operation.payload.node_id
-        )
+        new_editor_state =
+          EditorState.enable_node(
+            editor_state,
+            operation.payload.node_id
+          )
+
         {draft, new_editor_state}
     end
   end
