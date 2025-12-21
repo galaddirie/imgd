@@ -198,17 +198,13 @@ defmodule Imgd.Nodes.Registry do
   # Add new executor modules here as they are created.
   defp builtin_executor_modules do
     [
-      Imgd.Nodes.Executors.HttpRequest,
-      Imgd.Nodes.Executors.Transform,
+      Imgd.Nodes.Executors.Condition,
+      Imgd.Nodes.Executors.Switch,
       Imgd.Nodes.Executors.Format,
       Imgd.Nodes.Executors.Debug,
       Imgd.Nodes.Executors.Math,
-      Imgd.Nodes.Executors.Wait,
-      Imgd.Nodes.Executors.StringConcatenate,
-      Imgd.Nodes.Executors.StringSplit,
-      Imgd.Nodes.Executors.StringReplace,
-      Imgd.Nodes.Executors.StringCase,
-      Imgd.Nodes.Executors.StringTrim
+      Imgd.Nodes.Executors.Aggregator,
+      Imgd.Nodes.Executors.Splitter
     ]
   end
 
