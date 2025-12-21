@@ -8,6 +8,8 @@ defmodule Imgd.Runtime.Execution.Server do
   require Logger
   alias Runic.Workflow
   alias Imgd.Runtime.RunicAdapter
+  alias Imgd.Runtime.Events
+  alias Imgd.Runtime.Hooks.Observability
   alias Imgd.Executions.Execution
   alias Imgd.Repo
 
@@ -76,6 +78,9 @@ defmodule Imgd.Runtime.Execution.Server do
       update_status(state.execution_id, :running)
     end
 
+    # Emit execution started event
+    Events.emit(:execution_started, state.execution_id, %{status: :running})
+
     # Get initial trigger data
     trigger_data = fetch_trigger_data(state.execution_id)
 
@@ -88,6 +93,9 @@ defmodule Imgd.Runtime.Execution.Server do
       # Sync the Runic graph results back to the Imgd context
       new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
       finalize_execution(new_state)
+
+      # Emit completion event
+      Events.emit(:execution_completed, state.execution_id, %{status: :completed})
 
       {:stop, :normal, new_state}
     catch
@@ -136,7 +144,14 @@ defmodule Imgd.Runtime.Execution.Server do
       end
 
     if runic_wrk do
-      {:ok, runic_wrk}
+      # Attach observability hooks for logging, telemetry, events
+      hooked_wrk =
+        Observability.attach_all_hooks(runic_wrk,
+          execution_id: execution.id,
+          workflow_id: execution.workflow_id
+        )
+
+      {:ok, hooked_wrk}
     else
       {:error, :missing_source}
     end
@@ -144,8 +159,21 @@ defmodule Imgd.Runtime.Execution.Server do
 
   defp build_from_source(execution) do
     case get_source(execution) do
-      nil -> nil
-      source -> RunicAdapter.to_runic_workflow(source)
+      nil ->
+        nil
+
+      source ->
+        # Pass execution context to the adapter
+        opts = [
+          execution_id: execution.id,
+          variables: Map.get(execution.metadata, "variables", %{}),
+          metadata: %{
+            trace_id: Map.get(execution.metadata, "trace_id"),
+            workflow_id: execution.workflow_id
+          }
+        ]
+
+        RunicAdapter.to_runic_workflow(source, opts)
     end
   end
 
