@@ -4,17 +4,6 @@ defmodule Imgd.Executions.Execution do
 
   Tracks the runtime state of a single workflow execution including
   status, timing, context (accumulated node outputs), and error information.
-
-  ## Engine Logs
-
-  The `engine_build_log` and `engine_execution_log` fields store engine-specific
-  diagnostic information. The format depends on the configured execution engine:
-
-  - For the Runic engine: Contains Runic's build and reaction logs
-  - For custom engines: Format is engine-specific
-
-  These logs are useful for debugging but should not be relied upon for
-  business logic as they may change with engine versions.
   """
   @derive {Jason.Encoder,
            only: [
@@ -25,8 +14,6 @@ defmodule Imgd.Executions.Execution do
              :status,
              :execution_type,
              :trigger,
-             :engine_build_log,
-             :engine_execution_log,
              :context,
              :output,
              :error,
@@ -103,8 +90,6 @@ defmodule Imgd.Executions.Execution do
           status: status(),
           execution_type: execution_type(),
           trigger: Trigger.t(),
-          engine_build_log: [map()],
-          engine_execution_log: [map()],
           context: map(),
           pinned_data: map(),
           output: map() | nil,
@@ -129,11 +114,6 @@ defmodule Imgd.Executions.Execution do
 
     embeds_one :trigger, Trigger, on_replace: :update
     embeds_one :metadata, Metadata, on_replace: :update
-
-    # Engine-agnostic diagnostic logs
-    # These store engine-specific build and execution logs for debugging
-    field :engine_build_log, {:array, :map}, default: []
-    field :engine_execution_log, {:array, :map}, default: []
 
     # Accumulated outputs from all nodes: %{"node_id" => output_data}
     field :context, :map, default: %{}
@@ -169,8 +149,6 @@ defmodule Imgd.Executions.Execution do
       :workflow_id,
       :status,
       :execution_type,
-      :engine_build_log,
-      :engine_execution_log,
       :context,
       :pinned_data,
       :output,
@@ -190,8 +168,6 @@ defmodule Imgd.Executions.Execution do
     |> validate_map_field(:output, allow_nil: true)
     |> validate_map_field(:error, allow_nil: true)
     |> validate_map_field(:waiting_for, allow_nil: true)
-    |> validate_list_of_maps(:engine_build_log)
-    |> validate_list_of_maps(:engine_execution_log)
   end
 
   defp validate_immutable_source(changeset) do
@@ -311,22 +287,4 @@ defmodule Imgd.Executions.Execution do
   def duration_us(%__MODULE__{started_at: started, completed_at: completed}) do
     DateTime.diff(completed, started, :microsecond)
   end
-
-  # ===========================================================================
-  # Engine Log Accessors (backward compatibility + convenience)
-  # ===========================================================================
-
-  @doc """
-  Returns the engine build log.
-
-  For the Runic engine, this contains workflow construction events.
-  """
-  def build_log(%__MODULE__{engine_build_log: log}), do: log
-
-  @doc """
-  Returns the engine execution log.
-
-  For the Runic engine, this contains reaction/execution events.
-  """
-  def execution_log(%__MODULE__{engine_execution_log: log}), do: log
 end

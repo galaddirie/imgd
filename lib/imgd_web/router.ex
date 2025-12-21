@@ -52,10 +52,9 @@ defmodule ImgdWeb.Router do
 
     live_session :require_authenticated_user,
       on_mount: [{ImgdWeb.UserAuth, :require_authenticated}] do
-      live "/workflows", WorkflowLive.Index, :index
-      live "/workflows/:id", WorkflowLive.Show, :show
-      live "/workflows/:id/run", WorkflowLive.Runner, :run
-      live "/workflows/:workflow_id/executions/:id", WorkflowLive.ExecutionShow, :show
+      # live "/workflows", WorkflowLive.Index, :index
+      # live "/workflows/:id", WorkflowLive.Show, :show
+      # live "/workflows/:workflow_id/executions/:id", WorkflowLive.Execution.Show, :show
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end

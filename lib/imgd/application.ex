@@ -21,11 +21,8 @@ defmodule Imgd.Application do
         {Phoenix.PubSub, name: Imgd.PubSub},
         # Node type registry - must start before endpoint so types are available
         Imgd.Nodes.Registry,
-        # New Runtime Supervision
         {Registry, keys: :unique, name: Imgd.Runtime.Execution.Registry},
-        {Task.Supervisor, name: Imgd.Runtime.Execution.PersistenceSupervisor},
         Imgd.Runtime.Execution.Supervisor,
-        # Add before Sandbox.Supervisor
         Imgd.Runtime.Expression.Cache,
         Imgd.Workflows.EditingSession.Registry,
         Imgd.Workflows.EditingSession.DynamicSupervisor,

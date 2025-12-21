@@ -1,4 +1,4 @@
-defmodule Imgd.Runtime.Core.Expression do
+defmodule Imgd.Runtime.Expression do
   @moduledoc """
   Expression evaluation engine using Solid (Liquid templates).
 
