@@ -12,6 +12,7 @@ defmodule Imgd.Workflows.Sharing do
   alias Imgd.Workflows.Workflow
   alias Imgd.Workflows.WorkflowShare
   alias Imgd.Accounts.User
+  alias Imgd.Accounts.Scope
 
   @type share_role :: :viewer | :editor | :owner
 
@@ -20,9 +21,11 @@ defmodule Imgd.Workflows.Sharing do
 
   Returns `{:ok, share}` if successful, `{:error, changeset}` otherwise.
   """
-  @spec share_workflow(Workflow.t(), User.t(), share_role()) ::
-          {:ok, WorkflowShare.t()} | {:error, Ecto.Changeset.t()}
-  def share_workflow(%Workflow{} = workflow, %User{} = user, role) do
+  @spec share_workflow(Workflow.t(), Scope.t(), share_role()) ::
+          {:ok, WorkflowShare.t()} | {:error, Ecto.Changeset.t() | :cannot_share_with_owner}
+  def share_workflow(%Workflow{} = workflow, %Scope{} = scope, role) do
+    user = scope.user
+
     # Don't allow sharing with the owner themselves
     if workflow.user_id == user.id do
       {:error, :cannot_share_with_owner}
@@ -55,9 +58,11 @@ defmodule Imgd.Workflows.Sharing do
 
   Returns `{:ok, share}` if successful, `{:error, reason}` otherwise.
   """
-  @spec unshare_workflow(Workflow.t(), User.t()) ::
+  @spec unshare_workflow(Workflow.t(), Scope.t()) ::
           {:ok, WorkflowShare.t()} | {:error, :not_found}
-  def unshare_workflow(%Workflow{} = workflow, %User{} = user) do
+  def unshare_workflow(%Workflow{} = workflow, %Scope{} = scope) do
+    user = scope.user
+
     case Repo.get_by(WorkflowShare, workflow_id: workflow.id, user_id: user.id) do
       nil -> {:error, :not_found}
       share -> Repo.delete(share)
@@ -91,8 +96,10 @@ defmodule Imgd.Workflows.Sharing do
 
   Returns true if the user has access, false otherwise.
   """
-  @spec can_access?(Workflow.t(), User.t() | nil, share_role()) :: boolean()
-  def can_access?(%Workflow{} = workflow, user, required_role) do
+  @spec can_access?(Workflow.t(), Scope.t() | nil, share_role()) :: boolean()
+  def can_access?(%Workflow{} = workflow, scope, required_role) do
+    user = scope && scope.user
+
     cond do
       # Public workflows are viewable by anyone
       workflow.public and required_role == :viewer -> true
@@ -110,9 +117,9 @@ defmodule Imgd.Workflows.Sharing do
 
   Returns true if the user has editor or owner access.
   """
-  @spec can_edit?(Workflow.t(), User.t() | nil) :: boolean()
-  def can_edit?(%Workflow{} = workflow, user) do
-    can_access?(workflow, user, :editor)
+  @spec can_edit?(Workflow.t(), Scope.t() | nil) :: boolean()
+  def can_edit?(%Workflow{} = workflow, scope) do
+    can_access?(workflow, scope, :editor)
   end
 
   @doc """
@@ -120,9 +127,9 @@ defmodule Imgd.Workflows.Sharing do
 
   Returns true if the user has viewer, editor, or owner access.
   """
-  @spec can_view?(Workflow.t(), User.t() | nil) :: boolean()
-  def can_view?(%Workflow{} = workflow, user) do
-    can_access?(workflow, user, :viewer)
+  @spec can_view?(Workflow.t(), Scope.t() | nil) :: boolean()
+  def can_view?(%Workflow{} = workflow, scope) do
+    can_access?(workflow, scope, :viewer)
   end
 
   @doc """
@@ -154,10 +161,12 @@ defmodule Imgd.Workflows.Sharing do
 
   Returns a list of workflows the user can access, including their own and shared ones.
   """
-  @spec list_accessible_workflows(User.t() | nil) :: [Workflow.t()]
+  @spec list_accessible_workflows(Scope.t() | nil) :: [Workflow.t()]
   def list_accessible_workflows(nil), do: list_public_workflows()
 
-  def list_accessible_workflows(%User{} = user) do
+  def list_accessible_workflows(%Scope{} = scope) do
+    user = scope.user
+
     # Get all workflows the user can access in a single query
     query =
       from w in Workflow,
@@ -184,10 +193,12 @@ defmodule Imgd.Workflows.Sharing do
 
   Returns the role (:owner, :editor, :viewer) or nil if no access.
   """
-  @spec get_user_role(Workflow.t(), User.t() | nil) :: share_role() | nil
+  @spec get_user_role(Workflow.t(), Scope.t() | nil) :: share_role() | nil
   def get_user_role(%Workflow{} = workflow, nil), do: if(workflow.public, do: :viewer, else: nil)
 
-  def get_user_role(%Workflow{} = workflow, %User{} = user) do
+  def get_user_role(%Workflow{} = workflow, %Scope{} = scope) do
+    user = scope.user
+
     cond do
       workflow.user_id == user.id ->
         :owner
@@ -205,7 +216,7 @@ defmodule Imgd.Workflows.Sharing do
 
   # Private functions
 
-  defp check_share_permissions(workflow, user, required_role) do
+  defp check_share_permissions(workflow, %User{} = user, required_role) do
     case Repo.get_by(WorkflowShare, workflow_id: workflow.id, user_id: user.id) do
       nil -> false
       share -> role_allows?(share.role, required_role)
