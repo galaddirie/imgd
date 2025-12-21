@@ -86,8 +86,6 @@ defmodule Imgd.Sandbox do
   catch
     :exit, {:timeout, _} -> {:error, {:timeout, config.timeout}}
     :exit, :timeout -> {:error, {:timeout, config.timeout}}
-    :exit, :killed -> {:error, {:timeout, config.timeout}}
-    :exit, {:killed, _} -> {:error, {:timeout, config.timeout}}
     :exit, reason -> {:error, {:flame_error, reason}}
   end
 
