@@ -34,7 +34,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
   end
 
   describe "load_pending_ops/1" do
-    test "loads operations after last snapshot", %{workflow: workflow} do
+    test "loads operations after last snapshot", %{workflow: workflow, scope: scope} do
       # Insert some operations manually
       operations = [
         %EditOperation{
@@ -42,7 +42,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
           seq: 1,
           type: :update_node_metadata,
           payload: %{node_id: "node_1", changes: %{name: "Updated 1"}},
-          user_id: "user_1",
+          user_id: scope.user.id,
           client_seq: 1,
           workflow_id: workflow.id,
           inserted_at: DateTime.utc_now()
@@ -52,7 +52,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
           seq: 2,
           type: :update_node_position,
           payload: %{node_id: "node_1", position: %{x: 200, y: 150}},
-          user_id: "user_1",
+          user_id: scope.user.id,
           client_seq: 2,
           workflow_id: workflow.id,
           inserted_at: DateTime.utc_now()
@@ -62,7 +62,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
           seq: 3,
           type: :add_node,
           payload: %{node: %{id: "node_2", type_id: "json_parser", name: "JSON Parser"}},
-          user_id: "user_2",
+          user_id: scope.user.id,
           client_seq: 1,
           workflow_id: workflow.id,
           inserted_at: DateTime.utc_now()
@@ -102,7 +102,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
   end
 
   describe "persist/1" do
-    test "persists operations and updates draft", %{workflow: workflow} do
+    test "persists operations and updates draft", %{workflow: workflow, scope: scope} do
       # Create mock state with operations to persist
       ops = [
         %EditOperation{
@@ -110,7 +110,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
           seq: 1,
           type: :update_node_metadata,
           payload: %{node_id: "node_1", changes: %{name: "Persisted Name"}},
-          user_id: "user_1",
+          user_id: scope.user.id,
           client_seq: 1,
           workflow_id: workflow.id
         }
@@ -137,14 +137,14 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       assert updated_draft.settings["last_persisted_seq"] == 1
     end
 
-    test "handles duplicate operation inserts gracefully", %{workflow: workflow} do
+    test "handles duplicate operation inserts gracefully", %{workflow: workflow, scope: scope} do
       # Insert operation first
       op = %EditOperation{
         operation_id: "op_1",
         seq: 1,
         type: :update_node_metadata,
         payload: %{node_id: "node_1", changes: %{name: "Name"}},
-        user_id: "user_1",
+        user_id: scope.user.id,
         client_seq: 1,
         workflow_id: workflow.id
       }

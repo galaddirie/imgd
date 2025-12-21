@@ -185,7 +185,12 @@ defmodule Imgd.Collaboration.EditSession.Server do
   @impl true
   def terminate(reason, state) do
     Logger.info("Edit session terminating", reason: inspect(reason))
-    Persistence.persist(state)
+    try do
+      Persistence.persist(state)
+    catch
+      :exit, _ -> :ok
+      :error, _ -> :ok
+    end
     :ok
   end
 

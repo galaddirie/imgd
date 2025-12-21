@@ -74,12 +74,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "operation processing" do
-    setup %{workflow: workflow} do
-      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok
-    end
-
     test "applies add_node operation", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       operation = %{
         type: :add_node,
         payload: %{
@@ -91,7 +87,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
           }
         },
         id: "op_1",
-        user_id: "user_1"
+        user_id: Ecto.UUID.generate(),
+        client_seq: 1
       }
 
       assert {:ok, %{seq: seq, status: :applied}} = Server.apply_operation(workflow.id, operation)
@@ -115,7 +112,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
           }
         },
         id: "op_1",
-        user_id: "user_1"
+        user_id: Ecto.UUID.generate(),
+        client_seq: 1
       }
 
       assert {:error, {:node_already_exists, "node_1"}} =
@@ -134,7 +132,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
           }
         },
         id: "op_1",
-        user_id: "user_1"
+        user_id: Ecto.UUID.generate(),
+        client_seq: 1
       }
 
       # Apply same operation twice
@@ -157,19 +156,22 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
           type: :update_node_metadata,
           payload: %{node_id: "node_1", changes: %{name: "Updated Name"}},
           id: "op_1",
-          user_id: "user_1"
+          user_id: Ecto.UUID.generate(),
+          client_seq: 1
         },
         %{
           type: :update_node_position,
           payload: %{node_id: "node_1", position: %{x: 200, y: 150}},
           id: "op_2",
-          user_id: "user_1"
+          user_id: Ecto.UUID.generate(),
+          client_seq: 2
         },
         %{
           type: :update_node_metadata,
           payload: %{node_id: "node_1", changes: %{notes: "Added notes"}},
           id: "op_3",
-          user_id: "user_1"
+          user_id: Ecto.UUID.generate(),
+          client_seq: 3
         }
       ]
 
@@ -187,12 +189,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "editor state operations" do
-    setup %{workflow: workflow} do
-      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok
-    end
-
     test "handles pin_node_output operation", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       operation = %{
         type: :pin_node_output,
         payload: %{
@@ -200,7 +198,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
           output_data: %{"result" => "pinned output"}
         },
         id: "op_1",
-        user_id: "user_1"
+        user_id: Ecto.UUID.generate(),
+        client_seq: 1
       }
 
       assert {:ok, _} = Server.apply_operation(workflow.id, operation)
@@ -214,7 +213,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
         type: :disable_node,
         payload: %{node_id: "node_1", mode: :exclude},
         id: "op_1",
-        user_id: "user_1"
+        user_id: Ecto.UUID.generate(),
+        client_seq: 1
       }
 
       assert {:ok, _} = Server.apply_operation(workflow.id, operation)
@@ -226,12 +226,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "node locking" do
-    setup %{workflow: workflow} do
-      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok
-    end
-
     test "acquires node lock", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       assert :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
 
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
@@ -269,12 +265,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "synchronization" do
-    setup %{workflow: workflow} do
-      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok
-    end
-
     test "provides full sync for new clients", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       {:ok, sync_state} = Server.get_sync_state(workflow.id)
 
       assert sync_state.type == :full_sync
@@ -291,13 +283,15 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
           type: :update_node_metadata,
           payload: %{node_id: "node_1", changes: %{name: "Updated"}},
           id: "op_1",
-          user_id: "user_1"
+          user_id: Ecto.UUID.generate(),
+          client_seq: 1
         },
         %{
           type: :update_node_position,
           payload: %{node_id: "node_1", position: %{x: 200, y: 150}},
           id: "op_2",
-          user_id: "user_1"
+          user_id: Ecto.UUID.generate(),
+          client_seq: 2
         }
       ]
 
@@ -317,7 +311,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
         type: :update_node_metadata,
         payload: %{node_id: "node_1", changes: %{name: "Updated"}},
         id: "op_1",
-        user_id: "user_1"
+        user_id: Ecto.UUID.generate(),
+        client_seq: 1
       }
 
       {:ok, %{seq: seq}} = Server.apply_operation(workflow.id, operation)
@@ -330,31 +325,30 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "concurrent operations" do
-    setup %{workflow: workflow} do
-      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok
-    end
-
     test "serializes concurrent operations correctly", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       # Simulate concurrent operations from different users
       operations = [
         %{
           type: :update_node_metadata,
           payload: %{node_id: "node_1", changes: %{name: "Name 1"}},
           id: "op_1",
-          user_id: "user_1"
+          user_id: Ecto.UUID.generate(),
+          client_seq: 1
         },
         %{
           type: :update_node_metadata,
           payload: %{node_id: "node_1", changes: %{name: "Name 2"}},
           id: "op_2",
-          user_id: "user_2"
+          user_id: Ecto.UUID.generate(),
+          client_seq: 1
         },
         %{
           type: :update_node_position,
           payload: %{node_id: "node_1", position: %{x: 300, y: 200}},
           id: "op_3",
-          user_id: "user_1"
+          user_id: Ecto.UUID.generate(),
+          client_seq: 1
         }
       ]
 
@@ -376,17 +370,13 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "persistence" do
-    setup %{workflow: workflow} do
-      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok
-    end
-
     test "persists operations to database", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       operation = %{
         type: :update_node_metadata,
         payload: %{node_id: "node_1", changes: %{name: "Persisted Name"}},
         id: "op_1",
-        user_id: "user_1",
+        user_id: Ecto.UUID.generate(),
         client_seq: 1
       }
 

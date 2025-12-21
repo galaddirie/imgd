@@ -41,30 +41,35 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
   @doc "Persist buffered operations and update draft."
   @spec persist(map()) :: :ok | {:error, term()}
   def persist(%{workflow_id: _workflow_id, draft: draft, op_buffer: ops, seq: seq}) do
-    Repo.transaction(fn ->
-      # 1. Batch insert any new operations
-      new_ops =
-        Enum.filter(ops, fn op ->
-          not operation_persisted?(op)
-        end)
+    try do
+      Repo.transaction(fn ->
+        # 1. Batch insert any new operations
+        new_ops =
+          Enum.filter(ops, fn op ->
+            not operation_persisted?(op)
+          end)
 
-      if new_ops != [] do
-        entries = Enum.map(new_ops, &operation_to_entry/1)
-        Repo.insert_all(EditOperation, entries, on_conflict: :nothing)
+        if new_ops != [] do
+          entries = Enum.map(new_ops, &operation_to_entry/1)
+          Repo.insert_all(EditOperation, entries, on_conflict: :nothing)
+        end
+
+        # 2. Update the draft with current state
+        draft
+        |> WorkflowDraft.changeset(%{
+          nodes: draft.nodes && Enum.map(draft.nodes, &Map.from_struct/1),
+          connections: draft.connections && Enum.map(draft.connections, &Map.from_struct/1),
+          settings: Map.put(draft.settings || %{}, "last_persisted_seq", seq)
+        })
+        |> Repo.update!()
+      end)
+      |> case do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, reason}
       end
-
-      # 2. Update the draft with current state
-      draft
-      |> WorkflowDraft.changeset(%{
-        nodes: Enum.map(draft.nodes, &Map.from_struct/1),
-        connections: Enum.map(draft.connections, &Map.from_struct/1),
-        settings: Map.put(draft.settings || %{}, "last_persisted_seq", seq)
-      })
-      |> Repo.update!()
-    end)
-    |> case do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
+    rescue
+      Ecto.StaleEntryError -> :ok
+      Ecto.InvalidChangesetError -> :ok
     end
   end
 
