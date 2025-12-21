@@ -724,6 +724,65 @@ full_log = Workflow.log(executed)
 # Rebuild entire workflow state
 rebuilt = Workflow.from_log(full_log)
 ```
+---
+## Common Mistakes and API Clarifications
+
+### Building Workflows Programmatically
+
+When building workflows step-by-step (rather than using the declarative workflow syntax), it's important to understand the correct API:
+
+#### ❌ Common Mistakes
+
+```elixir
+# WRONG: Adding steps twice
+step1 = Runic.step(fn x -> x end, name: "step1")
+wrk = Workflow.add_step(wrk, step1)
+wrk = Component.connect(step1, :root, wrk)  # Don't do this!
+
+# WRONG: Calling Component.connect directly
+step2 = Runic.step(fn x -> x end, name: "step2")
+wrk = Component.connect(step2, "step1", wrk)  # Internal protocol method!
+
+# WRONG: Referencing :root by name
+wrk = Workflow.add(wrk, step, to: :root)  # :root is not a component name
+```
+
+**Why these are wrong:**
+- `Component.connect/3` is an internal protocol method called by `Workflow.add/3` - not meant for direct use
+- Adding a step with `add_step` or `add` already connects it to the graph
+- The `:root` symbol isn't a registered component name - it's a `%Root{}` struct
+
+#### ✅ Correct Approach
+
+```elixir
+require Runic
+alias Runic.Workflow
+
+# Create workflow
+wrk = Workflow.new(name: "my_workflow")
+
+# Option 1: Using add (high-level, recommended)
+step1 = Runic.step(fn x -> x + 1 end, name: "step1")
+wrk = Workflow.add(wrk, step1)  # Adds to root automatically
+
+step2 = Runic.step(fn x -> x * 2 end, name: "step2")
+wrk = Workflow.add(wrk, step2, to: "step1")  # Adds as child of step1
+
+# Option 2: Using add_step (lower-level)
+wrk = Workflow.new(name: "my_workflow")
+step1 = Runic.step(fn x -> x + 1 end)
+wrk = Workflow.add_step(wrk, step1)  # Adds to root
+
+step2 = Runic.step(fn x -> x * 2 end)
+wrk = Workflow.add_step(wrk, step1, step2)  # Connect by struct reference
+# or: wrk = Workflow.add_step(wrk, "step1", step2)  # Connect by name
+
+# Test it
+wrk
+|> Workflow.react_until_satisfied(5)
+|> Workflow.raw_productions()
+# => [6, 12]
+```
 
 ---
 
