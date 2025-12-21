@@ -8,9 +8,14 @@ defmodule Imgd.Workflows.SharingTest do
   describe "workflow sharing" do
     setup do
       # Create two users
-      {:ok, owner} = Accounts.register_user(%{email: "owner@example.com", password: "password123"})
-      {:ok, viewer} = Accounts.register_user(%{email: "viewer@example.com", password: "password123"})
-      {:ok, editor} = Accounts.register_user(%{email: "editor@example.com", password: "password123"})
+      {:ok, owner} =
+        Accounts.register_user(%{email: "owner@example.com", password: "password123"})
+
+      {:ok, viewer} =
+        Accounts.register_user(%{email: "viewer@example.com", password: "password123"})
+
+      {:ok, editor} =
+        Accounts.register_user(%{email: "editor@example.com", password: "password123"})
 
       # Create a workflow owned by owner
       workflow_attrs = %{
@@ -24,14 +29,20 @@ defmodule Imgd.Workflows.SharingTest do
       %{owner: owner, viewer: viewer, editor: editor, workflow: workflow}
     end
 
-    test "share_workflow/3 creates a share with viewer role", %{workflow: workflow, viewer: viewer} do
+    test "share_workflow/3 creates a share with viewer role", %{
+      workflow: workflow,
+      viewer: viewer
+    } do
       assert {:ok, share} = Sharing.share_workflow(workflow, viewer, :viewer)
       assert share.role == :viewer
       assert share.workflow_id == workflow.id
       assert share.user_id == viewer.id
     end
 
-    test "share_workflow/3 creates a share with editor role", %{workflow: workflow, editor: editor} do
+    test "share_workflow/3 creates a share with editor role", %{
+      workflow: workflow,
+      editor: editor
+    } do
       assert {:ok, share} = Sharing.share_workflow(workflow, editor, :editor)
       assert share.role == :editor
       assert share.workflow_id == workflow.id
@@ -88,7 +99,12 @@ defmodule Imgd.Workflows.SharingTest do
       refute private_workflow.public
     end
 
-    test "list_workflow_users/1 includes owner and shared users", %{workflow: workflow, owner: owner, viewer: viewer, editor: editor} do
+    test "list_workflow_users/1 includes owner and shared users", %{
+      workflow: workflow,
+      owner: owner,
+      viewer: viewer,
+      editor: editor
+    } do
       {:ok, _share1} = Sharing.share_workflow(workflow, viewer, :viewer)
       {:ok, _share2} = Sharing.share_workflow(workflow, editor, :editor)
 
@@ -104,7 +120,12 @@ defmodule Imgd.Workflows.SharingTest do
       assert user_roles[editor] == :editor
     end
 
-    test "get_user_role/2 returns correct roles", %{workflow: workflow, owner: owner, viewer: viewer, editor: editor} do
+    test "get_user_role/2 returns correct roles", %{
+      workflow: workflow,
+      owner: owner,
+      viewer: viewer,
+      editor: editor
+    } do
       {:ok, _share1} = Sharing.share_workflow(workflow, viewer, :viewer)
       {:ok, _share2} = Sharing.share_workflow(workflow, editor, :editor)
 
@@ -121,7 +142,11 @@ defmodule Imgd.Workflows.SharingTest do
       refute Sharing.can_view?(workflow, viewer)
     end
 
-    test "list_accessible_workflows/1 returns user's workflows", %{owner: owner, viewer: viewer, workflow: workflow} do
+    test "list_accessible_workflows/1 returns user's workflows", %{
+      owner: owner,
+      viewer: viewer,
+      workflow: workflow
+    } do
       # Owner should see their own workflow
       owner_workflows = Sharing.list_accessible_workflows(owner)
       assert length(owner_workflows) == 1

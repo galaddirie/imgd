@@ -52,7 +52,6 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowsTables do
       timestamps(type: :utc_datetime_usec)
     end
 
-
     execute(
       """
       ALTER TABLE workflows

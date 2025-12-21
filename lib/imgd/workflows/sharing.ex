@@ -185,12 +185,16 @@ defmodule Imgd.Workflows.Sharing do
   Returns the role (:owner, :editor, :viewer) or nil if no access.
   """
   @spec get_user_role(Workflow.t(), User.t() | nil) :: share_role() | nil
-  def get_user_role(%Workflow{} = workflow, nil), do: (if workflow.public, do: :viewer, else: nil)
+  def get_user_role(%Workflow{} = workflow, nil), do: if(workflow.public, do: :viewer, else: nil)
 
   def get_user_role(%Workflow{} = workflow, %User{} = user) do
     cond do
-      workflow.user_id == user.id -> :owner
-      workflow.public -> :viewer
+      workflow.user_id == user.id ->
+        :owner
+
+      workflow.public ->
+        :viewer
+
       true ->
         case Repo.get_by(WorkflowShare, workflow_id: workflow.id, user_id: user.id) do
           nil -> nil

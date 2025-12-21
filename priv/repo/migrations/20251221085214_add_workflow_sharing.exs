@@ -15,7 +15,9 @@ defmodule Imgd.Repo.Migrations.AddWorkflowSharing do
       add :role, :string, null: false
 
       add :user_id, references(:users, on_delete: :delete_all, type: :binary_id), null: false
-      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id), null: false
+
+      add :workflow_id, references(:workflows, on_delete: :delete_all, type: :binary_id),
+        null: false
 
       timestamps(type: :utc_datetime_usec)
     end

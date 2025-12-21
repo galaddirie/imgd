@@ -43,7 +43,9 @@ defmodule Imgd.Workflows.WorkflowShare do
     |> cast(attrs, [:role, :user_id, :workflow_id])
     |> validate_required([:role, :user_id, :workflow_id])
     |> validate_inclusion(:role, @valid_roles)
-    |> unique_constraint([:user_id, :workflow_id], name: :workflow_shares_user_id_workflow_id_index)
+    |> unique_constraint([:user_id, :workflow_id],
+      name: :workflow_shares_user_id_workflow_id_index
+    )
   end
 
   @doc """

@@ -104,5 +104,4 @@ defmodule Imgd.GraphTest do
     # b is excluded, so c has no parents in subgraph, and a is not reached
     assert Graph.vertex_ids(subgraph) |> Enum.sort() == ["c"]
   end
-
 end
