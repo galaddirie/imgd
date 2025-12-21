@@ -1085,7 +1085,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
 
         <div class="flex items-center justify-end">
           <.link
-            navigate={~p"/workflows/#{@execution.workflow_id}/executions/#{@execution.id}"}
+            navigate={~p"/workflows/#{@execution.workflow_id}/edit?execution_id=#{@execution.id}"}
             class="btn btn-ghost btn-sm gap-2"
           >
             <.icon name="hero-eye" class="size-4" /> View Full Details
@@ -1204,7 +1204,6 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   defp duration_bar_width(us) when us < 1_000_000, do: 80
   defp duration_bar_width(_), do: 100
 
-
   defp format_time(nil), do: "-"
   defp format_time(dt), do: Calendar.strftime(dt, "%H:%M:%S")
 
@@ -1257,5 +1256,4 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   defp format_log_value(v) when is_map(v), do: "{...}"
   defp format_log_value(v) when is_list(v), do: "[#{length(v)} items]"
   defp format_log_value(v), do: inspect(v, limit: 3)
-
 end
