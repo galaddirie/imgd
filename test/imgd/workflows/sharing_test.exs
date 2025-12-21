@@ -32,7 +32,15 @@ defmodule Imgd.Workflows.SharingTest do
 
       {:ok, workflow} = %Workflow{} |> Workflow.changeset(workflow_attrs) |> Repo.insert()
 
-      %{owner: owner, viewer: viewer, editor: editor, owner_scope: owner_scope, viewer_scope: viewer_scope, editor_scope: editor_scope, workflow: workflow}
+      %{
+        owner: owner,
+        viewer: viewer,
+        editor: editor,
+        owner_scope: owner_scope,
+        viewer_scope: viewer_scope,
+        editor_scope: editor_scope,
+        workflow: workflow
+      }
     end
 
     test "share_workflow/3 creates a share with viewer role", %{
@@ -55,15 +63,22 @@ defmodule Imgd.Workflows.SharingTest do
       assert share.user_id == editor_scope.user.id
     end
 
-    test "share_workflow/3 fails when sharing with owner", %{workflow: workflow, owner_scope: owner_scope} do
-      assert {:error, :cannot_share_with_owner} = Sharing.share_workflow(workflow, owner_scope, :viewer)
+    test "share_workflow/3 fails when sharing with owner", %{
+      workflow: workflow,
+      owner_scope: owner_scope
+    } do
+      assert {:error, :cannot_share_with_owner} =
+               Sharing.share_workflow(workflow, owner_scope, :viewer)
     end
 
     test "can_view?/2 returns true for owner", %{workflow: workflow, owner_scope: owner_scope} do
       assert Sharing.can_view?(workflow, owner_scope)
     end
 
-    test "can_view?/2 returns true for shared viewer", %{workflow: workflow, viewer_scope: viewer_scope} do
+    test "can_view?/2 returns true for shared viewer", %{
+      workflow: workflow,
+      viewer_scope: viewer_scope
+    } do
       {:ok, _share} = Sharing.share_workflow(workflow, viewer_scope, :viewer)
       assert Sharing.can_view?(workflow, viewer_scope)
     end
@@ -72,12 +87,18 @@ defmodule Imgd.Workflows.SharingTest do
       assert Sharing.can_edit?(workflow, owner_scope)
     end
 
-    test "can_edit?/2 returns true for shared editor", %{workflow: workflow, editor_scope: editor_scope} do
+    test "can_edit?/2 returns true for shared editor", %{
+      workflow: workflow,
+      editor_scope: editor_scope
+    } do
       {:ok, _share} = Sharing.share_workflow(workflow, editor_scope, :editor)
       assert Sharing.can_edit?(workflow, editor_scope)
     end
 
-    test "can_edit?/2 returns false for shared viewer", %{workflow: workflow, viewer_scope: viewer_scope} do
+    test "can_edit?/2 returns false for shared viewer", %{
+      workflow: workflow,
+      viewer_scope: viewer_scope
+    } do
       {:ok, _share} = Sharing.share_workflow(workflow, viewer_scope, :viewer)
       refute Sharing.can_edit?(workflow, viewer_scope)
     end
