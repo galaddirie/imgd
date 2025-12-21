@@ -54,9 +54,19 @@ defmodule Imgd.Collaboration.PreviewExecution do
   end
 
   defp get_editor_state(workflow_id) do
-    case EditServer.get_editor_state(workflow_id) do
-      {:ok, state} -> {:ok, state}
-      _ -> {:ok, %EditorState{workflow_id: workflow_id}}
+    # Check if the session process exists
+    case Registry.lookup(Imgd.Collaboration.EditSession.Registry, workflow_id) do
+      [{_pid, _}] ->
+        # Process exists, try to get state
+        try do
+          EditServer.get_editor_state(workflow_id)
+        rescue
+          _ -> {:ok, %EditorState{workflow_id: workflow_id}}
+        end
+
+      [] ->
+        # No process, return default state
+        {:ok, %EditorState{workflow_id: workflow_id}}
     end
   end
 
@@ -137,6 +147,11 @@ defmodule Imgd.Collaboration.PreviewExecution do
     {filtered_nodes, filtered_connections}
   end
 
+  defp build_subgraph(nodes, connections, _unknown_mode, _targets) do
+    # For unknown modes, default to full execution
+    {nodes, connections}
+  end
+
   defp create_preview_execution(workflow_id, scope, _draft, editor_state, input_data) do
     # Include pinned outputs in the execution context
     initial_context =
@@ -151,9 +166,11 @@ defmodule Imgd.Collaboration.PreviewExecution do
         context: initial_context,
         triggered_by_user_id: scope.user.id,
         metadata: %{
-          preview: true,
-          pinned_nodes: Map.keys(editor_state.pinned_outputs),
-          disabled_nodes: MapSet.to_list(editor_state.disabled_nodes)
+          extras: %{
+            preview: true,
+            pinned_nodes: Map.keys(editor_state.pinned_outputs),
+            disabled_nodes: MapSet.to_list(editor_state.disabled_nodes)
+          }
         }
       },
       scope
@@ -172,8 +189,12 @@ defmodule Imgd.Collaboration.PreviewExecution do
     case Runic.Workflow.react_until_satisfied(runic_workflow, %{}) do
       result_workflow ->
         context = extract_context(result_workflow)
-        Executions.update_execution_status(execution, :completed, scope, output: context)
-        {:ok, execution}
+
+        case Executions.update_execution_status(execution, :completed, scope, output: context) do
+          {:ok, updated_execution} -> {:ok, updated_execution}
+          # Fallback to original if update fails
+          {:error, _} -> {:ok, execution}
+        end
     end
   rescue
     e ->

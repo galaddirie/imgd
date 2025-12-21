@@ -68,7 +68,8 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
         type: :pin_node_output,
         payload: %{node_id: "http_node", output_data: %{"pinned" => "data"}},
         id: "pin_op",
-        user_id: scope.user.id
+        user_id: scope.user.id,
+        client_seq: 1
       })
 
       # Run full preview
@@ -76,8 +77,8 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
 
       assert execution.workflow_id == workflow.id
       assert execution.execution_type == :preview
-      assert execution.metadata["preview"] == true
-      assert execution.metadata["pinned_nodes"] == ["http_node"]
+      assert execution.metadata.extras[:preview] == true
+      assert execution.metadata.extras[:pinned_nodes] == ["http_node"]
     end
 
     test "handles workflow execution failures gracefully", %{workflow: workflow, scope: scope} do
@@ -106,7 +107,7 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
                )
 
       assert execution.execution_type == :preview
-      assert execution.metadata["preview"] == true
+      assert execution.metadata.extras[:preview] == true
     end
 
     test "handles invalid target node gracefully", %{workflow: workflow, scope: scope} do
@@ -162,7 +163,8 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
         type: :pin_node_output,
         payload: %{node_id: "http_node", output_data: %{"mock" => "data"}},
         id: "pin_op",
-        user_id: scope.user.id
+        user_id: scope.user.id,
+        client_seq: 1
       })
 
       # Run only filter_node and output_node (upstream http_node is pinned)
@@ -185,12 +187,13 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
         type: :disable_node,
         payload: %{node_id: "json_node", mode: :exclude},
         id: "disable_op",
-        user_id: scope.user.id
+        user_id: scope.user.id,
+        client_seq: 1
       })
 
       assert {:ok, execution} = PreviewExecution.run(workflow.id, scope, mode: :full)
 
-      assert execution.metadata["disabled_nodes"] == ["json_node"]
+      assert execution.metadata.extras[:disabled_nodes] == ["json_node"]
       # The execution should skip json_node entirely
     end
 
@@ -213,7 +216,7 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
       assert {:ok, execution} =
                PreviewExecution.run(workflow.id, scope, mode: :full, input_data: input_data)
 
-      assert execution.trigger["data"] == input_data
+      assert execution.trigger.data == input_data
     end
   end
 
@@ -265,29 +268,31 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
         type: :pin_node_output,
         payload: %{node_id: "http_node", output_data: %{"session" => "data"}},
         id: "session_pin",
-        user_id: scope.user.id
+        user_id: scope.user.id,
+        client_seq: 1
       })
 
       Imgd.Collaboration.EditSession.Server.apply_operation(workflow.id, %{
         type: :disable_node,
         payload: %{node_id: "filter_node", mode: :exclude},
         id: "session_disable",
-        user_id: scope.user.id
+        user_id: scope.user.id,
+        client_seq: 2
       })
 
       # Run execution - should pick up session state
       assert {:ok, execution} = PreviewExecution.run(workflow.id, scope, mode: :full)
 
-      assert execution.metadata["pinned_nodes"] == ["http_node"]
-      assert execution.metadata["disabled_nodes"] == ["filter_node"]
+      assert execution.metadata.extras[:pinned_nodes] == ["http_node"]
+      assert execution.metadata.extras[:disabled_nodes] == ["filter_node"]
     end
 
     test "works without active session", %{workflow: workflow, scope: scope} do
       # Should work with default editor state (no pins, no disabled nodes)
       assert {:ok, execution} = PreviewExecution.run(workflow.id, scope, mode: :full)
 
-      assert execution.metadata["pinned_nodes"] == []
-      assert execution.metadata["disabled_nodes"] == []
+      assert execution.metadata.extras[:pinned_nodes] == []
+      assert execution.metadata.extras[:disabled_nodes] == []
     end
   end
 end
