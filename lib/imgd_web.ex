@@ -86,6 +86,7 @@ defmodule ImgdWeb do
       import Phoenix.HTML
       # Core UI components
       import ImgdWeb.CoreComponents
+      import LiveSvelte
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

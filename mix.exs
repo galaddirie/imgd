@@ -52,7 +52,7 @@ defmodule Imgd.MixProject do
       {:lazy_html, ">= 0.1.0", only: :test},
       {:ex_machina, "~> 2.8.0", only: :test},
       {:phoenix_live_dashboard, "~> 0.8.3"},
-      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:live_svelte, "~> 0.16.0"},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:heroicons,
        github: "tailwindlabs/heroicons",
@@ -108,11 +108,11 @@ defmodule Imgd.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind imgd", "esbuild imgd"],
+      "assets.setup": ["cmd --cd assets npm install"],
+      "assets.build": ["compile", "tailwind imgd", "cmd --cd assets node build.js"],
       "assets.deploy": [
         "tailwind imgd --minify",
-        "esbuild imgd --minify",
+        "cmd --cd assets node build.js --deploy",
         "phx.digest"
       ],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]

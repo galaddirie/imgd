@@ -523,3 +523,201 @@ And **never** do this:
 <!-- phoenix:liveview-end -->
 
 <!-- usage-rules-end -->
+
+
+<!-- live_svelte-start -->
+# Svelte 5 + Phoenix LiveView (LiveSvelte)
+For higly interactive features we may use LiveSvelte to build the UI.
+You are an expert in:
+- Svelte 5 (Runes), TypeScript, modern component architecture
+- Phoenix LiveView + LiveSvelte integration patterns
+- Tailwind + component-driven UI
+You write production-quality code that matches the repo’s existing patterns.
+
+---
+
+
+### Phoenix LiveView + LiveSvelte app
+Signs:
+- `mix.exs`, `lib/*_web`, `assets/svelte/**`, `<.svelte name="...">`, `use LiveSvelte.Components`, or `~V` sigil usage
+Rules:
+- LiveView owns routing, data loading, auth, and server state.
+- Svelte components are UI + local state; LiveView is the source of truth for persisted state.
+
+- Prefer small, composable components with clear props boundaries.
+- Avoid unnecessary abstractions and classes (exception: state-machine style models).
+- Keep “business logic” on the server in Phoenix where feasible; keep Svelte focused on UI/UX.
+- Use TypeScript everywhere (strict).
+- Use readable names, predictable file structure, and minimal duplication.
+
+---
+
+## 2) Svelte 5 rules (Runes-first)
+
+### State + derivations
+- Use runes:
+  - `$state(...)` for local reactive state
+  - `$derived(...)` for pure computed values (NO side effects)
+  - `$effect(...)` for side effects / subscriptions / DOM interactions
+  - `$props()` for props
+  - `$bindable()` for two-way bindable props when necessary
+
+### Effects and dependency hygiene
+- `$derived` expressions MUST be side-effect free.
+- Prefer `$derived` over `$effect` when you’re computing data.
+- `$effect` should be for:
+  - calling client-only APIs
+  - syncing to imperative libraries
+  - subscriptions / cleanup
+- Always include cleanup in `$effect` when needed (return a function).
+
+### Props
+- Use `$props()` destructuring (with defaults) rather than older patterns.
+- Props should be serializable when crossing server/client boundaries in LiveSvelte mode.
+
+### Component style
+- Keep `<script lang="ts">` at top, then markup, then `<style>` if needed.
+- Prefer Tailwind for styling; use component-level CSS only for small scoped exceptions.
+
+---
+
+## 3) Tailwind + DaisyUI components
+
+- Use Tailwind and DaisyUI classes for layout, spacing, typography.
+- Prefer consistent spacing scale and reusable UI primitives (buttons, inputs, dialogs).
+- Use `cn(...)` helper if the repo has one; otherwise use simple class composition.
+
+---
+
+## 4) Phoenix LiveView + LiveSvelte rules (MOST IMPORTANT)
+
+### The contract
+- LiveView is the backend “truth” and synchronization layer.
+- Svelte is the UI + local interactivity layer.
+- Reactive props flow from LiveView → Svelte over the LiveView websocket.
+- Events flow from Svelte → LiveView via `live.pushEvent(...)` or `live.pushEventTo(...)`.
+
+### Where Svelte components live
+- Place Svelte components in: `assets/svelte/**`
+- Reference them from LiveView with:
+  - `<.svelte name="Example" props={%{...}} socket={@socket} />`
+  - or `use LiveSvelte.Components` and then `<.Example ... />`
+
+### SSR rules (LiveSvelte)
+- SSR requires Node in the runtime environment. Assume SSR is enabled unless explicitly disabled.
+- Code that depends on `window`, DOM, or `live.*` methods must be:
+  - triggered by user action, OR
+  - wrapped in `onMount(...)` / client-only effect
+- If SSR is disabled for a component, consider providing `:loading` slot fallback.
+
+### DO NOT leak secrets (“Secret State” caveat)
+- Never pass secrets, internal flags, or “hidden UI branches” as props to Svelte if users should not discover them.
+- If something must remain undiscoverable, keep it entirely server-side and render it via LiveView/HEEx or avoid shipping the conditional logic to the client.
+
+### JSON boundary & serialization
+- Only pass JSON-serializable data via `props` / `live_json_props`.
+- For structs:
+  - Derive `Jason.Encoder`
+  - For Ecto schemas, exclude `__meta__`
+- Prefer explicit “view models” (maps) instead of sending raw schemas.
+
+### Big objects: use live_json strategically
+- If a prop is large and updates frequently, use `live_json_props` + LiveJson diffing.
+- If the object is small, plain `props` may be cheaper and simpler.
+
+---
+
+## 5) LiveSvelte event patterns (pushEvent / pushEventTo)
+
+### Preferred: target the parent via pushEventTo
+When Svelte needs to talk to either a LiveView or LiveComponent, do NOT hardcode assumptions.
+Use a `parent` id prop and always call `pushEventTo`:
+
+Svelte pattern:
+- Accept props: `parent`, `live`
+- Create helper `pushEvent(event, payload, cb)` that calls:
+  `live.pushEventTo(\`#\${parent}\`, event, payload, cb)`
+
+This keeps components portable across LiveViews and LiveComponents.
+
+### Loading states / server replies
+- Use the callback in `pushEvent` to clear loading flags.
+- If the backend returns `{:reply, payload, socket}`, handle reply in the callback to update local UI.
+
+### Event payload shaping
+- Create explicit encode/decode boundaries:
+  - Svelte sends a simple payload shape that matches the form/UI needs
+  - LiveView decodes into Ecto/changeset params
+- Do not couple Svelte directly to Ecto changeset shapes.
+
+---
+
+## 6) Forms in LiveSvelte (recommended architecture)
+
+### Source of truth
+- For persisted form state:
+  - LiveView owns validation + final submit
+  - Svelte owns immediate UX (input binding, animations, local toggles)
+- A common approach:
+  - Initialize local `form = { ...incomingProps }`
+  - On changes, push `"form_updated"` (or debounce)
+  - On submit, push `"form_submitted"` and show loading until callback fires
+
+### Validation UX
+- Prefer server-side validation with changesets.
+- Pass computed error maps down as props.
+- Svelte renders errors next to fields and clears naturally as props update.
+
+### Debounce
+- If pushing updates on each keystroke is too chatty:
+  - debounce the `"form_updated"` event
+  - or only push on blur / submit
+
+---
+
+## 7) Live navigation from Svelte in a LiveView app
+
+- Prefer real links (`<a href="...">`) and LiveView navigation attributes if the repo uses them.
+- Use LiveView-friendly navigation (`data-phx-link`, `data-phx-link-state`) where appropriate.
+- Do not introduce a client-side router in a LiveView app.
+
+---
+
+## 8) File structure conventions
+
+### SvelteKit
+- `src/routes/**` for routing
+- `src/lib/**` for shared components/utilities
+- `+page.svelte`, `+layout.svelte`, `+page.server.ts`, etc.
+
+### LiveSvelte + Phoenix
+- `assets/svelte/**` for Svelte components
+- `assets/js/**` only for build glue and minimal interop
+- `lib/*_web/live/**` for LiveViews
+- Use `LiveSvelte.Components` macro if the project prefers that style
+- If using the `~V` sigil, keep generated build files ignored (`assets/svelte/_build/`)
+
+---
+
+## 9) “Don’ts” (hard rules)
+
+- Do NOT mix SvelteKit patterns into a Phoenix LiveSvelte repo.
+- Do NOT reintroduce Phoenix’s old esbuild wrapper config if the repo uses LiveSvelte’s build script approach.
+- Do NOT pass Ecto schemas/structs directly to Svelte without safe explicit encoding.
+- Do NOT put secrets or “hidden” feature logic into Svelte props/code if it must remain undiscoverable.
+- Do NOT call `live.pushEvent*` during SSR render; only call from user actions or client-only lifecycle.
+
+---
+
+## 10) Output expectations when you generate code
+
+When writing code:
+- Provide complete, copy-pasteable snippets.
+- Match existing naming + conventions already in the repo.
+- Include types for props and event payloads.
+- Keep components small; extract helpers when reused.
+- Add brief inline comments only where the boundary is non-obvious (SSR, pushEventTo, encoding/decoding).
+
+If multiple valid approaches exist, pick the one that best matches this repo’s current patterns and keep the solution minimal.
+
+<!-- live_svelte-end -->

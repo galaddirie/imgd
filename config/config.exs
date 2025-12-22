@@ -64,6 +64,8 @@ config :imgd, ImgdWeb.Endpoint,
   pubsub_server: Imgd.PubSub,
   live_view: [signing_salt: "kv/AE/28"]
 
+config :live_svelte, ssr: false
+
 # Configure the mailer
 #
 # By default it uses the "Local" adapter which stores the emails
@@ -72,16 +74,6 @@ config :imgd, ImgdWeb.Endpoint,
 # For production it's recommended to configure a different adapter
 # at the `config/runtime.exs`.
 config :imgd, Imgd.Mailer, adapter: Swoosh.Adapters.Local
-
-# Configure esbuild (the version is required)
-config :esbuild,
-  version: "0.25.4",
-  imgd: [
-    args:
-      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
-    cd: Path.expand("../assets", __DIR__),
-    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
-  ]
 
 # Configure tailwind (the version is required)
 config :tailwind,
