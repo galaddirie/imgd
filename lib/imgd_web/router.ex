@@ -41,7 +41,6 @@ defmodule ImgdWeb.Router do
       pipe_through :browser
 
       live_dashboard "/dashboard", metrics: ImgdWeb.Telemetry
-      live "/vue_demo", ImgdWeb.VueDemoLive
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
   end
@@ -59,6 +58,8 @@ defmodule ImgdWeb.Router do
       # live "/workflows/:workflow_id/executions/:id", WorkflowLive.Execution.Show, :show
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
+      live "/vue_demo", ImgdWeb.VueDemoLive
+
     end
 
     post "/users/update-password", UserSessionController, :update_password
