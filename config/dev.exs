@@ -1,5 +1,6 @@
 import Config
 
+config :live_vue, vite_host: "http://localhost:5173", ssr_module: LiveVue.SSR.ViteJS
 config :imgd, :env, :dev
 
 # Configure your database
@@ -26,10 +27,8 @@ config :imgd, ImgdWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "tzl/PQ20vnnzbF107ZILQXIVSVwj74dJa9hnFHvOpGrmnKQOcOCoUzhJL6z/J1jc",
-  watchers: [
-    esbuild: {Esbuild, :install_and_run, [:imgd, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:imgd, ~w(--watch)]}
-  ]
+  watchers: [vite: {PhoenixVite.Npm, :run, [:vite, ~w(dev)]}],
+  static_url: [host: "localhost", port: 5173]
 
 # ## SSL Support
 #
@@ -59,8 +58,6 @@ config :imgd, ImgdWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
-      # Static assets, except user uploads
-      ~r"priv/static/(?!uploads/).*\.(js|css|png|jpeg|jpg|gif|svg)$",
       # Gettext translations
       ~r"priv/gettext/.*\.po$",
       # Router, Controllers, LiveViews and LiveComponents

@@ -41,6 +41,7 @@ defmodule ImgdWeb.Router do
       pipe_through :browser
 
       live_dashboard "/dashboard", metrics: ImgdWeb.Telemetry
+      live "/vue_demo", ImgdWeb.VueDemoLive
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
   end
