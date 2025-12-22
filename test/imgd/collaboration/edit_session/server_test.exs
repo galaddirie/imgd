@@ -406,7 +406,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       # Force persistence (normally happens on timer)
       pid = GenServer.whereis(Server.via_tuple(workflow.id))
       send(pid, :persist)
-      :timer.sleep(50)  # Give it time to persist
+      # Give it time to persist
+      :timer.sleep(50)
 
       # Check database
       operations = Repo.all(from o in EditOperation, where: o.workflow_id == ^workflow.id)

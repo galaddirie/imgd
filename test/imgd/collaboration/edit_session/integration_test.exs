@@ -313,12 +313,14 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       }
 
       {:ok, %{seq: seq}} = Server.apply_operation(workflow.id, operation)
-      assert seq == 1  # Verify operation was applied
+      # Verify operation was applied
+      assert seq == 1
 
       # Force persistence (in real scenario this happens on timer)
       pid = GenServer.whereis(Server.via_tuple(workflow.id))
       send(pid, :persist)
-      :timer.sleep(100)  # Give it more time to persist
+      # Give it more time to persist
+      :timer.sleep(100)
 
       # Check database
       operations =
@@ -418,7 +420,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
 
       # Simulate server restart by stopping session
       Supervisor.stop_session(workflow.id)
-      :timer.sleep(10)  # Give it time to fully terminate
+      # Give it time to fully terminate
+      :timer.sleep(10)
       refute Process.alive?(session_pid)
 
       # New session should recover state
