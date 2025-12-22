@@ -92,3 +92,4 @@ defmodule Imgd.Collaboration.EditorState do
     }
   end
 end
+
