@@ -76,6 +76,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   describe "operation processing" do
     test "applies add_node operation", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       operation = %{
         type: :add_node,
         payload: %{
@@ -191,6 +192,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   describe "editor state operations" do
     test "handles pin_node_output operation", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       operation = %{
         type: :pin_node_output,
         payload: %{
@@ -372,6 +374,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   describe "persistence" do
     test "persists operations to database", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       operation = %{
         type: :update_node_metadata,
         payload: %{node_id: "node_1", changes: %{name: "Persisted Name"}},

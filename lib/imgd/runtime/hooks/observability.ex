@@ -63,7 +63,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
     workflow = put_hook_context(workflow, execution_id, workflow_id)
 
     # Attach hooks to all steps
-    # Note: Runic's :all pseudo-name attaches to every step
     workflow
     |> attach_logging_hooks()
     |> attach_telemetry_hooks(execution_id)
@@ -74,9 +73,13 @@ defmodule Imgd.Runtime.Hooks.Observability do
   """
   @spec attach_logging_hooks(Workflow.t()) :: Workflow.t()
   def attach_logging_hooks(workflow) do
-    workflow
-    |> Workflow.attach_before_hook(:all, &before_step_logging/3)
-    |> Workflow.attach_after_hook(:all, &after_step_logging/3)
+    # Attach logging hooks to all steps
+    workflow.components
+    |> Enum.reduce(workflow, fn {component_name, _component}, wf ->
+      wf
+      |> Workflow.attach_before_hook(component_name, &before_step_logging/3)
+      |> Workflow.attach_after_hook(component_name, &after_step_logging/3)
+    end)
   end
 
   @doc """
@@ -93,9 +96,13 @@ defmodule Imgd.Runtime.Hooks.Observability do
       after_step_telemetry(step, wf, fact, execution_id)
     end
 
-    workflow
-    |> Workflow.attach_before_hook(:all, before_fn)
-    |> Workflow.attach_after_hook(:all, after_fn)
+    # Attach telemetry hooks to all steps
+    workflow.components
+    |> Enum.reduce(workflow, fn {component_name, _component}, wf ->
+      wf
+      |> Workflow.attach_before_hook(component_name, before_fn)
+      |> Workflow.attach_after_hook(component_name, after_fn)
+    end)
   end
 
   # ===========================================================================
@@ -176,14 +183,17 @@ defmodule Imgd.Runtime.Hooks.Observability do
     )
 
     # Broadcast event for real-time updates using the standardized PubSub
-    Imgd.Executions.PubSub.broadcast_node(:node_completed, execution_id, nil, %{
+    payload = %{
       node_id: step_name,
       status: :completed,
       output_data: sanitize_for_broadcast(result_fact.value),
       output_item_count: output_item_count,
       duration_us: duration_us,
       completed_at: DateTime.utc_now()
-    })
+    }
+
+    Logger.debug("Broadcasting node_completed", payload: payload)
+    Imgd.Executions.PubSub.broadcast_node(:node_completed, execution_id, nil, payload)
 
     workflow
   end

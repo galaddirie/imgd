@@ -46,6 +46,7 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
         |> Workflow.add(Runic.step(fn _ -> [1, 2, 3] end, name: "list_step"))
         |> Observability.attach_all_hooks(execution_id: execution_id, workflow_id: "wf-1")
 
+      # Run the workflow
       _finished = Workflow.react_until_satisfied(workflow, :input)
 
       assert_receive {:node_completed, payload}
