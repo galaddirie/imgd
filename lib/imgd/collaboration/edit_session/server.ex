@@ -139,6 +139,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
     {:reply, {:ok, state.editor_state}, state}
   end
 
+  def handle_call({:update_editor_state, new_editor_state}, _from, state) do
+    {:reply, :ok, %{state | editor_state: new_editor_state}}
+  end
+
   @impl true
   def handle_cast({:release_lock, node_id, user_id}, state) do
     new_editor_state = EditorState.release_lock(state.editor_state, node_id, user_id)

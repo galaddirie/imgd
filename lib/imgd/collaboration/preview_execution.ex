@@ -31,6 +31,8 @@ defmodule Imgd.Collaboration.PreviewExecution do
   """
   @spec run(String.t(), Scope.t(), preview_opts()) ::
           {:ok, Executions.Execution.t()} | {:error, term()}
+  @spec run(String.t(), Scope.t(), preview_opts()) ::
+          {:ok, Executions.Execution.t()} | {:error, term()}
   def run(workflow_id, scope, opts \\ []) do
     mode = Keyword.get(opts, :mode, :full)
     target_nodes = Keyword.get(opts, :target_nodes, [])

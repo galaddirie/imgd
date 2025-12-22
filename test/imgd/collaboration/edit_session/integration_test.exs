@@ -77,7 +77,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
           }
         },
         id: "op_add_node",
-        user_id: user1.id
+        user_id: user1.id,
+        client_seq: 1
       }
 
       assert {:ok, %{seq: 1}} = Server.apply_operation(workflow.id, operation1)
@@ -93,7 +94,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
           }
         },
         id: "op_add_connection",
-        user_id: user1.id
+        user_id: user1.id,
+        client_seq: 2
       }
 
       assert {:ok, %{seq: 2}} = Server.apply_operation(workflow.id, operation2)
@@ -116,7 +118,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
           ]
         },
         id: "op_update_config",
-        user_id: user2.id
+        user_id: user2.id,
+        client_seq: 3
       }
 
       assert {:ok, %{seq: 3}} = Server.apply_operation(workflow.id, operation3)
@@ -129,7 +132,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
           output_data: %{"test" => "pinned data"}
         },
         id: "op_pin_output",
-        user_id: user2.id
+        user_id: user2.id,
+        client_seq: 4
       }
 
       assert {:ok, %{seq: 4}} = Server.apply_operation(workflow.id, operation4)
@@ -139,7 +143,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
         type: :disable_node,
         payload: %{node_id: "filter_node", mode: :exclude},
         id: "op_disable_node",
-        user_id: user1.id
+        user_id: user1.id,
+        client_seq: 5
       }
 
       assert {:ok, %{seq: 5}} = Server.apply_operation(workflow.id, operation5)
@@ -168,7 +173,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
         type: :update_node_metadata,
         payload: %{node_id: "input_node", changes: %{name: "Updated Input"}},
         id: "op_update_name",
-        user_id: user1.id
+        user_id: user1.id,
+        client_seq: 1
       }
 
       assert {:ok, %{seq: 1}} = Server.apply_operation(workflow.id, operation)
@@ -200,28 +206,32 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
            type: :update_node_metadata,
            payload: %{node_id: "input_node", changes: %{name: "Name 1"}},
            id: "op_1",
-           user_id: user1.id
+           user_id: user1.id,
+           client_seq: 1
          }},
         {user2.id,
          %{
            type: :update_node_position,
            payload: %{node_id: "input_node", position: %{x: 200, y: 150}},
            id: "op_2",
-           user_id: user2.id
+           user_id: user2.id,
+           client_seq: 2
          }},
         {user1.id,
          %{
            type: :update_node_metadata,
            payload: %{node_id: "input_node", changes: %{notes: "Note 1"}},
            id: "op_3",
-           user_id: user1.id
+           user_id: user1.id,
+           client_seq: 3
          }},
         {user2.id,
          %{
            type: :pin_node_output,
            payload: %{node_id: "input_node", output_data: %{}},
            id: "op_4",
-           user_id: user2.id
+           user_id: user2.id,
+           client_seq: 4
          }}
       ]
 
@@ -252,15 +262,22 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
         type: :pin_node_output,
         payload: %{node_id: "input_node", output_data: %{"pinned" => "value"}},
         id: "pin_op",
-        user_id: scope1.user.id
+        user_id: scope1.user.id,
+        client_seq: 1
       })
 
       Server.apply_operation(workflow.id, %{
         type: :disable_node,
         payload: %{node_id: "transform_node", mode: :exclude},
         id: "disable_op",
-        user_id: scope1.user.id
+        user_id: scope1.user.id,
+        client_seq: 2
       })
+
+      # Check editor state
+      {:ok, editor_state} = Server.get_editor_state(workflow.id)
+      assert Map.keys(editor_state.pinned_outputs) == ["input_node"]
+      assert MapSet.to_list(editor_state.disabled_nodes) == ["transform_node"]
 
       # Run preview execution
       assert {:ok, execution} =
@@ -271,8 +288,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
                )
 
       # Verify execution includes editor state
-      assert execution.metadata["pinned_nodes"] == ["input_node"]
-      assert execution.metadata["disabled_nodes"] == ["transform_node"]
+      assert execution.metadata.extras.pinned_nodes == ["input_node"]
+      assert execution.metadata.extras.disabled_nodes == ["transform_node"]
       assert execution.context["input_node"] == %{"pinned" => "value"}
     end
 
@@ -285,19 +302,23 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
         payload: %{
           node: %{
             id: "test_node",
-            type_id: "test_type",
+            type_id: "manual_input",
             name: "Test Node",
             position: %{x: 100, y: 100}
           }
         },
         id: "persist_test_op",
-        user_id: user1.id
+        user_id: user1.id,
+        client_seq: 1
       }
 
-      Server.apply_operation(workflow.id, operation)
+      {:ok, %{seq: seq}} = Server.apply_operation(workflow.id, operation)
+      assert seq == 1  # Verify operation was applied
 
       # Force persistence (in real scenario this happens on timer)
-      :sys.get_state(Server.via_tuple(workflow.id))
+      pid = GenServer.whereis(Server.via_tuple(workflow.id))
+      send(pid, :persist)
+      :timer.sleep(100)  # Give it more time to persist
 
       # Check database
       operations =
@@ -338,7 +359,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
         type: :update_node_config,
         payload: %{node_id: "input_node", patch: [%{op: "add", path: "/locked", value: true}]},
         id: "locked_edit",
-        user_id: user1.id
+        user_id: user1.id,
+        client_seq: 1
       }
 
       assert {:ok, _} = Server.apply_operation(workflow.id, operation)
@@ -383,13 +405,20 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
         type: :update_node_metadata,
         payload: %{node_id: "input_node", changes: %{name: "Recovery Test"}},
         id: "recovery_op",
-        user_id: user1.id
+        user_id: user1.id,
+        client_seq: 1
       }
 
       Server.apply_operation(workflow.id, operation)
 
+      # Force persistence before stopping
+      pid = GenServer.whereis(Server.via_tuple(workflow.id))
+      send(pid, :persist)
+      :timer.sleep(100)
+
       # Simulate server restart by stopping session
       Supervisor.stop_session(workflow.id)
+      :timer.sleep(10)  # Give it time to fully terminate
       refute Process.alive?(session_pid)
 
       # New session should recover state
@@ -419,7 +448,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
             type: :update_node_metadata,
             payload: %{node_id: "input_node", changes: %{name: "Update #{i}"}},
             id: "bulk_op_#{i}",
-            user_id: user1.id
+            user_id: user1.id,
+            client_seq: i
           }
         end
 

@@ -63,6 +63,9 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       # In a real test, we'd wait for the timer, but that's slow
       :ok = :sys.terminate(pid, :shutdown)
 
+      # Give it a moment to terminate
+      :timer.sleep(10)
+
       # Process should be dead
       refute Process.alive?(pid)
 
@@ -102,6 +105,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "rejects invalid operations", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       operation = %{
         type: :add_node,
         payload: %{
@@ -122,6 +127,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "handles operation deduplication", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       operation = %{
         type: :add_node,
         payload: %{
@@ -152,6 +159,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "maintains operation sequence numbers", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       operations = [
         %{
           type: :update_node_metadata,
@@ -211,6 +220,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "handles disable_node operation", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       operation = %{
         type: :disable_node,
         payload: %{node_id: "node_1", mode: :exclude},
@@ -237,6 +248,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "rejects lock for already locked node", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
 
       assert {:error, {:locked_by, "user_1"}} =
@@ -244,6 +256,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "allows same user to refresh lock", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
       # Should succeed
       :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
@@ -253,6 +266,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "releases node lock", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
       :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
 
       # Release via cast (async)
@@ -279,6 +293,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "provides incremental sync when client has some operations", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       # Apply some operations first
       operations = [
         %{
@@ -308,6 +324,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     end
 
     test "provides up-to-date sync when client is current", %{workflow: workflow} do
+      {:ok, _pid} = Supervisor.ensure_session(workflow.id)
+
       # Apply operation, then sync with current seq
       operation = %{
         type: :update_node_metadata,
@@ -372,21 +390,23 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "persistence" do
-    test "persists operations to database", %{workflow: workflow} do
+    test "persists operations to database", %{workflow: workflow, user: user} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
 
       operation = %{
         type: :update_node_metadata,
         payload: %{node_id: "node_1", changes: %{name: "Persisted Name"}},
         id: "op_1",
-        user_id: Ecto.UUID.generate(),
+        user_id: user.id,
         client_seq: 1
       }
 
       Server.apply_operation(workflow.id, operation)
 
       # Force persistence (normally happens on timer)
-      :sys.get_state(Server.via_tuple(workflow.id))
+      pid = GenServer.whereis(Server.via_tuple(workflow.id))
+      send(pid, :persist)
+      :timer.sleep(50)  # Give it time to persist
 
       # Check database
       operations = Repo.all(from o in EditOperation, where: o.workflow_id == ^workflow.id)
