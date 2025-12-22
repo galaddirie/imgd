@@ -56,7 +56,11 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
       %{scope: scope, workflow: workflow, execution: execution}
     end
 
-    test "emits telemetry and pubsub events for step completion", %{scope: scope, workflow: workflow, execution: execution} do
+    test "emits telemetry and pubsub events for step completion", %{
+      scope: scope,
+      workflow: workflow,
+      execution: execution
+    } do
       execution_id = execution.id
       handler_id = "obs-telemetry-#{System.unique_integer([:positive])}"
 
