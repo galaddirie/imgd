@@ -192,7 +192,10 @@ defmodule Imgd.WorkflowsTest do
       assert "Workflow 3" in workflow_names
     end
 
-    test "list_public_workflows/0 returns only public workflows", %{scope2: scope2, workflow3: workflow3} do
+    test "list_public_workflows/0 returns only public workflows", %{
+      scope2: scope2,
+      workflow3: workflow3
+    } do
       # Initially no public workflows
       assert Workflows.list_public_workflows() == []
 

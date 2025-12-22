@@ -2,8 +2,8 @@ defmodule Imgd.Executions.PubSub do
   @moduledoc """
   PubSub broadcasting for workflow execution and node execution updates.
 
-  Provides real-time updates so LiveViews and other processes can stay
-  in sync as executions progress.
+  All subscriptions require a valid scope with appropriate permissions.
+  This ensures users can only receive updates for resources they have access to.
 
   ## Topics
 
@@ -34,24 +34,62 @@ defmodule Imgd.Executions.PubSub do
   def execution_topic(execution_id), do: "execution:#{execution_id}"
   def workflow_executions_topic(workflow_id), do: "workflow_executions:#{workflow_id}"
 
-  # Subscriptions
+  # ============================================================================
+  # Subscriptions (Scope Required)
+  # ============================================================================
 
-  @doc "Subscribe to updates for a specific execution."
-  def subscribe_execution(execution_id) do
-    Phoenix.PubSub.subscribe(@pubsub, execution_topic(execution_id))
+  @doc """
+  Subscribe to updates for a specific execution.
+
+  Requires a scope with view access to the execution's workflow.
+  Returns `:ok` on success, `{:error, :unauthorized}` if access denied,
+  or `{:error, :not_found}` if execution doesn't exist.
+  """
+  @spec subscribe_execution(Scope.t() | nil, String.t()) ::
+          :ok | {:error, :unauthorized | :not_found}
+  def subscribe_execution(scope, execution_id) do
+    case authorize_execution(scope, execution_id) do
+      :ok ->
+        Phoenix.PubSub.subscribe(@pubsub, execution_topic(execution_id))
+        :ok
+
+      error ->
+        error
+    end
   end
 
-  @doc "Unsubscribe from a specific execution's updates."
+  @doc """
+  Unsubscribe from a specific execution's updates.
+  """
+  @spec unsubscribe_execution(String.t()) :: :ok
   def unsubscribe_execution(execution_id) do
     Phoenix.PubSub.unsubscribe(@pubsub, execution_topic(execution_id))
   end
 
-  @doc "Subscribe to all execution updates for a workflow."
-  def subscribe_workflow_executions(workflow_id) do
-    Phoenix.PubSub.subscribe(@pubsub, workflow_executions_topic(workflow_id))
+  @doc """
+  Subscribe to all execution updates for a workflow.
+
+  Requires a scope with view access to the workflow.
+  Returns `:ok` on success, `{:error, :unauthorized}` if access denied,
+  or `{:error, :not_found}` if workflow doesn't exist.
+  """
+  @spec subscribe_workflow_executions(Scope.t() | nil, String.t()) ::
+          :ok | {:error, :unauthorized | :not_found}
+  def subscribe_workflow_executions(scope, workflow_id) do
+    case authorize_workflow(scope, workflow_id) do
+      :ok ->
+        Phoenix.PubSub.subscribe(@pubsub, workflow_executions_topic(workflow_id))
+        :ok
+
+      error ->
+        error
+    end
   end
 
-  @doc "Unsubscribe from a workflow's execution updates."
+  @doc """
+  Unsubscribe from a workflow's execution updates.
+  """
+  @spec unsubscribe_workflow_executions(String.t()) :: :ok
   def unsubscribe_workflow_executions(workflow_id) do
     Phoenix.PubSub.unsubscribe(@pubsub, workflow_executions_topic(workflow_id))
   end
@@ -63,30 +101,70 @@ defmodule Imgd.Executions.PubSub do
   @doc """
   Checks if the scope can subscribe to updates for a specific execution.
 
-  Returns `true` if the user can view the execution, `false` otherwise.
+  Returns `:ok` if authorized, `{:error, :not_found}` if execution doesn't exist,
+  or `{:error, :unauthorized}` if access denied.
   """
-  @spec can_subscribe_execution?(Scope.t() | nil, String.t()) :: boolean()
-  def can_subscribe_execution?(scope, execution_id) do
+  @spec authorize_execution(Scope.t() | nil, String.t()) ::
+          :ok | {:error, :unauthorized | :not_found}
+  def authorize_execution(scope, execution_id) do
     case Imgd.Repo.get(Imgd.Executions.Execution, execution_id) do
-      nil -> false
-      execution -> Scope.can_view_execution?(scope, execution)
+      nil ->
+        {:error, :not_found}
+
+      execution ->
+        execution = Imgd.Repo.preload(execution, :workflow)
+
+        if Scope.can_view_execution?(scope, execution) do
+          :ok
+        else
+          {:error, :unauthorized}
+        end
     end
   end
 
   @doc """
   Checks if the scope can subscribe to execution updates for a workflow.
 
-  Returns `true` if the user can view the workflow, `false` otherwise.
+  Returns `:ok` if authorized, `{:error, :not_found}` if workflow doesn't exist,
+  or `{:error, :unauthorized}` if access denied.
   """
-  @spec can_subscribe_workflow_executions?(Scope.t() | nil, String.t()) :: boolean()
-  def can_subscribe_workflow_executions?(scope, workflow_id) do
+  @spec authorize_workflow(Scope.t() | nil, String.t()) ::
+          :ok | {:error, :unauthorized | :not_found}
+  def authorize_workflow(scope, workflow_id) do
     case Imgd.Repo.get(Imgd.Workflows.Workflow, workflow_id) do
-      nil -> false
-      workflow -> Scope.can_view_workflow?(scope, workflow)
+      nil ->
+        {:error, :not_found}
+
+      workflow ->
+        if Scope.can_view_workflow?(scope, workflow) do
+          :ok
+        else
+          {:error, :unauthorized}
+        end
     end
   end
 
+  @doc """
+  Deprecated: Use `authorize_execution/2` instead.
+  """
+  @deprecated "Use authorize_execution/2 instead"
+  @spec can_subscribe_execution?(Scope.t() | nil, String.t()) :: boolean()
+  def can_subscribe_execution?(scope, execution_id) do
+    authorize_execution(scope, execution_id) == :ok
+  end
+
+  @doc """
+  Deprecated: Use `authorize_workflow/2` instead.
+  """
+  @deprecated "Use authorize_workflow/2 instead"
+  @spec can_subscribe_workflow_executions?(Scope.t() | nil, String.t()) :: boolean()
+  def can_subscribe_workflow_executions?(scope, workflow_id) do
+    authorize_workflow(scope, workflow_id) == :ok
+  end
+
+  # ============================================================================
   # Execution lifecycle broadcasts
+  # ============================================================================
 
   @doc "Broadcast that an execution has started."
   def broadcast_execution_started(%Execution{} = execution) do
@@ -112,7 +190,9 @@ defmodule Imgd.Executions.PubSub do
     broadcast_workflow(execution.workflow_id, message)
   end
 
+  # ============================================================================
   # Node execution broadcasts
+  # ============================================================================
 
   @doc "Broadcast that a node has started executing."
   def broadcast_node_started(%Execution{} = execution, %NodeExecution{} = node_execution) do
@@ -147,7 +227,9 @@ defmodule Imgd.Executions.PubSub do
     broadcast_workflow(workflow_id, message)
   end
 
+  # ============================================================================
   # Private helpers
+  # ============================================================================
 
   defp broadcast_execution(event, %Execution{} = execution) do
     message = {event, execution}

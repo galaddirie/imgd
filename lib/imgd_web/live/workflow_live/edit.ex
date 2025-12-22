@@ -877,7 +877,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           PubSub.unsubscribe_execution(current_id)
         end
 
-        PubSub.subscribe_execution(execution_id)
+        PubSub.subscribe_execution(socket.assigns.current_scope, execution_id)
         assign(socket, :subscribed_execution_id, execution_id)
     end
   end

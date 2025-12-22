@@ -14,7 +14,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
   require Logger
 
   alias Imgd.Collaboration.{EditorState, EditOperation}
-  alias Imgd.Collaboration.EditSession.{Operations, Persistence, Presence}
+  alias Imgd.Collaboration.EditSession.{Operations, Persistence, Presence, PubSub}
   alias Imgd.Workflows
 
   @idle_timeout :timer.minutes(30)
@@ -127,7 +127,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
     case EditorState.acquire_lock(state.editor_state, node_id, user_id) do
       {:ok, new_editor_state} ->
         new_state = %{state | editor_state: new_editor_state}
-        broadcast_lock_acquired(state.workflow_id, node_id, user_id)
+        PubSub.broadcast_lock_acquired(state.workflow_id, node_id, user_id)
         {:reply, :ok, new_state}
 
       {:locked, other_user_id} ->
@@ -147,7 +147,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
   def handle_cast({:release_lock, node_id, user_id}, state) do
     new_editor_state = EditorState.release_lock(state.editor_state, node_id, user_id)
     new_state = %{state | editor_state: new_editor_state}
-    broadcast_lock_released(state.workflow_id, node_id)
+    PubSub.broadcast_lock_released(state.workflow_id, node_id)
     {:noreply, new_state}
   end
 
@@ -271,8 +271,8 @@ defmodule Imgd.Collaboration.EditSession.Server do
             dirty: true
         }
 
-        # 7. Broadcast to all clients
-        broadcast_operation(state.workflow_id, op_record)
+        # 7. Broadcast to all clients via secure PubSub
+        PubSub.broadcast_operation(state.workflow_id, op_record)
 
         {:ok, new_state, %{seq: new_seq, status: :applied}}
       end
@@ -404,29 +404,5 @@ defmodule Imgd.Collaboration.EditSession.Server do
     if state.idle_timer, do: Process.cancel_timer(state.idle_timer)
     idle_timer = Process.send_after(self(), :idle_timeout, @idle_timeout)
     %{state | idle_timer: idle_timer}
-  end
-
-  defp broadcast_operation(workflow_id, operation) do
-    Phoenix.PubSub.broadcast(
-      Imgd.PubSub,
-      "edit_session:#{workflow_id}",
-      {:operation_applied, operation}
-    )
-  end
-
-  defp broadcast_lock_acquired(workflow_id, node_id, user_id) do
-    Phoenix.PubSub.broadcast(
-      Imgd.PubSub,
-      "edit_session:#{workflow_id}",
-      {:lock_acquired, node_id, user_id}
-    )
-  end
-
-  defp broadcast_lock_released(workflow_id, node_id) do
-    Phoenix.PubSub.broadcast(
-      Imgd.PubSub,
-      "edit_session:#{workflow_id}",
-      {:lock_released, node_id}
-    )
   end
 end

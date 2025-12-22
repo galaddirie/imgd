@@ -2,6 +2,8 @@ defmodule Imgd.Runtime.Events do
   @moduledoc """
   Event emission and handling for workflow execution.
 
+  All subscriptions require a valid scope with appropriate permissions.
+
   Provides a unified interface for emitting execution events that can be
   consumed by:
   - Real-time UI via Phoenix PubSub
@@ -20,6 +22,8 @@ defmodule Imgd.Runtime.Events do
   """
 
   require Logger
+
+  alias Imgd.Accounts.Scope
 
   @type event_type ::
           :execution_started
@@ -59,10 +63,21 @@ defmodule Imgd.Runtime.Events do
 
   @doc """
   Subscribes to events for a specific execution.
+
+  Requires a scope with view access to the execution's workflow.
+  Returns `:ok` on success, `{:error, :unauthorized}` if access denied,
+  or `{:error, :not_found}` if execution doesn't exist.
   """
-  @spec subscribe(String.t()) :: :ok | {:error, term()}
-  def subscribe(execution_id) do
-    Phoenix.PubSub.subscribe(Imgd.PubSub, topic(execution_id))
+  @spec subscribe(Scope.t() | nil, String.t()) :: :ok | {:error, :unauthorized | :not_found}
+  def subscribe(scope, execution_id) do
+    case authorize(scope, execution_id) do
+      :ok ->
+        Phoenix.PubSub.subscribe(Imgd.PubSub, topic(execution_id))
+        :ok
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -71,6 +86,29 @@ defmodule Imgd.Runtime.Events do
   @spec unsubscribe(String.t()) :: :ok
   def unsubscribe(execution_id) do
     Phoenix.PubSub.unsubscribe(Imgd.PubSub, topic(execution_id))
+  end
+
+  @doc """
+  Checks if the scope can subscribe to execution events.
+
+  Returns `:ok` if authorized, `{:error, :not_found}` if execution doesn't exist,
+  or `{:error, :unauthorized}` if access denied.
+  """
+  @spec authorize(Scope.t() | nil, String.t()) :: :ok | {:error, :unauthorized | :not_found}
+  def authorize(scope, execution_id) do
+    case Imgd.Repo.get(Imgd.Executions.Execution, execution_id) do
+      nil ->
+        {:error, :not_found}
+
+      execution ->
+        execution = Imgd.Repo.preload(execution, :workflow)
+
+        if Scope.can_view_execution?(scope, execution) do
+          :ok
+        else
+          {:error, :unauthorized}
+        end
+    end
   end
 
   # ===========================================================================

@@ -16,6 +16,14 @@ defmodule Imgd.Accounts.Scope do
       Scope.can_view_workflow?(scope, workflow)
       Scope.can_edit_workflow?(scope, workflow)
 
+  ## PubSub Authorization
+
+  Use the PubSub-specific modules for subscription authorization:
+
+      Imgd.Executions.PubSub.subscribe_execution(scope, execution_id)
+      Imgd.Collaboration.EditSession.PubSub.subscribe_session(scope, workflow_id)
+      Imgd.Runtime.Events.subscribe(scope, execution_id)
+
   ## Usage
 
       # In context modules, accept scope as first argument
@@ -165,6 +173,34 @@ defmodule Imgd.Accounts.Scope do
   def can_create_execution?(scope, workflow, _execution_type) do
     can_view_workflow?(scope, workflow)
   end
+
+  # ============================================================================
+  # Edit Session Permissions
+  # ============================================================================
+
+  @doc """
+  Checks if the scope can join an edit session for the given workflow.
+
+  Edit sessions require edit access since they involve modifying workflow state.
+  """
+  @spec can_join_edit_session?(t() | nil, map()) :: boolean()
+  def can_join_edit_session?(scope, workflow) do
+    can_edit_workflow?(scope, workflow)
+  end
+
+  @doc """
+  Checks if the scope can observe an edit session (read-only).
+
+  Observation only requires view access.
+  """
+  @spec can_observe_edit_session?(t() | nil, map()) :: boolean()
+  def can_observe_edit_session?(scope, workflow) do
+    can_view_workflow?(scope, workflow)
+  end
+
+  # ============================================================================
+  # Private Helpers
+  # ============================================================================
 
   defp has_workflow_share?(user_id, workflow_id, roles \\ nil) do
     import Ecto.Query

@@ -8,10 +8,16 @@ defmodule Imgd.Collaboration.EditSession.Presence do
   - Cursor positions
   - Node selections
   - Node focus (config panel open)
+
+  Note: Subscription to presence updates should go through
+  `Imgd.Collaboration.EditSession.PubSub.subscribe_presence/2` which
+  enforces scope-based authorization.
   """
   use Phoenix.Presence,
     otp_app: :imgd,
     pubsub_server: Imgd.PubSub
+
+  alias Imgd.Collaboration.EditSession.PubSub, as: EditPubSub
 
   @type presence_meta :: %{
           user: map(),
@@ -22,7 +28,7 @@ defmodule Imgd.Collaboration.EditSession.Presence do
         }
 
   @doc "Topic for a workflow's edit session presence."
-  def topic(workflow_id), do: "edit_presence:#{workflow_id}"
+  def topic(workflow_id), do: EditPubSub.presence_topic(workflow_id)
 
   @doc "Track a user joining an edit session."
   def track_user(workflow_id, user, %Phoenix.LiveView.Socket{}) do
