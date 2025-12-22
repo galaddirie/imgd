@@ -27,7 +27,7 @@ config :imgd, ImgdWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "tzl/PQ20vnnzbF107ZILQXIVSVwj74dJa9hnFHvOpGrmnKQOcOCoUzhJL6z/J1jc",
   watchers: [
-    node: ["build.js", "--watch", cd: Path.expand("../assets", __DIR__)],
+    esbuild: {Esbuild, :install_and_run, [:imgd, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:imgd, ~w(--watch)]}
   ]
 

@@ -68,7 +68,6 @@ defmodule ImgdWeb.Router do
 
     live_session :current_user,
       on_mount: [{ImgdWeb.UserAuth, :mount_current_scope}] do
-      live "/svelte-flow", FlowLive, :index
       live "/users/register", UserLive.Registration, :new
       live "/users/log-in", UserLive.Login, :new
       live "/users/log-in/:token", UserLive.Confirmation, :new

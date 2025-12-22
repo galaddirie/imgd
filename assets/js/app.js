@@ -24,14 +24,12 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/imgd"
 import topbar from "../vendor/topbar"
-import {getHooks} from "../../deps/live_svelte/assets/js/live_svelte/hooks.svelte.js"
-import * as SvelteComponents from "../svelte/**/*.svelte"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, ...getHooks(SvelteComponents)},
+  hooks: {...colocatedHooks},
 })
 
 // Show progress bar on live navigation and form submits
@@ -82,3 +80,4 @@ if (process.env.NODE_ENV === "development") {
     window.liveReloader = reloader
   })
 }
+

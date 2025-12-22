@@ -2,10 +2,8 @@
    https://tailwindcss.com/docs/configuration */
 
 @import "tailwindcss" source(none);
-@import "../node_modules/@xyflow/svelte/dist/style.css";
 @source "../css";
 @source "../js";
-@source "../svelte";
 @source "../../lib/imgd_web";
 
 /* A Tailwind plugin that makes "hero-#{ICON}" classes available.
