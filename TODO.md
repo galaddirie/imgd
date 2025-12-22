@@ -19,6 +19,8 @@ Create example workflows
 
 - multi node example for self hosted audience - get file from pc send it to laptop to run code 
 
+- game server workflow example
+
 ADD ERROR HIGHLIGHTING TO EXPRESSION UI
 
 
