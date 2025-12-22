@@ -26,12 +26,6 @@ defmodule Imgd.ChangesetHelpers do
     end)
   end
 
-
-
-
-
-
-
   @doc """
   Validates that a string field is a valid 64-character lowercase hex hash.
   Used for content hashes (SHA-256).
