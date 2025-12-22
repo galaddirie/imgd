@@ -15,7 +15,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
     {:ok, user} = Accounts.register_user(%{email: "test@example.com", password: "password123"})
     scope = Scope.for_user(user)
 
-    {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+    {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
     # Create a basic draft
     draft_attrs = %{
@@ -29,7 +29,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       ]
     }
 
-    {:ok, _} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+    {:ok, _} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
     %{workflow: workflow, scope: scope, user: user}
   end

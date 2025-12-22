@@ -161,6 +161,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
       |> Enum.into(%{}, fn {node_id, data} -> {node_id, data} end)
 
     Executions.create_execution(
+      scope,
       %{
         workflow_id: workflow_id,
         execution_type: :preview,
@@ -174,8 +175,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
             disabled_nodes: MapSet.to_list(editor_state.disabled_nodes)
           }
         }
-      },
-      scope
+      }
     )
   end
 
@@ -192,7 +192,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
       result_workflow ->
         context = extract_context(result_workflow)
 
-        case Executions.update_execution_status(execution, :completed, scope, output: context) do
+        case Executions.update_execution_status(scope, execution, :completed, output: context) do
           {:ok, updated_execution} -> {:ok, updated_execution}
           # Fallback to original if update fails
           {:error, _} -> {:ok, execution}
@@ -200,7 +200,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
     end
   rescue
     e ->
-      Executions.update_execution_status(execution, :failed, scope, error: Exception.message(e))
+      Executions.update_execution_status(scope, execution, :failed, error: Exception.message(e))
       {:error, e}
   end
 

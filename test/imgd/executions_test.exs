@@ -14,7 +14,7 @@ defmodule Imgd.ExecutionsTest do
       # Create users and workflow
       {:ok, user} = Accounts.register_user(%{email: "user@example.com", password: "password123"})
       scope = Scope.for_user(user)
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+      {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
       # Create and publish a version
       draft_attrs = %{
@@ -23,10 +23,10 @@ defmodule Imgd.ExecutionsTest do
         triggers: [%{type: :manual, config: %{}}]
       }
 
-      {:ok, _draft} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+      {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
       {:ok, {_workflow, version}} =
-        Workflows.publish_workflow(workflow, %{version_tag: "1.0.0"}, scope)
+        Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
 
       %{scope: scope, workflow: workflow, version: version}
     end
@@ -43,7 +43,7 @@ defmodule Imgd.ExecutionsTest do
         metadata: %{trace_id: "trace-123", correlation_id: "corr-456"}
       }
 
-      assert {:ok, execution} = Executions.create_execution(execution_attrs, scope)
+      assert {:ok, execution} = Executions.create_execution(scope, execution_attrs)
       assert execution.workflow_id == workflow.id
       assert execution.workflow_id == workflow.id
       assert execution.status == :pending
@@ -59,12 +59,12 @@ defmodule Imgd.ExecutionsTest do
         trigger: %{type: :manual, data: %{}}
       }
 
-      assert {:error, :workflow_not_found} = Executions.create_execution(execution_attrs, scope)
+      assert {:error, :workflow_not_found} = Executions.create_execution(scope, execution_attrs)
     end
 
     test "create_execution/2 fails when workflow not published", %{scope: scope} do
       # Create unpublished workflow
-      {:ok, unpublished_workflow} = Workflows.create_workflow(%{name: "Unpublished"}, scope)
+      {:ok, unpublished_workflow} = Workflows.create_workflow(scope, %{name: "Unpublished"})
 
       execution_attrs = %{
         workflow_id: unpublished_workflow.id,
@@ -72,13 +72,13 @@ defmodule Imgd.ExecutionsTest do
       }
 
       assert {:error, :workflow_not_published} =
-               Executions.create_execution(execution_attrs, scope)
+               Executions.create_execution(scope, execution_attrs)
     end
 
     test "create_execution/2 allows preview execution on draft workflow for editors", %{
       scope: scope
     } do
-      {:ok, draft_workflow} = Workflows.create_workflow(%{name: "Draft Preview"}, scope)
+      {:ok, draft_workflow} = Workflows.create_workflow(scope, %{name: "Draft Preview"})
 
       draft_attrs = %{
         nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
@@ -86,7 +86,7 @@ defmodule Imgd.ExecutionsTest do
         triggers: [%{type: :manual, config: %{}}]
       }
 
-      {:ok, _draft} = Workflows.update_workflow_draft(draft_workflow, draft_attrs, scope)
+      {:ok, _draft} = Workflows.update_workflow_draft(scope, draft_workflow, draft_attrs)
 
       execution_attrs = %{
         workflow_id: draft_workflow.id,
@@ -94,7 +94,7 @@ defmodule Imgd.ExecutionsTest do
         execution_type: :preview
       }
 
-      assert {:ok, execution} = Executions.create_execution(execution_attrs, scope)
+      assert {:ok, execution} = Executions.create_execution(scope, execution_attrs)
       assert execution.workflow_id == draft_workflow.id
       assert execution.execution_type == :preview
     end
@@ -110,7 +110,7 @@ defmodule Imgd.ExecutionsTest do
         trigger: %{type: :manual, data: %{}}
       }
 
-      assert {:error, :access_denied} = Executions.create_execution(execution_attrs, other_scope)
+      assert {:error, :access_denied} = Executions.create_execution(other_scope, execution_attrs)
     end
 
     test "get_execution/2 returns execution for user with access", %{
@@ -121,7 +121,7 @@ defmodule Imgd.ExecutionsTest do
       # Create execution
       {:ok, execution} = create_test_execution(workflow, version, scope)
 
-      assert {:ok, fetched} = Executions.get_execution(execution.id, scope)
+      assert {:ok, fetched} = Executions.get_execution(scope, execution.id)
       assert fetched.id == execution.id
       assert fetched.workflow_id == workflow.id
     end
@@ -133,13 +133,13 @@ defmodule Imgd.ExecutionsTest do
     } do
       {:ok, execution} = create_test_execution(workflow, version, scope)
 
-      assert {:ok, fetched} = Executions.get_execution_with_nodes(execution.id, scope)
+      assert {:ok, fetched} = Executions.get_execution_with_nodes(scope, execution.id)
       assert fetched.workflow.id == workflow.id
       assert fetched.triggered_by_user.id == scope.user.id
     end
 
     test "get_execution/2 returns error for non-existent execution", %{scope: scope} do
-      assert {:error, :not_found} = Executions.get_execution(Ecto.UUID.generate(), scope)
+      assert {:error, :not_found} = Executions.get_execution(scope, Ecto.UUID.generate())
     end
 
     test "get_execution/2 returns error when user lacks access", %{
@@ -156,7 +156,7 @@ defmodule Imgd.ExecutionsTest do
 
       other_scope = Scope.for_user(other_user)
 
-      assert {:error, :not_found} = Executions.get_execution(execution.id, other_scope)
+      assert {:error, :not_found} = Executions.get_execution(other_scope, execution.id)
     end
   end
 
@@ -164,7 +164,7 @@ defmodule Imgd.ExecutionsTest do
     setup do
       {:ok, user} = Accounts.register_user(%{email: "user@example.com", password: "password123"})
       scope = Scope.for_user(user)
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+      {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
       # Create and publish a version
       draft_attrs = %{
@@ -173,10 +173,10 @@ defmodule Imgd.ExecutionsTest do
         triggers: [%{type: :manual, config: %{}}]
       }
 
-      {:ok, _draft} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+      {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
       {:ok, {_workflow, version}} =
-        Workflows.publish_workflow(workflow, %{version_tag: "1.0.0"}, scope)
+        Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
 
       {:ok, execution} = create_test_execution(workflow, version, scope)
 
@@ -187,7 +187,7 @@ defmodule Imgd.ExecutionsTest do
       scope: scope,
       execution: execution
     } do
-      assert {:ok, updated} = Executions.update_execution_status(execution, :running, scope)
+      assert {:ok, updated} = Executions.update_execution_status(scope, execution, :running)
       assert updated.status == :running
       assert updated.started_at != nil
     end
@@ -199,7 +199,7 @@ defmodule Imgd.ExecutionsTest do
       output = %{"result" => "success"}
 
       assert {:ok, updated} =
-               Executions.update_execution_status(execution, :completed, scope, output: output)
+               Executions.update_execution_status(scope, execution, :completed, output: output)
 
       assert updated.status == :completed
       assert updated.completed_at != nil
@@ -213,7 +213,7 @@ defmodule Imgd.ExecutionsTest do
       error = {:node_failed, "node1", "connection timeout"}
 
       assert {:ok, updated} =
-               Executions.update_execution_status(execution, :failed, scope, error: error)
+               Executions.update_execution_status(scope, execution, :failed, error: error)
 
       assert updated.status == :failed
       assert updated.completed_at != nil
@@ -227,15 +227,15 @@ defmodule Imgd.ExecutionsTest do
       other_scope = Scope.for_user(other_user)
 
       assert {:error, :access_denied} =
-               Executions.update_execution_status(execution, :running, other_scope)
+               Executions.update_execution_status(other_scope, execution, :running)
     end
 
     test "cancel_execution/2 cancels running execution", %{scope: scope, execution: execution} do
       # Start execution
-      {:ok, running} = Executions.update_execution_status(execution, :running, scope)
+      {:ok, running} = Executions.update_execution_status(scope, execution, :running)
 
       # Cancel it
-      assert {:ok, cancelled} = Executions.cancel_execution(running, scope)
+      assert {:ok, cancelled} = Executions.cancel_execution(scope, running)
       assert cancelled.status == :cancelled
       assert cancelled.completed_at != nil
     end
@@ -245,10 +245,10 @@ defmodule Imgd.ExecutionsTest do
       execution: execution
     } do
       # Complete execution
-      {:ok, completed} = Executions.update_execution_status(execution, :completed, scope)
+      {:ok, completed} = Executions.update_execution_status(scope, execution, :completed)
 
       # Try to cancel
-      assert {:error, :already_terminal} = Executions.cancel_execution(completed, scope)
+      assert {:error, :already_terminal} = Executions.cancel_execution(scope, completed)
     end
   end
 
@@ -256,7 +256,7 @@ defmodule Imgd.ExecutionsTest do
     setup do
       {:ok, user} = Accounts.register_user(%{email: "user@example.com", password: "password123"})
       scope = Scope.for_user(user)
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+      {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
       # Create and publish a version
       draft_attrs = %{
@@ -265,10 +265,10 @@ defmodule Imgd.ExecutionsTest do
         triggers: [%{type: :manual, config: %{}}]
       }
 
-      {:ok, _draft} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+      {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
       {:ok, {_workflow, version}} =
-        Workflows.publish_workflow(workflow, %{version_tag: "1.0.0"}, scope)
+        Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
 
       {:ok, execution} = create_test_execution(workflow, version, scope)
 
@@ -287,7 +287,7 @@ defmodule Imgd.ExecutionsTest do
         metadata: %{"priority" => "high"}
       }
 
-      assert {:ok, node_execution} = Executions.create_node_execution(node_attrs, scope)
+      assert {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
       assert node_execution.execution_id == execution.id
       assert node_execution.node_id == "node1"
       assert node_execution.node_type_id == "input_node"
@@ -303,7 +303,7 @@ defmodule Imgd.ExecutionsTest do
         node_type_id: "input_node"
       }
 
-      assert {:error, :execution_not_found} = Executions.create_node_execution(node_attrs, scope)
+      assert {:error, :execution_not_found} = Executions.create_node_execution(scope, node_attrs)
     end
 
     test "create_node_execution/2 fails when user lacks access", %{execution: execution} do
@@ -318,7 +318,7 @@ defmodule Imgd.ExecutionsTest do
         node_type_id: "input_node"
       }
 
-      assert {:error, :access_denied} = Executions.create_node_execution(node_attrs, other_scope)
+      assert {:error, :access_denied} = Executions.create_node_execution(other_scope, node_attrs)
     end
 
     test "update_node_execution_status/4 updates status through lifecycle", %{
@@ -327,17 +327,17 @@ defmodule Imgd.ExecutionsTest do
     } do
       # Create node execution
       node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(node_attrs, scope)
+      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
 
       # Queue it
       assert {:ok, queued} =
-               Executions.update_node_execution_status(node_execution, :queued, scope)
+               Executions.update_node_execution_status(scope, node_execution, :queued)
 
       assert queued.status == :queued
       assert queued.queued_at != nil
 
       # Start it
-      assert {:ok, running} = Executions.update_node_execution_status(queued, :running, scope)
+      assert {:ok, running} = Executions.update_node_execution_status(scope, queued, :running)
       assert running.status == :running
       assert running.started_at != nil
 
@@ -345,7 +345,7 @@ defmodule Imgd.ExecutionsTest do
       output_data = %{"result" => "success"}
 
       assert {:ok, completed} =
-               Executions.update_node_execution_status(running, :completed, scope,
+               Executions.update_node_execution_status(scope, running, :completed,
                  output_data: output_data
                )
 
@@ -360,14 +360,14 @@ defmodule Imgd.ExecutionsTest do
     } do
       # Create and start node execution
       node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(node_attrs, scope)
-      {:ok, running} = Executions.update_node_execution_status(node_execution, :running, scope)
+      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
+      {:ok, running} = Executions.update_node_execution_status(scope, node_execution, :running)
 
       # Fail it
       error = %{"type" => "timeout", "message" => "Connection timed out"}
 
       assert {:ok, failed} =
-               Executions.update_node_execution_status(running, :failed, scope, error: error)
+               Executions.update_node_execution_status(scope, running, :failed, error: error)
 
       assert failed.status == :failed
       assert failed.completed_at != nil
@@ -380,7 +380,7 @@ defmodule Imgd.ExecutionsTest do
     } do
       # Create node execution
       node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(node_attrs, scope)
+      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
 
       {:ok, other_user} =
         Accounts.register_user(%{email: "other@example.com", password: "password123"})
@@ -388,7 +388,7 @@ defmodule Imgd.ExecutionsTest do
       other_scope = Scope.for_user(other_user)
 
       assert {:error, :access_denied} =
-               Executions.update_node_execution_status(node_execution, :running, other_scope)
+               Executions.update_node_execution_status(other_scope, node_execution, :running)
     end
 
     test "retry_node_execution/2 creates a retry node execution", %{
@@ -397,11 +397,11 @@ defmodule Imgd.ExecutionsTest do
     } do
       # Create and fail original node execution
       node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(node_attrs, scope)
-      {:ok, failed} = Executions.update_node_execution_status(node_execution, :failed, scope)
+      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
+      {:ok, failed} = Executions.update_node_execution_status(scope, node_execution, :failed)
 
       # Retry it
-      assert {:ok, retry} = Executions.retry_node_execution(failed, scope)
+      assert {:ok, retry} = Executions.retry_node_execution(scope, failed)
       assert retry.execution_id == execution.id
       assert retry.node_id == "node1"
       assert retry.node_type_id == "input_node"
@@ -416,7 +416,7 @@ defmodule Imgd.ExecutionsTest do
     } do
       # Create node execution
       node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(node_attrs, scope)
+      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
 
       {:ok, other_user} =
         Accounts.register_user(%{email: "other@example.com", password: "password123"})
@@ -424,7 +424,7 @@ defmodule Imgd.ExecutionsTest do
       other_scope = Scope.for_user(other_user)
 
       assert {:error, :access_denied} =
-               Executions.retry_node_execution(node_execution, other_scope)
+               Executions.retry_node_execution(other_scope, node_execution)
     end
 
     test "list_node_executions/2 returns node executions for accessible execution", %{
@@ -434,17 +434,17 @@ defmodule Imgd.ExecutionsTest do
       # Create multiple node executions
       {:ok, _node1} =
         Executions.create_node_execution(
-          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"},
-          scope
+          scope,
+          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"}
         )
 
       {:ok, _node2} =
         Executions.create_node_execution(
-          %{execution_id: execution.id, node_id: "node2", node_type_id: "output"},
-          scope
+          scope,
+          %{execution_id: execution.id, node_id: "node2", node_type_id: "output"}
         )
 
-      node_executions = Executions.list_node_executions(execution, scope)
+      node_executions = Executions.list_node_executions(scope, execution)
       assert length(node_executions) == 2
 
       node_ids = Enum.map(node_executions, & &1.node_id) |> Enum.sort()
@@ -459,7 +459,7 @@ defmodule Imgd.ExecutionsTest do
 
       other_scope = Scope.for_user(other_user)
 
-      assert Executions.list_node_executions(execution, other_scope) == []
+      assert Executions.list_node_executions(other_scope, execution) == []
     end
 
     test "get_node_execution/2 returns node execution for user with access", %{
@@ -468,11 +468,11 @@ defmodule Imgd.ExecutionsTest do
     } do
       {:ok, node_execution} =
         Executions.create_node_execution(
-          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"},
-          scope
+          scope,
+          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"}
         )
 
-      assert {:ok, fetched} = Executions.get_node_execution(node_execution.id, scope)
+      assert {:ok, fetched} = Executions.get_node_execution(scope, node_execution.id)
       assert fetched.id == node_execution.id
       assert fetched.execution.workflow_id == execution.workflow_id
     end
@@ -483,8 +483,8 @@ defmodule Imgd.ExecutionsTest do
     } do
       {:ok, node_execution} =
         Executions.create_node_execution(
-          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"},
-          scope
+          scope,
+          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"}
         )
 
       {:ok, other_user} =
@@ -492,7 +492,7 @@ defmodule Imgd.ExecutionsTest do
 
       other_scope = Scope.for_user(other_user)
 
-      assert {:error, :not_found} = Executions.get_node_execution(node_execution.id, other_scope)
+      assert {:error, :not_found} = Executions.get_node_execution(other_scope, node_execution.id)
     end
   end
 
@@ -509,8 +509,8 @@ defmodule Imgd.ExecutionsTest do
       scope2 = Scope.for_user(user2)
 
       # Create workflows
-      {:ok, workflow1} = Workflows.create_workflow(%{name: "Workflow 1"}, scope1)
-      {:ok, workflow2} = Workflows.create_workflow(%{name: "Workflow 2"}, scope2)
+      {:ok, workflow1} = Workflows.create_workflow(scope1, %{name: "Workflow 1"})
+      {:ok, workflow2} = Workflows.create_workflow(scope2, %{name: "Workflow 2"})
 
       # Publish versions
       draft_attrs = %{
@@ -519,14 +519,14 @@ defmodule Imgd.ExecutionsTest do
         triggers: [%{type: :manual, config: %{}}]
       }
 
-      {:ok, _draft1} = Workflows.update_workflow_draft(workflow1, draft_attrs, scope1)
-      {:ok, _draft2} = Workflows.update_workflow_draft(workflow2, draft_attrs, scope2)
+      {:ok, _draft1} = Workflows.update_workflow_draft(scope1, workflow1, draft_attrs)
+      {:ok, _draft2} = Workflows.update_workflow_draft(scope2, workflow2, draft_attrs)
 
       {:ok, {_w1, version1}} =
-        Workflows.publish_workflow(workflow1, %{version_tag: "1.0.0"}, scope1)
+        Workflows.publish_workflow(scope1, workflow1, %{version_tag: "1.0.0"})
 
       {:ok, {_w2, version2}} =
-        Workflows.publish_workflow(workflow2, %{version_tag: "1.0.0"}, scope2)
+        Workflows.publish_workflow(scope2, workflow2, %{version_tag: "1.0.0"})
 
       # Create executions with different statuses
       {:ok, exec1} = create_test_execution(workflow1, version1, scope1, :pending)
@@ -562,7 +562,7 @@ defmodule Imgd.ExecutionsTest do
       user1 = Accounts.get_user_by_email("user1@example.com")
       [workflow] = Imgd.Workflows.list_owned_workflows(Scope.for_user(user1))
 
-      executions = Executions.list_workflow_executions(workflow, scope1)
+      executions = Executions.list_workflow_executions(scope1, workflow)
       assert length(executions) == 3
     end
 
@@ -570,7 +570,7 @@ defmodule Imgd.ExecutionsTest do
       user1 = Accounts.get_user_by_email("user1@example.com")
       [workflow] = Imgd.Workflows.list_owned_workflows(Scope.for_user(user1))
 
-      executions = Executions.list_workflow_executions(workflow, scope1, limit: 2)
+      executions = Executions.list_workflow_executions(scope1, workflow, limit: 2)
       assert length(executions) == 2
     end
 
@@ -588,7 +588,7 @@ defmodule Imgd.ExecutionsTest do
       [workflow] = Imgd.Workflows.list_owned_workflows(Scope.for_user(user1))
 
       # Get version
-      versions = Workflows.list_workflow_versions(workflow, scope1)
+      versions = Workflows.list_workflow_versions(scope1, workflow)
       version = hd(versions)
 
       # Create execution with yesterday's date

@@ -409,7 +409,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
             }
             |> maybe_put_workflow_version(version_id)
 
-          case Executions.create_execution(execution_attrs, scope) do
+          case Executions.create_execution(scope, execution_attrs) do
             {:ok, execution} ->
               case ExecutionSupervisor.start_execution(execution.id) do
                 {:ok, _pid} ->
@@ -496,7 +496,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       |> maybe_put_workflow_version(version_id)
 
     with :ok <- maybe_persist_draft_for_run(socket, version_id),
-         {:ok, execution} <- Executions.create_execution(execution_attrs, scope) do
+         {:ok, execution} <- Executions.create_execution(scope, execution_attrs) do
       case ExecutionSupervisor.start_execution(execution.id) do
         {:ok, _pid} ->
           :ok
@@ -1118,7 +1118,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       settings: draft.settings || %{}
     }
 
-    case Workflows.update_workflow_draft(workflow, attrs, scope) do
+    case Workflows.update_workflow_draft(scope, workflow, attrs) do
       {:ok, _draft} -> :ok
       {:error, reason} -> {:error, reason}
     end

@@ -17,7 +17,7 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
     scope1 = Scope.for_user(user1)
     scope2 = Scope.for_user(user2)
 
-    {:ok, workflow} = Workflows.create_workflow(%{name: "Integration Test Workflow"}, scope1)
+    {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Integration Test Workflow"})
 
     # Create initial draft
     draft_attrs = %{
@@ -47,7 +47,7 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       ]
     }
 
-    {:ok, _} = Workflows.update_workflow_draft(workflow, draft_attrs, scope1)
+    {:ok, _} = Workflows.update_workflow_draft(scope1, workflow, draft_attrs)
 
     %{workflow: workflow, user1: user1, user2: user2, scope1: scope1, scope2: scope2}
   end

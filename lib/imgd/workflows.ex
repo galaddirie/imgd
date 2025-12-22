@@ -2,8 +2,26 @@ defmodule Imgd.Workflows do
   @moduledoc """
   Context for managing workflows, versions, drafts, and related functionality.
 
-  Provides functions to create, read, update, and delete workflows, manage their
-  versions and drafts, and handle publishing workflows.
+  All functions that require authorization accept a `Scope` as the first argument
+  following Phoenix conventions. Permission checks are performed through the
+  `Imgd.Accounts.Scope` module.
+
+  ## Authorization
+
+  - Use `Scope.can_view_workflow?/2` to check view permissions
+  - Use `Scope.can_edit_workflow?/2` to check edit permissions
+  - Use `Scope.owns_workflow?/2` to check ownership
+
+  ## Examples
+
+      # List workflows accessible to the user
+      Workflows.list_workflows(scope)
+
+      # Get a workflow (returns error if not accessible)
+      {:ok, workflow} = Workflows.get_workflow(scope, workflow_id)
+
+      # Update a workflow (requires edit permission)
+      {:ok, workflow} = Workflows.update_workflow(scope, workflow, attrs)
   """
 
   import Ecto.Query, warn: false
@@ -34,14 +52,14 @@ defmodule Imgd.Workflows do
   def list_workflows(nil), do: list_public_workflows()
 
   def list_workflows(%Scope{} = scope) do
-    user = scope.user
+    user_id = scope.user.id
 
     # Get all workflows the user can access in a single query
     query =
       from w in Workflow,
         left_join: s in WorkflowShare,
-        on: s.workflow_id == w.id and s.user_id == ^user.id,
-        where: w.user_id == ^user.id or not is_nil(s.id) or w.public == true,
+        on: s.workflow_id == w.id and s.user_id == ^user_id,
+        where: w.user_id == ^user_id or not is_nil(s.id) or w.public == true,
         distinct: true,
         order_by: [desc: w.updated_at]
 
@@ -59,33 +77,37 @@ defmodule Imgd.Workflows do
   end
 
   @doc """
-  Lists workflows owned by the given user.
-
-  Returns all workflows owned by the user in the scope.
+  Lists workflows owned by the user in the scope.
   """
   @spec list_owned_workflows(Scope.t()) :: [Workflow.t()]
   def list_owned_workflows(%Scope{} = scope) do
-    user = scope.user
-
-    Repo.all(from w in Workflow, where: w.user_id == ^user.id, order_by: [desc: w.updated_at])
+    user_id = scope.user.id
+    Repo.all(from w in Workflow, where: w.user_id == ^user_id, order_by: [desc: w.updated_at])
   end
+
+  # ============================================================================
+  # Read Functions
+  # ============================================================================
 
   @doc """
   Gets a single workflow by ID, checking access permissions.
 
   Returns `{:ok, workflow}` if the user has access, `{:error, :not_found}` otherwise.
   """
+  @spec get_workflow(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
+          {:ok, Workflow.t()} | {:error, :not_found}
   @spec get_workflow(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
           {:ok, Workflow.t()} | {:error, :not_found}
-  def get_workflow(%Scope{} = scope, id), do: get_workflow(id, scope)
+  def get_workflow(%Scope{} = scope, id), do: do_get_workflow(id, scope)
+  def get_workflow(id, scope), do: do_get_workflow(id, scope)
 
-  def get_workflow(id, scope) do
+  defp do_get_workflow(id, scope) do
     case Repo.get(Workflow, id) do
       nil ->
         {:error, :not_found}
 
       %Workflow{} = workflow ->
-        if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
+        if Scope.can_view_workflow?(scope, workflow) do
           {:ok, workflow}
         else
           {:error, :not_found}
@@ -98,18 +120,20 @@ defmodule Imgd.Workflows do
 
   Returns `{:ok, workflow}` with draft loaded, or `{:error, :not_found}`.
   """
+  @spec get_workflow_with_draft(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
+          {:ok, Workflow.t()} | {:error, :not_found}
   @spec get_workflow_with_draft(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
           {:ok, Workflow.t()} | {:error, :not_found}
-  def get_workflow_with_draft(%Scope{} = scope, id),
-    do: get_workflow_with_draft(id, scope)
+  def get_workflow_with_draft(%Scope{} = scope, id), do: do_get_workflow_with_draft(id, scope)
+  def get_workflow_with_draft(id, scope), do: do_get_workflow_with_draft(id, scope)
 
-  def get_workflow_with_draft(id, scope) do
+  defp do_get_workflow_with_draft(id, scope) do
     case Repo.get(Workflow, id) |> Repo.preload(:draft) do
       nil ->
         {:error, :not_found}
 
       %Workflow{} = workflow ->
-        if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
+        if Scope.can_view_workflow?(scope, workflow) do
           {:ok, workflow}
         else
           {:error, :not_found}
@@ -117,18 +141,22 @@ defmodule Imgd.Workflows do
     end
   end
 
+  # ============================================================================
+  # Create/Update/Delete Functions
+  # ============================================================================
+
   @doc """
   Creates a new workflow for the user in the scope.
 
   Returns `{:ok, workflow}` if successful, `{:error, changeset}` otherwise.
   """
-  @spec create_workflow(workflow_params(), Scope.t()) ::
+  @spec create_workflow(Scope.t(), workflow_params()) ::
           {:ok, Workflow.t()} | {:error, Ecto.Changeset.t()}
-  def create_workflow(attrs, %Scope{} = scope) do
-    user = scope.user
+  def create_workflow(%Scope{} = scope, attrs) do
+    user_id = scope.user.id
 
     %Workflow{}
-    |> Workflow.changeset(Map.put(attrs, :user_id, user.id))
+    |> Workflow.changeset(Map.put(attrs, :user_id, user_id))
     |> Repo.insert()
   end
 
@@ -137,10 +165,10 @@ defmodule Imgd.Workflows do
 
   Returns `{:ok, workflow}` if successful, `{:error, changeset | :not_found | :access_denied}` otherwise.
   """
-  @spec update_workflow(Workflow.t(), workflow_params(), Scope.t()) ::
+  @spec update_workflow(Scope.t(), Workflow.t(), workflow_params()) ::
           {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
-  def update_workflow(%Workflow{} = workflow, attrs, scope) do
-    if Imgd.Workflows.Sharing.can_edit?(workflow, scope) do
+  def update_workflow(%Scope{} = scope, %Workflow{} = workflow, attrs) do
+    if Scope.can_edit_workflow?(scope, workflow) do
       workflow
       |> Workflow.changeset(attrs)
       |> Repo.update()
@@ -155,12 +183,10 @@ defmodule Imgd.Workflows do
   Only owners can delete workflows. Returns `{:ok, workflow}` if successful,
   `{:error, :not_found | :access_denied}` otherwise.
   """
-  @spec delete_workflow(Workflow.t(), Scope.t()) ::
+  @spec delete_workflow(Scope.t(), Workflow.t()) ::
           {:ok, Workflow.t()} | {:error, :not_found | :access_denied}
-  def delete_workflow(%Workflow{} = workflow, %Scope{} = scope) do
-    user = scope.user
-
-    if workflow.user_id == user.id do
+  def delete_workflow(%Scope{} = scope, %Workflow{} = workflow) do
+    if Scope.owns_workflow?(scope, workflow) do
       Repo.delete(workflow)
     else
       {:error, :access_denied}
@@ -173,14 +199,10 @@ defmodule Imgd.Workflows do
   Only owners can archive workflows. Returns `{:ok, workflow}` if successful,
   `{:error, changeset | :not_found | :access_denied}` otherwise.
   """
-  @spec archive_workflow(Workflow.t(), Scope.t()) ::
+  @spec archive_workflow(Scope.t(), Workflow.t()) ::
           {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
   def archive_workflow(%Scope{} = scope, %Workflow{} = workflow) do
-    archive_workflow(workflow, scope)
-  end
-
-  def archive_workflow(%Workflow{} = workflow, scope) do
-    update_workflow(workflow, %{status: :archived}, scope)
+    update_workflow(scope, workflow, %{status: :archived})
   end
 
   @doc """
@@ -188,14 +210,10 @@ defmodule Imgd.Workflows do
 
   Returns `{:ok, workflow}` if successful, `{:error, reason}` otherwise.
   """
-  @spec duplicate_workflow(Workflow.t(), Scope.t()) ::
+  @spec duplicate_workflow(Scope.t(), Workflow.t()) ::
           {:ok, Workflow.t()} | {:error, :access_denied | term()}
   def duplicate_workflow(%Scope{} = scope, %Workflow{} = workflow) do
-    duplicate_workflow(workflow, scope)
-  end
-
-  def duplicate_workflow(%Workflow{} = workflow, %Scope{} = scope) do
-    if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
+    if Scope.can_view_workflow?(scope, workflow) do
       Repo.transaction(fn ->
         workflow = Repo.preload(workflow, :draft)
 
@@ -212,10 +230,7 @@ defmodule Imgd.Workflows do
           published_version_id: nil
         }
 
-        {:ok, duplicated} =
-          %Workflow{user_id: scope.user.id}
-          |> Workflow.changeset(workflow_attrs)
-          |> Repo.insert()
+        {:ok, duplicated} = create_workflow(scope, workflow_attrs)
 
         draft_attrs = %{
           nodes: Enum.map(draft.nodes || [], &Map.from_struct/1),
@@ -240,15 +255,19 @@ defmodule Imgd.Workflows do
     end
   end
 
+  # ============================================================================
+  # Publishing Functions
+  # ============================================================================
+
   @doc """
   Publishes a workflow version, creating a new published version.
 
   Returns `{:ok, {workflow, version}}` if successful, `{:error, reason}` otherwise.
   """
-  @spec publish_workflow(Workflow.t(), workflow_version_params(), Scope.t()) ::
+  @spec publish_workflow(Scope.t(), Workflow.t(), workflow_version_params()) ::
           {:ok, {Workflow.t(), WorkflowVersion.t()}} | {:error, any()}
-  def publish_workflow(%Workflow{} = workflow, version_attrs, scope) do
-    if Imgd.Workflows.Sharing.can_edit?(workflow, scope) do
+  def publish_workflow(%Scope{} = scope, %Workflow{} = workflow, version_attrs) do
+    if Scope.can_edit_workflow?(scope, workflow) do
       Repo.transaction(fn ->
         # Get the current draft
         draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
@@ -285,20 +304,24 @@ defmodule Imgd.Workflows do
     end
   end
 
+  # ============================================================================
+  # Version Functions
+  # ============================================================================
+
   @doc """
   Gets a workflow version by ID, checking access permissions.
 
   Returns `{:ok, version}` if the user has access, `{:error, :not_found}` otherwise.
   """
-  @spec get_workflow_version(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
+  @spec get_workflow_version(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
           {:ok, WorkflowVersion.t()} | {:error, :not_found}
-  def get_workflow_version(id, scope) do
+  def get_workflow_version(scope, id) do
     case Repo.get(WorkflowVersion, id) |> Repo.preload(:workflow) do
       nil ->
         {:error, :not_found}
 
       %WorkflowVersion{workflow: workflow} = version ->
-        if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
+        if Scope.can_view_workflow?(scope, workflow) do
           {:ok, version}
         else
           {:error, :not_found}
@@ -311,9 +334,9 @@ defmodule Imgd.Workflows do
 
   Returns a list of versions if the user has access, empty list otherwise.
   """
-  @spec list_workflow_versions(Workflow.t(), Scope.t() | nil) :: [WorkflowVersion.t()]
-  def list_workflow_versions(%Workflow{} = workflow, scope) do
-    if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
+  @spec list_workflow_versions(Scope.t() | nil, Workflow.t()) :: [WorkflowVersion.t()]
+  def list_workflow_versions(scope, %Workflow{} = workflow) do
+    if Scope.can_view_workflow?(scope, workflow) do
       Repo.all(
         from v in WorkflowVersion,
           where: v.workflow_id == ^workflow.id,
@@ -323,6 +346,10 @@ defmodule Imgd.Workflows do
       []
     end
   end
+
+  # ============================================================================
+  # Draft Functions
+  # ============================================================================
 
   @doc """
   Gets a workflow draft by workflow ID.
@@ -342,10 +369,10 @@ defmodule Imgd.Workflows do
 
   Returns `{:ok, draft}` if successful, `{:error, changeset | :not_found | :access_denied}` otherwise.
   """
-  @spec update_workflow_draft(Workflow.t(), map(), Scope.t()) ::
+  @spec update_workflow_draft(Scope.t(), Workflow.t(), map()) ::
           {:ok, WorkflowDraft.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
-  def update_workflow_draft(%Workflow{} = workflow, attrs, scope) do
-    if Imgd.Workflows.Sharing.can_edit?(workflow, scope) do
+  def update_workflow_draft(%Scope{} = scope, %Workflow{} = workflow, attrs) do
+    if Scope.can_edit_workflow?(scope, workflow) do
       case Repo.get_by(WorkflowDraft, workflow_id: workflow.id) do
         nil ->
           # Create draft if it doesn't exist
@@ -363,14 +390,18 @@ defmodule Imgd.Workflows do
     end
   end
 
+  # ============================================================================
+  # Execution Functions
+  # ============================================================================
+
   @doc """
   Gets executions for a workflow, checking access permissions.
 
   Returns a list of executions if the user has access, empty list otherwise.
   """
-  @spec list_workflow_executions(Workflow.t(), Scope.t() | nil) :: [Execution.t()]
-  def list_workflow_executions(%Workflow{} = workflow, scope) do
-    if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
+  @spec list_workflow_executions(Scope.t() | nil, Workflow.t()) :: [Execution.t()]
+  def list_workflow_executions(scope, %Workflow{} = workflow) do
+    if Scope.can_view_workflow?(scope, workflow) do
       Repo.all(
         from e in Execution,
           where: e.workflow_id == ^workflow.id,
@@ -398,7 +429,9 @@ defmodule Imgd.Workflows do
     Repo.all(query) |> Map.new()
   end
 
-  # Private functions
+  # ============================================================================
+  # Private Helpers
+  # ============================================================================
 
   defp compute_source_hash(%WorkflowDraft{} = draft) do
     # Create a deterministic hash of the workflow structure

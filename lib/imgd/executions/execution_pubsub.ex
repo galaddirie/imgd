@@ -25,6 +25,7 @@ defmodule Imgd.Executions.PubSub do
   """
 
   alias Imgd.Executions.{Execution, NodeExecution}
+  alias Imgd.Accounts.Scope
 
   @pubsub Imgd.PubSub
 
@@ -53,6 +54,36 @@ defmodule Imgd.Executions.PubSub do
   @doc "Unsubscribe from a workflow's execution updates."
   def unsubscribe_workflow_executions(workflow_id) do
     Phoenix.PubSub.unsubscribe(@pubsub, workflow_executions_topic(workflow_id))
+  end
+
+  # ============================================================================
+  # Authorization
+  # ============================================================================
+
+  @doc """
+  Checks if the scope can subscribe to updates for a specific execution.
+
+  Returns `true` if the user can view the execution, `false` otherwise.
+  """
+  @spec can_subscribe_execution?(Scope.t() | nil, String.t()) :: boolean()
+  def can_subscribe_execution?(scope, execution_id) do
+    case Imgd.Repo.get(Imgd.Executions.Execution, execution_id) do
+      nil -> false
+      execution -> Scope.can_view_execution?(scope, execution)
+    end
+  end
+
+  @doc """
+  Checks if the scope can subscribe to execution updates for a workflow.
+
+  Returns `true` if the user can view the workflow, `false` otherwise.
+  """
+  @spec can_subscribe_workflow_executions?(Scope.t() | nil, String.t()) :: boolean()
+  def can_subscribe_workflow_executions?(scope, workflow_id) do
+    case Imgd.Repo.get(Imgd.Workflows.Workflow, workflow_id) do
+      nil -> false
+      workflow -> Scope.can_view_workflow?(scope, workflow)
+    end
   end
 
   # Execution lifecycle broadcasts

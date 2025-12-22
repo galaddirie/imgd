@@ -11,7 +11,7 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
     {:ok, user} = Accounts.register_user(%{email: "test@example.com", password: "password123"})
     scope = Scope.for_user(user)
 
-    {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+    {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
     # Create a draft for the workflow
     draft_attrs = %{
@@ -20,7 +20,7 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
       ]
     }
 
-    {:ok, _} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+    {:ok, _} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
     %{workflow: workflow, scope: scope}
   end
@@ -108,7 +108,7 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
       # Create another workflow
       {:ok, user} = Accounts.register_user(%{email: "test2@example.com", password: "password123"})
       scope = Scope.for_user(user)
-      {:ok, workflow2} = Workflows.create_workflow(%{name: "Workflow 2"}, scope)
+      {:ok, workflow2} = Workflows.create_workflow(scope, %{name: "Workflow 2"})
 
       # Create draft for workflow2
       draft_attrs = %{
@@ -117,7 +117,7 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
         ]
       }
 
-      {:ok, _} = Workflows.update_workflow_draft(workflow2, draft_attrs, scope)
+      {:ok, _} = Workflows.update_workflow_draft(scope, workflow2, draft_attrs)
 
       {:ok, pid1} = Supervisor.ensure_session(workflow.id)
       {:ok, pid2} = Supervisor.ensure_session(workflow2.id)
@@ -159,7 +159,7 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
             Accounts.register_user(%{email: "user#{i}@example.com", password: "password123"})
 
           scope = Scope.for_user(user)
-          {:ok, wf} = Workflows.create_workflow(%{name: "Workflow #{i}"}, scope)
+          {:ok, wf} = Workflows.create_workflow(scope, %{name: "Workflow #{i}"})
 
           # Create draft for each workflow
           draft_attrs = %{
@@ -168,7 +168,7 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
             ]
           }
 
-          {:ok, _} = Workflows.update_workflow_draft(wf, draft_attrs, scope)
+          {:ok, _} = Workflows.update_workflow_draft(scope, wf, draft_attrs)
           wf
         end
 

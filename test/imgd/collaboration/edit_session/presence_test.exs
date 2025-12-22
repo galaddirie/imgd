@@ -11,7 +11,7 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
     {:ok, user} = Accounts.register_user(%{email: "test@example.com", password: "password123"})
     scope = Scope.for_user(user)
 
-    {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+    {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
     %{workflow: workflow, user: user}
   end
@@ -149,7 +149,7 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
       # Create another workflow
       {:ok, user} = Accounts.register_user(%{email: "other@example.com", password: "password123"})
       scope = Scope.for_user(user)
-      {:ok, workflow2} = Workflows.create_workflow(%{name: "Workflow 2"}, scope)
+      {:ok, workflow2} = Workflows.create_workflow(scope, %{name: "Workflow 2"})
 
       Presence.track_user(workflow.id, %{id: "user1", email: "user1@test.com"}, self())
       Presence.track_user(workflow2.id, %{id: "user2", email: "user2@test.com"}, self())

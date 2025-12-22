@@ -60,12 +60,12 @@ defmodule Imgd.Executions do
 
   Returns executions if the user has access to the workflow, empty list otherwise.
   """
-  @spec list_workflow_executions(Workflow.t(), Scope.t() | nil, keyword()) :: [Execution.t()]
-  def list_workflow_executions(%Workflow{} = workflow, scope, opts \\ []) do
+  @spec list_workflow_executions(Scope.t() | nil, Workflow.t(), keyword()) :: [Execution.t()]
+  def list_workflow_executions(scope, %Workflow{} = workflow, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
     offset = Keyword.get(opts, :offset, 0)
 
-    if Imgd.Workflows.Sharing.can_view?(workflow, scope) do
+    if Scope.can_view_workflow?(scope, workflow) do
       Repo.all(
         from e in Execution,
           where: e.workflow_id == ^workflow.id,
@@ -83,17 +83,15 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, execution}` if the user has access, `{:error, :not_found}` otherwise.
   """
-  @spec get_execution(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
+  @spec get_execution(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
           {:ok, Execution.t()} | {:error, :not_found}
-  def get_execution(%Scope{} = scope, id), do: get_execution(id, scope)
-
-  def get_execution(id, scope) do
+  def get_execution(scope, id) do
     case Repo.get(Execution, id) |> Repo.preload([:workflow, :triggered_by_user]) do
       nil ->
         {:error, :not_found}
 
       %Execution{} = execution ->
-        if Imgd.Workflows.Sharing.can_view?(execution.workflow, scope) do
+        if Scope.can_view_workflow?(scope, execution.workflow) do
           {:ok, execution}
         else
           {:error, :not_found}
@@ -106,16 +104,16 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, execution}` with node executions loaded, or `{:error, :not_found}`.
   """
-  @spec get_execution_with_nodes(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
+  @spec get_execution_with_nodes(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
           {:ok, Execution.t()} | {:error, :not_found}
-  def get_execution_with_nodes(id, scope) do
+  def get_execution_with_nodes(scope, id) do
     case Repo.get(Execution, id)
          |> Repo.preload([:workflow, :triggered_by_user, :node_executions]) do
       nil ->
         {:error, :not_found}
 
       %Execution{} = execution ->
-        if Imgd.Workflows.Sharing.can_view?(execution.workflow, scope) do
+        if Scope.can_view_workflow?(scope, execution.workflow) do
           {:ok, execution}
         else
           {:error, :not_found}
@@ -128,9 +126,9 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, execution}` if successful, `{:error, changeset}` otherwise.
   """
-  @spec create_execution(execution_params(), Scope.t() | nil) ::
+  @spec create_execution(Scope.t() | nil, execution_params()) ::
           {:ok, Execution.t()} | {:error, Ecto.Changeset.t()}
-  def create_execution(attrs, scope) do
+  def create_execution(scope, attrs) do
     # Check if user can view the workflow
     workflow_id = attrs[:workflow_id]
     execution_type = Map.get(attrs, :execution_type, :production)
@@ -140,8 +138,8 @@ defmodule Imgd.Executions do
         {:error, :workflow_not_found}
 
       workflow ->
-        can_view = Imgd.Workflows.Sharing.can_view?(workflow, scope)
-        can_edit = Imgd.Workflows.Sharing.can_edit?(workflow, scope)
+        can_view = Scope.can_view_workflow?(scope, workflow)
+        can_edit = Scope.can_edit_workflow?(scope, workflow)
 
         cond do
           execution_type in [:preview, :partial] and not can_edit ->
@@ -192,13 +190,13 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, execution}` if successful, `{:error, changeset | :not_found | :access_denied}` otherwise.
   """
-  @spec update_execution_status(Execution.t(), Execution.status(), Scope.t() | nil, keyword()) ::
+  @spec update_execution_status(Scope.t() | nil, Execution.t(), Execution.status(), keyword()) ::
           {:ok, Execution.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
-  def update_execution_status(%Execution{} = execution, status, scope, opts \\ []) do
+  def update_execution_status(scope, %Execution{} = execution, status, opts \\ []) do
     # Ensure workflow is loaded
     execution = Repo.preload(execution, :workflow)
 
-    if Imgd.Workflows.Sharing.can_view?(execution.workflow, scope) do
+    if Scope.can_view_workflow?(scope, execution.workflow) do
       updates = %{status: status}
 
       # Add timestamps based on status
@@ -243,13 +241,13 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, execution}` if successful, `{:error, reason}` otherwise.
   """
-  @spec cancel_execution(Execution.t(), Scope.t() | nil) ::
+  @spec cancel_execution(Scope.t() | nil, Execution.t()) ::
           {:ok, Execution.t()} | {:error, :not_found | :access_denied | :already_terminal}
-  def cancel_execution(%Execution{} = execution, scope) do
+  def cancel_execution(scope, %Execution{} = execution) do
     if Execution.terminal?(execution) do
       {:error, :already_terminal}
     else
-      update_execution_status(execution, :cancelled, scope)
+      update_execution_status(scope, execution, :cancelled)
     end
   end
 
@@ -258,12 +256,12 @@ defmodule Imgd.Executions do
 
   Returns node executions ordered by insertion time.
   """
-  @spec list_node_executions(Execution.t(), Scope.t() | nil) :: [NodeExecution.t()]
-  def list_node_executions(%Execution{} = execution, scope) do
+  @spec list_node_executions(Scope.t() | nil, Execution.t()) :: [NodeExecution.t()]
+  def list_node_executions(scope, %Execution{} = execution) do
     # Ensure workflow is loaded
     execution = Repo.preload(execution, :workflow)
 
-    if Imgd.Workflows.Sharing.can_view?(execution.workflow, scope) do
+    if Scope.can_view_workflow?(scope, execution.workflow) do
       Repo.all(
         from ne in NodeExecution,
           where: ne.execution_id == ^execution.id,
@@ -279,15 +277,15 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, node_execution}` if the user has access, `{:error, :not_found}` otherwise.
   """
-  @spec get_node_execution(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
+  @spec get_node_execution(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
           {:ok, NodeExecution.t()} | {:error, :not_found}
-  def get_node_execution(id, scope) do
+  def get_node_execution(scope, id) do
     case Repo.get(NodeExecution, id) |> Repo.preload(execution: :workflow) do
       nil ->
         {:error, :not_found}
 
       %NodeExecution{execution: execution} = node_execution ->
-        if Imgd.Workflows.Sharing.can_view?(execution.workflow, scope) do
+        if Scope.can_view_workflow?(scope, execution.workflow) do
           {:ok, node_execution}
         else
           {:error, :not_found}
@@ -300,9 +298,9 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, node_execution}` if successful, `{:error, changeset}` otherwise.
   """
-  @spec create_node_execution(node_execution_params(), Scope.t() | nil) ::
+  @spec create_node_execution(Scope.t() | nil, node_execution_params()) ::
           {:ok, NodeExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
-  def create_node_execution(attrs, scope) do
+  def create_node_execution(scope, attrs) do
     execution_id = attrs[:execution_id]
 
     case Repo.get(Execution, execution_id) |> Repo.preload(:workflow) do
@@ -310,7 +308,7 @@ defmodule Imgd.Executions do
         {:error, :execution_not_found}
 
       execution ->
-        if Imgd.Workflows.Sharing.can_view?(execution.workflow, scope) do
+        if Scope.can_view_workflow?(scope, execution.workflow) do
           %NodeExecution{}
           |> NodeExecution.changeset(attrs)
           |> Repo.insert()
@@ -326,17 +324,17 @@ defmodule Imgd.Executions do
   Returns `{:ok, node_execution}` if successful, `{:error, changeset | :access_denied}` otherwise.
   """
   @spec update_node_execution_status(
+          Scope.t() | nil,
           NodeExecution.t(),
           NodeExecution.status(),
-          Scope.t() | nil,
           keyword()
         ) ::
           {:ok, NodeExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
-  def update_node_execution_status(%NodeExecution{} = node_execution, status, scope, opts \\ []) do
+  def update_node_execution_status(scope, %NodeExecution{} = node_execution, status, opts \\ []) do
     # Check access via the execution's workflow
     execution = Repo.get!(Execution, node_execution.execution_id) |> Repo.preload(:workflow)
 
-    if Imgd.Workflows.Sharing.can_view?(execution.workflow, scope) do
+    if Scope.can_view_workflow?(scope, execution.workflow) do
       updates = %{status: status}
 
       # Add timestamps based on status
@@ -384,13 +382,13 @@ defmodule Imgd.Executions do
 
   Returns `{:ok, node_execution}` if successful, `{:error, changeset | :access_denied}` otherwise.
   """
-  @spec retry_node_execution(NodeExecution.t(), Scope.t() | nil) ::
+  @spec retry_node_execution(Scope.t() | nil, NodeExecution.t()) ::
           {:ok, NodeExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
-  def retry_node_execution(%NodeExecution{} = original, scope) do
+  def retry_node_execution(scope, %NodeExecution{} = original) do
     # Check access via the execution's workflow
     execution = Repo.get!(Execution, original.execution_id) |> Repo.preload(:workflow)
 
-    if Imgd.Workflows.Sharing.can_view?(execution.workflow, scope) do
+    if Scope.can_view_workflow?(scope, execution.workflow) do
       %NodeExecution{}
       |> NodeExecution.changeset(%{
         execution_id: original.execution_id,

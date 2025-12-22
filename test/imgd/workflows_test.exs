@@ -34,7 +34,7 @@ defmodule Imgd.WorkflowsTest do
         description: "A test workflow description"
       }
 
-      assert {:ok, workflow} = Workflows.create_workflow(attrs, scope1)
+      assert {:ok, workflow} = Workflows.create_workflow(scope1, attrs)
       assert workflow.name == "Test Workflow"
       assert workflow.description == "A test workflow description"
       assert workflow.user_id == scope1.user.id
@@ -45,13 +45,13 @@ defmodule Imgd.WorkflowsTest do
     test "create_workflow/2 validates required fields", %{scope1: scope1} do
       # Missing name
       attrs = %{description: "Description without name"}
-      assert {:error, changeset} = Workflows.create_workflow(attrs, scope1)
+      assert {:error, changeset} = Workflows.create_workflow(scope1, attrs)
       assert %{name: ["can't be blank"]} = errors_on(changeset)
     end
 
     test "get_workflow/2 returns workflow for owner", %{scope1: scope1} do
       # Create workflow
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope1)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Test Workflow"})
 
       # Owner can access
       assert {:ok, fetched} = Workflows.get_workflow(workflow.id, scope1)
@@ -64,7 +64,7 @@ defmodule Imgd.WorkflowsTest do
 
     test "get_workflow/2 returns error when user lacks access", %{scope1: scope1, scope2: scope2} do
       # Create workflow for user1
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope1)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Test Workflow"})
 
       # User2 cannot access
       assert {:error, :not_found} = Workflows.get_workflow(workflow.id, scope2)
@@ -72,8 +72,8 @@ defmodule Imgd.WorkflowsTest do
 
     test "get_workflow/2 allows access to public workflows", %{scope1: scope1, scope2: scope2} do
       # Create and make workflow public
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Public Workflow"}, scope1)
-      {:ok, public_workflow} = Imgd.Workflows.Sharing.make_public(workflow)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Public Workflow"})
+      {:ok, public_workflow} = Workflows.update_workflow(scope1, workflow, %{public: true})
 
       # Any user can access public workflows
       assert {:ok, fetched} = Workflows.get_workflow(public_workflow.id, scope2)
@@ -81,7 +81,7 @@ defmodule Imgd.WorkflowsTest do
     end
 
     test "update_workflow/3 updates workflow for owner", %{scope1: scope1} do
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Original Name"}, scope1)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Original Name"})
 
       update_attrs = %{
         name: "Updated Name",
@@ -89,7 +89,7 @@ defmodule Imgd.WorkflowsTest do
         public: true
       }
 
-      assert {:ok, updated} = Workflows.update_workflow(workflow, update_attrs, scope1)
+      assert {:ok, updated} = Workflows.update_workflow(scope1, workflow, update_attrs)
       assert updated.name == "Updated Name"
       assert updated.description == "Updated description"
       assert updated.public
@@ -99,16 +99,16 @@ defmodule Imgd.WorkflowsTest do
       scope1: scope1,
       scope2: scope2
     } do
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope1)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Test Workflow"})
 
       assert {:error, :access_denied} =
-               Workflows.update_workflow(workflow, %{name: "New Name"}, scope2)
+               Workflows.update_workflow(scope2, workflow, %{name: "New Name"})
     end
 
     test "delete_workflow/2 deletes workflow for owner", %{scope1: scope1} do
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope1)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Test Workflow"})
 
-      assert {:ok, deleted} = Workflows.delete_workflow(workflow, scope1)
+      assert {:ok, deleted} = Workflows.delete_workflow(scope1, workflow)
       assert deleted.id == workflow.id
 
       # Verify it's gone
@@ -119,16 +119,16 @@ defmodule Imgd.WorkflowsTest do
       scope1: scope1,
       scope2: scope2
     } do
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope1)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Test Workflow"})
 
-      assert {:error, :access_denied} = Workflows.delete_workflow(workflow, scope2)
+      assert {:error, :access_denied} = Workflows.delete_workflow(scope2, workflow)
     end
 
     test "archive_workflow/2 archives workflow for owner", %{scope1: scope1} do
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope1)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Test Workflow"})
       assert workflow.status == :draft
 
-      assert {:ok, archived} = Workflows.archive_workflow(workflow, scope1)
+      assert {:ok, archived} = Workflows.archive_workflow(scope1, workflow)
       assert archived.status == :archived
     end
 
@@ -136,9 +136,9 @@ defmodule Imgd.WorkflowsTest do
       scope1: scope1,
       scope2: scope2
     } do
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope1)
+      {:ok, workflow} = Workflows.create_workflow(scope1, %{name: "Test Workflow"})
 
-      assert {:error, :access_denied} = Workflows.archive_workflow(workflow, scope2)
+      assert {:error, :access_denied} = Workflows.archive_workflow(scope2, workflow)
     end
   end
 
@@ -154,9 +154,9 @@ defmodule Imgd.WorkflowsTest do
       scope2 = Scope.for_user(user2)
 
       # Create workflows
-      {:ok, workflow1} = Workflows.create_workflow(%{name: "Workflow 1"}, scope1)
-      {:ok, workflow2} = Workflows.create_workflow(%{name: "Workflow 2"}, scope1)
-      {:ok, workflow3} = Workflows.create_workflow(%{name: "Workflow 3"}, scope2)
+      {:ok, workflow1} = Workflows.create_workflow(scope1, %{name: "Workflow 1"})
+      {:ok, workflow2} = Workflows.create_workflow(scope1, %{name: "Workflow 2"})
+      {:ok, workflow3} = Workflows.create_workflow(scope2, %{name: "Workflow 3"})
 
       %{
         scope1: scope1,
@@ -178,27 +178,13 @@ defmodule Imgd.WorkflowsTest do
       assert Workflows.list_workflows(nil) == []
     end
 
-    test "list_workflows/1 includes shared workflows", %{
-      scope1: scope1,
-      scope2: _scope2,
-      workflow3: workflow3
-    } do
-      # Share workflow3 with user1
-      {:ok, _share} = Imgd.Workflows.Sharing.share_workflow(workflow3, scope1, :viewer)
-
-      workflows = Workflows.list_workflows(scope1)
-      assert length(workflows) == 3
-      workflow_names = Enum.map(workflows, & &1.name) |> Enum.sort()
-      assert "Workflow 3" in workflow_names
-    end
-
     test "list_workflows/1 includes public workflows", %{
       scope1: scope1,
-      scope2: _scope2,
+      scope2: scope2,
       workflow3: workflow3
     } do
       # Make workflow3 public
-      {:ok, _public_workflow} = Imgd.Workflows.Sharing.make_public(workflow3)
+      {:ok, _public_workflow} = Workflows.update_workflow(scope2, workflow3, %{public: true})
 
       workflows = Workflows.list_workflows(scope1)
       assert length(workflows) == 3
@@ -206,27 +192,13 @@ defmodule Imgd.WorkflowsTest do
       assert "Workflow 3" in workflow_names
     end
 
-    test "list_owned_workflows/1 returns only owned workflows", %{
-      scope1: scope1,
-      scope2: _scope2,
-      workflow3: workflow3
-    } do
-      # Share workflow3 with user1
-      {:ok, _share} = Imgd.Workflows.Sharing.share_workflow(workflow3, scope1, :viewer)
-
-      owned_workflows = Workflows.list_owned_workflows(scope1)
-      assert length(owned_workflows) == 2
-      workflow_names = Enum.map(owned_workflows, & &1.name) |> Enum.sort()
-      assert workflow_names == ["Workflow 1", "Workflow 2"]
-    end
-
-    test "list_public_workflows/0 returns only public workflows", %{workflow3: workflow3} do
+    test "list_public_workflows/0 returns only public workflows", %{scope2: scope2, workflow3: workflow3} do
       # Initially no public workflows
-      assert Workflows.Sharing.list_public_workflows() == []
+      assert Workflows.list_public_workflows() == []
 
       # Make one public
-      {:ok, _public_workflow} = Imgd.Workflows.Sharing.make_public(workflow3)
-      public_workflows = Workflows.Sharing.list_public_workflows()
+      {:ok, _public_workflow} = Workflows.update_workflow(scope2, workflow3, %{public: true})
+      public_workflows = Workflows.list_public_workflows()
       assert length(public_workflows) == 1
       assert hd(public_workflows).id == workflow3.id
     end
@@ -237,7 +209,7 @@ defmodule Imgd.WorkflowsTest do
       {:ok, user} = Accounts.register_user(%{email: "user@example.com", password: "password123"})
       scope = Scope.for_user(user)
 
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+      {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
       # Create a draft for the workflow
       draft_attrs = %{
@@ -247,7 +219,7 @@ defmodule Imgd.WorkflowsTest do
         settings: %{timeout_ms: 300_000, max_retries: 3}
       }
 
-      {:ok, _draft} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+      {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
       %{scope: scope, workflow: workflow}
     end
@@ -259,7 +231,7 @@ defmodule Imgd.WorkflowsTest do
       }
 
       assert {:ok, {updated_workflow, version}} =
-               Workflows.publish_workflow(workflow, version_attrs, scope)
+               Workflows.publish_workflow(scope, workflow, version_attrs)
 
       assert updated_workflow.status == :active
       assert updated_workflow.current_version_tag == "1.0.0"
@@ -280,7 +252,7 @@ defmodule Imgd.WorkflowsTest do
       version_attrs = %{version_tag: "1.0.0"}
 
       assert {:error, :access_denied} =
-               Workflows.publish_workflow(workflow, version_attrs, other_scope)
+               Workflows.publish_workflow(other_scope, workflow, version_attrs)
     end
 
     test "get_workflow_version/2 returns version for user with access", %{
@@ -289,14 +261,14 @@ defmodule Imgd.WorkflowsTest do
     } do
       # First publish a version
       {:ok, {_workflow, version}} =
-        Workflows.publish_workflow(workflow, %{version_tag: "1.0.0"}, scope)
+        Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
 
-      assert {:ok, fetched} = Workflows.get_workflow_version(version.id, scope)
+      assert {:ok, fetched} = Workflows.get_workflow_version(scope, version.id)
       assert fetched.id == version.id
     end
 
     test "get_workflow_version/2 returns error for non-existent version", %{scope: scope} do
-      assert {:error, :not_found} = Workflows.get_workflow_version(Ecto.UUID.generate(), scope)
+      assert {:error, :not_found} = Workflows.get_workflow_version(scope, Ecto.UUID.generate())
     end
 
     test "list_workflow_versions/2 returns versions for accessible workflow", %{
@@ -304,10 +276,10 @@ defmodule Imgd.WorkflowsTest do
       workflow: workflow
     } do
       # Publish multiple versions
-      {:ok, {_w1, _v1}} = Workflows.publish_workflow(workflow, %{version_tag: "1.0.0"}, scope)
-      {:ok, {_w2, _v2}} = Workflows.publish_workflow(workflow, %{version_tag: "1.1.0"}, scope)
+      {:ok, {_w1, _v1}} = Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
+      {:ok, {_w2, _v2}} = Workflows.publish_workflow(scope, workflow, %{version_tag: "1.1.0"})
 
-      versions = Workflows.list_workflow_versions(workflow, scope)
+      versions = Workflows.list_workflow_versions(scope, workflow)
       assert length(versions) == 2
       version_tags = Enum.map(versions, & &1.version_tag) |> Enum.sort()
       assert version_tags == ["1.0.0", "1.1.0"]
@@ -324,10 +296,10 @@ defmodule Imgd.WorkflowsTest do
 
       # Publish a version
       {:ok, {_workflow, _version}} =
-        Workflows.publish_workflow(workflow, %{version_tag: "1.0.0"}, scope)
+        Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
 
       # Other user cannot see versions
-      assert Workflows.list_workflow_versions(workflow, other_scope) == []
+      assert Workflows.list_workflow_versions(other_scope, workflow) == []
     end
   end
 
@@ -335,7 +307,7 @@ defmodule Imgd.WorkflowsTest do
     setup do
       {:ok, user} = Accounts.register_user(%{email: "user@example.com", password: "password123"})
       scope = Scope.for_user(user)
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+      {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
       %{scope: scope, workflow: workflow}
     end
@@ -351,7 +323,7 @@ defmodule Imgd.WorkflowsTest do
         settings: %{timeout_ms: 300_000, max_retries: 3}
       }
 
-      assert {:ok, draft} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+      assert {:ok, draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
       assert draft.workflow_id == workflow.id
       assert length(draft.nodes) == 1
       assert hd(draft.nodes).id == "node1"
@@ -369,7 +341,7 @@ defmodule Imgd.WorkflowsTest do
         triggers: []
       }
 
-      {:ok, draft} = Workflows.update_workflow_draft(workflow, initial_attrs, scope)
+      {:ok, draft} = Workflows.update_workflow_draft(scope, workflow, initial_attrs)
 
       # Update draft
       update_attrs = %{
@@ -379,7 +351,7 @@ defmodule Imgd.WorkflowsTest do
         ]
       }
 
-      {:ok, updated_draft} = Workflows.update_workflow_draft(workflow, update_attrs, scope)
+      {:ok, updated_draft} = Workflows.update_workflow_draft(scope, workflow, update_attrs)
 
       assert updated_draft.workflow_id == draft.workflow_id
       assert length(updated_draft.nodes) == 2
@@ -396,7 +368,7 @@ defmodule Imgd.WorkflowsTest do
       draft_attrs = %{nodes: %{}, connections: [], triggers: []}
 
       assert {:error, :access_denied} =
-               Workflows.update_workflow_draft(workflow, draft_attrs, other_scope)
+               Workflows.update_workflow_draft(other_scope, workflow, draft_attrs)
     end
   end
 
@@ -404,7 +376,7 @@ defmodule Imgd.WorkflowsTest do
     setup do
       {:ok, user} = Accounts.register_user(%{email: "user@example.com", password: "password123"})
       scope = Scope.for_user(user)
-      {:ok, workflow} = Workflows.create_workflow(%{name: "Test Workflow"}, scope)
+      {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
       # Create and publish a version
       draft_attrs = %{
@@ -413,10 +385,10 @@ defmodule Imgd.WorkflowsTest do
         triggers: [%{type: :manual, config: %{}}]
       }
 
-      {:ok, _draft} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+      {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
       {:ok, {_workflow, version}} =
-        Workflows.publish_workflow(workflow, %{version_tag: "1.0.0"}, scope)
+        Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
 
       # Create some executions
       {:ok, execution1} = create_execution_for_workflow(workflow, version, :pending)
@@ -431,7 +403,7 @@ defmodule Imgd.WorkflowsTest do
       workflow: workflow,
       executions: executions
     } do
-      fetched_executions = Workflows.list_workflow_executions(workflow, scope)
+      fetched_executions = Workflows.list_workflow_executions(scope, workflow)
       assert length(fetched_executions) == 3
 
       execution_ids = Enum.map(fetched_executions, & &1.id) |> MapSet.new()
@@ -447,7 +419,7 @@ defmodule Imgd.WorkflowsTest do
 
       other_scope = Scope.for_user(other_user)
 
-      assert Workflows.list_workflow_executions(workflow, other_scope) == []
+      assert Workflows.list_workflow_executions(other_scope, workflow) == []
     end
 
     test "count_workflow_executions/1 returns execution counts by status", %{workflow: workflow} do
@@ -460,7 +432,7 @@ defmodule Imgd.WorkflowsTest do
     test "count_workflow_executions/1 returns empty map for workflow with no executions" do
       {:ok, user} = Accounts.register_user(%{email: "new@example.com", password: "password123"})
       scope = Scope.for_user(user)
-      {:ok, empty_workflow} = Workflows.create_workflow(%{name: "Empty Workflow"}, scope)
+      {:ok, empty_workflow} = Workflows.create_workflow(scope, %{name: "Empty Workflow"})
 
       assert Workflows.count_workflow_executions(empty_workflow) == %{}
     end
