@@ -51,4 +51,3 @@ defmodule Imgd.Collaboration.EditOperation do
     |> unique_constraint([:workflow_id, :seq])
   end
 end
-

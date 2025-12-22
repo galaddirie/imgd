@@ -43,4 +43,3 @@ defmodule Imgd.Collaboration.EditSession.Supervisor do
     end
   end
 end
-
