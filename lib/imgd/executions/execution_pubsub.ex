@@ -112,7 +112,6 @@ defmodule Imgd.Executions.PubSub do
   @doc "Broadcast a node event with a raw payload."
   def broadcast_node(event, execution_id, workflow_id, payload) do
     message = {event, payload}
-
     broadcast(execution_id, message)
     broadcast_workflow(workflow_id, message)
   end
