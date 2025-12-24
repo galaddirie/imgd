@@ -4,7 +4,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   """
 
   alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.{Node, Connection}
+  alias Imgd.Workflows.Embeds.{Step, Connection}
   alias Imgd.Graph
 
   @type operation :: %{
@@ -18,20 +18,20 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   @spec validate(WorkflowDraft.t(), operation()) :: :ok | {:error, term()}
   def validate(draft, operation) do
     case operation.type do
-      :add_node ->
-        validate_add_node(draft, operation.payload)
+      :add_step ->
+        validate_add_step(draft, operation.payload)
 
-      :remove_node ->
-        validate_remove_node(draft, operation.payload)
+      :remove_step ->
+        validate_remove_step(draft, operation.payload)
 
-      :update_node_config ->
-        validate_update_node(draft, operation.payload)
+      :update_step_config ->
+        validate_update_step(draft, operation.payload)
 
-      :update_node_position ->
-        validate_update_node(draft, operation.payload)
+      :update_step_position ->
+        validate_update_step(draft, operation.payload)
 
-      :update_node_metadata ->
-        validate_update_node(draft, operation.payload)
+      :update_step_metadata ->
+        validate_update_step(draft, operation.payload)
 
       :add_connection ->
         validate_add_connection(draft, operation.payload)
@@ -40,7 +40,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
         validate_remove_connection(draft, operation.payload)
 
       # Editor operations don't need draft validation
-      type when type in [:pin_node_output, :unpin_node_output, :disable_node, :enable_node] ->
+      type when type in [:pin_step_output, :unpin_step_output, :disable_step, :enable_step] ->
         :ok
 
       _ ->
@@ -63,51 +63,51 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   # Validation Functions
   # ============================================================================
 
-  defp validate_add_node(draft, %{node: node_data}) do
-    node_id = node_data.id || node_data["id"]
+  defp validate_add_step(draft, %{step: step_data}) do
+    step_id = step_data.id || step_data["id"]
 
     cond do
-      node_exists?(draft, node_id) ->
-        {:error, {:node_already_exists, node_id}}
+      step_exists?(draft, step_id) ->
+        {:error, {:step_already_exists, step_id}}
 
-      not valid_node_type?(node_data) ->
-        {:error, :invalid_node_type}
+      not valid_step_type?(step_data) ->
+        {:error, :invalid_step_type}
 
       true ->
         :ok
     end
   end
 
-  defp validate_remove_node(draft, %{node_id: node_id}) do
-    if node_exists?(draft, node_id) do
+  defp validate_remove_step(draft, %{step_id: step_id}) do
+    if step_exists?(draft, step_id) do
       :ok
     else
-      {:error, {:node_not_found, node_id}}
+      {:error, {:step_not_found, step_id}}
     end
   end
 
-  defp validate_update_node(draft, %{node_id: node_id}) do
-    if node_exists?(draft, node_id) do
+  defp validate_update_step(draft, %{step_id: step_id}) do
+    if step_exists?(draft, step_id) do
       :ok
     else
-      {:error, {:node_not_found, node_id}}
+      {:error, {:step_not_found, step_id}}
     end
   end
 
   defp validate_add_connection(draft, %{connection: conn_data}) do
-    source_id = conn_data.source_node_id || conn_data["source_node_id"]
-    target_id = conn_data.target_node_id || conn_data["target_node_id"]
+    source_id = conn_data.source_step_id || conn_data["source_step_id"]
+    target_id = conn_data.target_step_id || conn_data["target_step_id"]
     conn_id = conn_data.id || conn_data["id"]
 
     cond do
       connection_exists?(draft, conn_id) ->
         {:error, {:connection_already_exists, conn_id}}
 
-      not node_exists?(draft, source_id) ->
-        {:error, {:source_node_not_found, source_id}}
+      not step_exists?(draft, source_id) ->
+        {:error, {:source_step_not_found, source_id}}
 
-      not node_exists?(draft, target_id) ->
-        {:error, {:target_node_not_found, target_id}}
+      not step_exists?(draft, target_id) ->
+        {:error, {:target_step_not_found, target_id}}
 
       source_id == target_id ->
         {:error, :self_loop_not_allowed}
@@ -132,40 +132,40 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   # Apply Functions
   # ============================================================================
 
-  defp do_apply(draft, :add_node, %{node: node_data}) do
-    node = build_node(node_data)
-    new_nodes = draft.nodes ++ [node]
-    {:ok, %{draft | nodes: new_nodes}}
+  defp do_apply(draft, :add_step, %{step: step_data}) do
+    step = build_step(step_data)
+    new_steps = draft.steps ++ [step]
+    {:ok, %{draft | steps: new_steps}}
   end
 
-  defp do_apply(draft, :remove_node, %{node_id: node_id}) do
-    # Remove node and all its connections
-    new_nodes = Enum.reject(draft.nodes, &(&1.id == node_id))
+  defp do_apply(draft, :remove_step, %{step_id: step_id}) do
+    # Remove step and all its connections
+    new_steps = Enum.reject(draft.steps, &(&1.id == step_id))
 
     new_connections =
       Enum.reject(draft.connections, fn conn ->
-        conn.source_node_id == node_id or conn.target_node_id == node_id
+        conn.source_step_id == step_id or conn.target_step_id == step_id
       end)
 
-    {:ok, %{draft | nodes: new_nodes, connections: new_connections}}
+    {:ok, %{draft | steps: new_steps, connections: new_connections}}
   end
 
-  defp do_apply(draft, :update_node_config, %{node_id: node_id, patch: patch}) do
-    update_node(draft, node_id, fn node ->
-      new_config = apply_json_patch(node.config, patch)
-      %{node | config: new_config}
+  defp do_apply(draft, :update_step_config, %{step_id: step_id, patch: patch}) do
+    update_step(draft, step_id, fn step ->
+      new_config = apply_json_patch(step.config, patch)
+      %{step | config: new_config}
     end)
   end
 
-  defp do_apply(draft, :update_node_position, %{node_id: node_id, position: position}) do
-    update_node(draft, node_id, fn node ->
-      %{node | position: position}
+  defp do_apply(draft, :update_step_position, %{step_id: step_id, position: position}) do
+    update_step(draft, step_id, fn step ->
+      %{step | position: position}
     end)
   end
 
-  defp do_apply(draft, :update_node_metadata, %{node_id: node_id, changes: changes}) do
-    update_node(draft, node_id, fn node ->
-      node
+  defp do_apply(draft, :update_step_metadata, %{step_id: step_id, changes: changes}) do
+    update_step(draft, step_id, fn step ->
+      step
       |> maybe_update(:name, changes)
       |> maybe_update(:notes, changes)
     end)
@@ -190,22 +190,22 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   # Helpers
   # ============================================================================
 
-  defp node_exists?(draft, node_id) do
-    Enum.any?(draft.nodes, &(&1.id == node_id))
+  defp step_exists?(draft, step_id) do
+    Enum.any?(draft.steps, &(&1.id == step_id))
   end
 
   defp connection_exists?(draft, conn_id) do
     Enum.any?(draft.connections, &(&1.id == conn_id))
   end
 
-  defp valid_node_type?(node_data) do
-    type_id = node_data.type_id || node_data["type_id"]
-    Imgd.Nodes.Registry.exists?(type_id)
+  defp valid_step_type?(step_data) do
+    type_id = step_data.type_id || step_data["type_id"]
+    Imgd.Steps.Registry.exists?(type_id)
   end
 
   defp would_create_cycle?(draft, source_id, target_id) do
     # Build graph with proposed edge and check for cycles
-    case Graph.from_workflow(draft.nodes, draft.connections) do
+    case Graph.from_workflow(draft.steps, draft.connections) do
       {:ok, graph} ->
         # Add the proposed edge
         test_graph = Graph.add_edge(graph, source_id, target_id)
@@ -217,21 +217,21 @@ defmodule Imgd.Collaboration.EditSession.Operations do
     end
   end
 
-  defp update_node(draft, node_id, update_fn) do
-    new_nodes =
-      Enum.map(draft.nodes, fn node ->
-        if node.id == node_id do
-          update_fn.(node)
+  defp update_step(draft, step_id, update_fn) do
+    new_steps =
+      Enum.map(draft.steps, fn step ->
+        if step.id == step_id do
+          update_fn.(step)
         else
-          node
+          step
         end
       end)
 
-    {:ok, %{draft | nodes: new_nodes}}
+    {:ok, %{draft | steps: new_steps}}
   end
 
-  defp build_node(data) when is_map(data) do
-    %Node{
+  defp build_step(data) when is_map(data) do
+    %Step{
       id: data[:id] || data["id"],
       type_id: data[:type_id] || data["type_id"],
       name: data[:name] || data["name"],
@@ -244,9 +244,9 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   defp build_connection(data) when is_map(data) do
     %Connection{
       id: data[:id] || data["id"],
-      source_node_id: data[:source_node_id] || data["source_node_id"],
+      source_step_id: data[:source_step_id] || data["source_step_id"],
       source_output: data[:source_output] || data["source_output"] || "main",
-      target_node_id: data[:target_node_id] || data["target_node_id"],
+      target_step_id: data[:target_step_id] || data["target_step_id"],
       target_input: data[:target_input] || data["target_input"] || "main"
     }
   end

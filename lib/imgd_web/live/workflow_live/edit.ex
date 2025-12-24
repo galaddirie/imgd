@@ -3,30 +3,31 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   LiveView for Editing and running workflow executions in real-time.
 
   Features:
-  - Visual DAG representation with live node status updates
+  - Visual DAG representation with live step status updates
   - Real-time trace log streaming
-  - Node configuration modal with expression support
+  - Step configuration modal with expression support
   - Pin management for iterative development
   """
   use ImgdWeb, :live_view
 
   alias Imgd.Collaboration.EditorState
-  alias Imgd.Collaboration.EditSession.{Operations, Presence, Server, Supervisor}
+  alias Imgd.Collaboration.EditSession.{Supervisor, Server, Presence}
   alias Imgd.Executions
-  alias Imgd.Executions.{Execution, NodeExecution, PubSub}
+  alias Imgd.Executions.{Execution, StepExecution, PubSub}
   alias Imgd.Runtime.Execution.Supervisor, as: ExecutionSupervisor
   alias Imgd.Workflows
   alias Imgd.Workflows.DagLayout
-  alias ImgdWeb.WorkflowLive.Components.NodeConfigModal
+  alias Imgd.Collaboration.EditSession.Operations
+  alias ImgdWeb.WorkflowLive.Components.StepConfigModal
   import ImgdWeb.WorkflowLive.RunnerComponents
 
   @trace_log_limit 500
   @draft_operation_types [
-    :add_node,
-    :remove_node,
-    :update_node_config,
-    :update_node_position,
-    :update_node_metadata,
+    :add_step,
+    :remove_step,
+    :update_step_config,
+    :update_step_position,
+    :update_step_metadata,
     :add_connection,
     :remove_connection
   ]
@@ -61,9 +62,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               _ -> %EditorState{workflow_id: workflow.id}
             end
 
-          node_map = Map.new((draft && draft.nodes) || [], &{&1.id, &1})
+          step_map = Map.new((draft && draft.steps) || [], &{&1.id, &1})
           pin_labels = %{}
-          pins_with_status = build_pins_with_status(editor_state, node_map, pin_labels)
+          pins_with_status = build_pins_with_status(editor_state, step_map, pin_labels)
 
           socket =
             socket
@@ -75,17 +76,17 @@ defmodule ImgdWeb.WorkflowLive.Edit do
             |> assign(:client_seq, 0)
             |> assign(:editor_state, editor_state)
             |> assign(:presence_tracked?, false)
-            |> assign(:locked_node_id, nil)
+            |> assign(:locked_step_id, nil)
             |> assign(:pin_labels, pin_labels)
             |> assign(:versions, versions)
             |> assign(:versions_map, versions_map)
             |> assign(:selected_version_id, "draft")
             |> assign_source_graph(draft)
             |> assign(:execution, nil)
-            |> assign(:node_states, build_initial_pin_states(workflow, pins_with_status))
-            |> assign(:selected_node_id, nil)
+            |> assign(:step_states, build_initial_pin_states(workflow, pins_with_status))
+            |> assign(:selected_step_id, nil)
             |> assign(:running?, false)
-            |> assign(:can_run?, length((draft && draft.nodes) || []) > 0)
+            |> assign(:can_run?, length((draft && draft.steps) || []) > 0)
             |> assign(:trace_log_count, 0)
             |> assign(:subscribed_execution_id, nil)
             |> assign(:demo_inputs, demo_inputs)
@@ -94,10 +95,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
             |> assign(:run_form_error, nil)
             # Modal state
             |> assign(:show_config_modal, false)
-            |> assign(:config_modal_node, nil)
+            |> assign(:config_modal_step, nil)
             # Context menu state
             |> assign(:show_context_menu, false)
-            |> assign(:context_menu_node_id, nil)
+            |> assign(:context_menu_step_id, nil)
             |> assign(:context_menu_position, %{x: 0, y: 0})
             |> assign(:pins_with_status, pins_with_status)
             |> maybe_subscribe_to_edit_session(scope, workflow.id)
@@ -116,39 +117,39 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   defp assign_source_graph(socket, source) do
     # Only Workflow has a draft; Versions and Snapshots are themselves the source.
-    {nodes, connections} =
+    {steps, connections} =
       case source do
         %Imgd.Workflows.Workflow{} = workflow ->
           workflow = Imgd.Repo.preload(workflow, :draft)
           draft = workflow.draft
-          {(draft && draft.nodes) || [], (draft && draft.connections) || []}
+          {(draft && draft.steps) || [], (draft && draft.connections) || []}
 
-        %{nodes: nodes, connections: connections} ->
-          {nodes || [], connections || []}
+        %{steps: steps, connections: connections} ->
+          {steps || [], connections || []}
 
         _ ->
           {[], []}
       end
 
     {layout, layout_meta} =
-      DagLayout.compute_with_metadata(nodes, connections)
+      DagLayout.compute_with_metadata(steps, connections)
 
     edges = DagLayout.compute_edges(connections, layout)
-    node_map = Map.new(nodes, &{&1.id, &1})
+    step_map = Map.new(steps, &{&1.id, &1})
 
     socket
-    |> assign(:graph_nodes, nodes)
+    |> assign(:graph_steps, steps)
     |> assign(:dag_layout, layout)
     |> assign(:dag_edges, edges)
     |> assign(:dag_meta, layout_meta)
-    |> assign(:node_map, node_map)
+    |> assign(:step_map, step_map)
   end
 
   @impl true
   def handle_params(%{"execution_id" => execution_id}, _uri, socket) do
     scope = socket.assigns.current_scope
 
-    case Executions.get_execution_with_nodes(execution_id, scope) do
+    case Executions.get_execution_with_steps(execution_id, scope) do
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Execution not found")}
 
@@ -195,35 +196,35 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   # ============================================================================
-  # Node Config Modal Events
+  # Step Config Modal Events
   # ============================================================================
 
   @impl true
-  def handle_event("open_node_config", %{"node-id" => node_id}, socket) do
-    node = Map.get(socket.assigns.node_map, node_id)
+  def handle_event("open_step_config", %{"step-id" => step_id}, socket) do
+    step = Map.get(socket.assigns.step_map, step_id)
 
-    if node do
-      socket = release_node_lock(socket)
+    if step do
+      socket = release_step_lock(socket)
 
-      case acquire_node_lock(socket, node_id) do
+      case acquire_step_lock(socket, step_id) do
         {:ok, socket} ->
           socket =
             socket
             |> assign(:show_config_modal, true)
-            |> assign(:config_modal_node, node)
+            |> assign(:config_modal_step, step)
             |> assign(:show_context_menu, false)
-            |> maybe_update_presence_focus(node_id)
+            |> maybe_update_presence_focus(step_id)
 
           {:noreply, socket}
 
         {:error, {:locked_by, _user_id}} ->
-          {:noreply, put_flash(socket, :error, "Node is currently being edited")}
+          {:noreply, put_flash(socket, :error, "Step is currently being edited")}
 
         {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Unable to lock node: #{inspect(reason)}")}
+          {:noreply, put_flash(socket, :error, "Unable to lock step: #{inspect(reason)}")}
       end
     else
-      {:noreply, put_flash(socket, :error, "Node not found")}
+      {:noreply, put_flash(socket, :error, "Step not found")}
     end
   end
 
@@ -231,9 +232,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_event("close_config_modal", _, socket) do
     {:noreply,
      socket
-     |> release_node_lock()
+     |> release_step_lock()
      |> assign(:show_config_modal, false)
-     |> assign(:config_modal_node, nil)
+     |> assign(:config_modal_step, nil)
      |> maybe_update_presence_focus(nil)}
   end
 
@@ -277,7 +278,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         socket
         |> assign(:selected_version_id, version_id)
         |> assign_source_graph(source)
-        |> assign(:can_run?, length(Map.get(source || %{}, :nodes) || []) > 0)
+        |> assign(:can_run?, length(Map.get(source || %{}, :steps) || []) > 0)
       else
         socket
       end
@@ -292,33 +293,33 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   @impl true
-  def handle_event("execute_to_node", %{"node-id" => node_id}, socket) do
-    handle_execute_to_node_impl(socket, node_id)
+  def handle_event("execute_to_step", %{"step-id" => step_id}, socket) do
+    handle_execute_to_step_impl(socket, step_id)
   end
 
   # ============================================================================
-  # Node Selection & Context Menu
+  # Step Selection & Context Menu
   # ============================================================================
 
   @impl true
-  def handle_event("select_node", %{"node-id" => node_id}, socket) do
+  def handle_event("select_step", %{"step-id" => step_id}, socket) do
     # Double-click opens modal, single click selects
-    selected = if socket.assigns.selected_node_id == node_id, do: nil, else: node_id
+    selected = if socket.assigns.selected_step_id == step_id, do: nil, else: step_id
 
     socket =
       socket
-      |> assign(:selected_node_id, selected)
+      |> assign(:selected_step_id, selected)
       |> maybe_update_presence_selection(selected)
 
     {:noreply, socket}
   end
 
   @impl true
-  def handle_event("open_context_menu", %{"node-id" => node_id, "x" => x, "y" => y}, socket) do
+  def handle_event("open_context_menu", %{"step-id" => step_id, "x" => x, "y" => y}, socket) do
     socket =
       socket
       |> assign(:show_context_menu, true)
-      |> assign(:context_menu_node_id, node_id)
+      |> assign(:context_menu_step_id, step_id)
       |> assign(:context_menu_position, %{x: x, y: y})
 
     {:noreply, socket}
@@ -329,7 +330,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     socket =
       socket
       |> assign(:show_context_menu, false)
-      |> assign(:context_menu_node_id, nil)
+      |> assign(:context_menu_step_id, nil)
 
     {:noreply, socket}
   end
@@ -338,7 +339,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_event("clear_selection", _params, socket) do
     socket =
       socket
-      |> assign(:selected_node_id, nil)
+      |> assign(:selected_step_id, nil)
       |> maybe_update_presence_selection(nil)
 
     {:noreply, socket}
@@ -349,14 +350,14 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # ============================================================================
 
   @impl true
-  def handle_event("clear_pin", %{"node-id" => node_id}, socket) do
-    case apply_edit_operation(socket, :unpin_node_output, %{node_id: node_id}) do
+  def handle_event("clear_pin", %{"step-id" => step_id}, socket) do
+    case apply_edit_operation(socket, :unpin_step_output, %{step_id: step_id}) do
       {:ok, socket} ->
         socket =
           socket
           |> assign(:show_context_menu, false)
           |> put_flash(:info, "Pin removed")
-          |> append_trace_log(:info, "Removed pin", %{node_id: node_id})
+          |> append_trace_log(:info, "Removed pin", %{step_id: step_id})
 
         {:noreply, socket}
 
@@ -370,8 +371,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     pins = socket.assigns.pins_with_status
 
     {socket, errors} =
-      Enum.reduce(pins, {socket, []}, fn {node_id, _pin}, {socket, errors} ->
-        case apply_edit_operation(socket, :unpin_node_output, %{node_id: node_id}) do
+      Enum.reduce(pins, {socket, []}, fn {step_id, _pin}, {socket, errors} ->
+        case apply_edit_operation(socket, :unpin_step_output, %{step_id: step_id}) do
           {:ok, socket} -> {socket, errors}
           {:error, reason} -> {socket, [reason | errors]}
         end
@@ -431,7 +432,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
                     |> assign(:execution, execution)
                     |> assign(:running?, true)
                     |> assign(
-                      :node_states,
+                      :step_states,
                       build_initial_pin_states(workflow, socket.assigns.pins_with_status)
                     )
                     |> assign(:trace_log_count, 0)
@@ -471,11 +472,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
            |> assign(:run_form_error, message)}
       end
     else
-      {:noreply, put_flash(socket, :error, "Workflow must have nodes before running")}
+      {:noreply, put_flash(socket, :error, "Workflow must have steps before running")}
     end
   end
 
-  defp handle_execute_to_node_impl(socket, node_id) do
+  defp handle_execute_to_step_impl(socket, step_id) do
     scope = socket.assigns.current_scope
     workflow = socket.assigns.workflow
     trigger_data = get_trigger_data_from_form(socket)
@@ -487,10 +488,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         execution_type: :partial,
         trigger: %{type: :manual, data: trigger_data},
         metadata:
-          build_manual_metadata("Partial Run: #{node_id}",
+          build_manual_metadata("Partial Run: #{step_id}",
             version_id: version_id,
             partial: true,
-            target: node_id
+            target: step_id
           )
       }
       |> maybe_put_workflow_version(version_id)
@@ -515,14 +516,14 @@ defmodule ImgdWeb.WorkflowLive.Edit do
             |> assign(:execution, execution)
             |> assign(:running?, true)
             |> assign(
-              :node_states,
+              :step_states,
               build_initial_pin_states(workflow, socket.assigns.pins_with_status)
             )
             |> assign(:trace_log_count, 0)
             |> stream(:trace_log, [], reset: true)
             |> append_trace_log(:info, "Partial execution started", %{
               partial: true,
-              target: node_id,
+              target: step_id,
               version: version_id
             })
             |> push_patch(to: ~p"/workflows/#{workflow.id}/edit?execution_id=#{execution.id}")
@@ -543,42 +544,42 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # PubSub Handlers
   # ============================================================================
 
-  # Handle messages from NodeConfigModal
+  # Handle messages from StepConfigModal
   @impl true
-  def handle_info(:close_node_config_modal, socket) do
+  def handle_info(:close_step_config_modal, socket) do
     {:noreply,
      socket
-     |> release_node_lock()
+     |> release_step_lock()
      |> assign(:show_config_modal, false)
-     |> assign(:config_modal_node, nil)
+     |> assign(:config_modal_step, nil)
      |> maybe_update_presence_focus(nil)}
   end
 
   @impl true
-  def handle_info({:node_config_saved, node_id, new_config}, socket) do
-    node = Map.get(socket.assigns.node_map, node_id)
+  def handle_info({:step_config_saved, step_id, new_config}, socket) do
+    step = Map.get(socket.assigns.step_map, step_id)
 
-    if node do
-      patch = build_config_patch(node.config || %{}, new_config || %{})
+    if step do
+      patch = build_config_patch(step.config || %{}, new_config || %{})
 
       if patch == [] do
         {:noreply,
          socket
-         |> release_node_lock()
+         |> release_step_lock()
          |> assign(:show_config_modal, false)
-         |> assign(:config_modal_node, nil)
+         |> assign(:config_modal_step, nil)
          |> maybe_update_presence_focus(nil)}
       else
-        case apply_edit_operation(socket, :update_node_config, %{node_id: node_id, patch: patch}) do
+        case apply_edit_operation(socket, :update_step_config, %{step_id: step_id, patch: patch}) do
           {:ok, socket} ->
             socket =
               socket
-              |> release_node_lock()
+              |> release_step_lock()
               |> assign(:show_config_modal, false)
-              |> assign(:config_modal_node, nil)
+              |> assign(:config_modal_step, nil)
               |> maybe_update_presence_focus(nil)
-              |> put_flash(:info, "Node configuration saved")
-              |> append_trace_log(:info, "Node config updated", %{node_id: short_id(node_id)})
+              |> put_flash(:info, "Step configuration saved")
+              |> append_trace_log(:info, "Step config updated", %{step_id: short_id(step_id)})
 
             {:noreply, socket}
 
@@ -587,24 +588,24 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         end
       end
     else
-      {:noreply, put_flash(socket, :error, "Node not found")}
+      {:noreply, put_flash(socket, :error, "Step not found")}
     end
   end
 
   @impl true
-  def handle_info({:pin_node_output, node_id, output_data, label}, socket) do
+  def handle_info({:pin_step_output, step_id, output_data, label}, socket) do
     payload = %{
-      node_id: node_id,
+      step_id: step_id,
       output_data: output_data,
       label: if(label == "", do: nil, else: label)
     }
 
-    case apply_edit_operation(socket, :pin_node_output, payload) do
+    case apply_edit_operation(socket, :pin_step_output, payload) do
       {:ok, socket} ->
         socket =
           socket
           |> put_flash(:info, "Output pinned successfully")
-          |> append_trace_log(:info, "Pinned node output", %{node_id: node_id})
+          |> append_trace_log(:info, "Pinned step output", %{step_id: step_id})
 
         {:noreply, socket}
 
@@ -660,12 +661,12 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   @impl true
-  def handle_info({:node_started, payload}, socket) do
-    node_id = payload.node_id
-    node_name = get_node_name(socket.assigns.node_map, node_id)
+  def handle_info({:step_started, payload}, socket) do
+    step_id = payload.step_id
+    step_name = get_step_name(socket.assigns.step_map, step_id)
 
-    node_states =
-      Map.put(socket.assigns.node_states, node_id, %{
+    step_states =
+      Map.put(socket.assigns.step_states, step_id, %{
         status: :running,
         started_at: payload.started_at,
         queued_at: payload.queued_at,
@@ -677,24 +678,24 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
     socket =
       socket
-      |> assign(:node_states, node_states)
-      |> append_trace_log(:info, "Node started: #{node_name}", %{
-        node_type: payload.node_type_id,
-        node_id: short_id(node_id)
+      |> assign(:step_states, step_states)
+      |> append_trace_log(:info, "Step started: #{step_name}", %{
+        step_type: payload.step_type_id,
+        step_id: short_id(step_id)
       })
 
     {:noreply, socket}
   end
 
   @impl true
-  def handle_info({:node_completed, payload}, socket) do
-    node_id = payload.node_id
-    node_name = get_node_name(socket.assigns.node_map, node_id)
-    existing = Map.get(socket.assigns.node_states, node_id, %{})
+  def handle_info({:step_completed, payload}, socket) do
+    step_id = payload.step_id
+    step_name = get_step_name(socket.assigns.step_map, step_id)
+    existing = Map.get(socket.assigns.step_states, step_id, %{})
     duration_us = payload.duration_us
 
-    node_states =
-      Map.put(socket.assigns.node_states, node_id, %{
+    step_states =
+      Map.put(socket.assigns.step_states, step_id, %{
         status: :completed,
         started_at: existing[:started_at] || payload.started_at,
         completed_at: payload.completed_at,
@@ -706,24 +707,24 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
     socket =
       socket
-      |> assign(:node_states, node_states)
-      |> append_trace_log(:success, "Node completed: #{node_name}", %{
+      |> assign(:step_states, step_states)
+      |> append_trace_log(:success, "Step completed: #{step_name}", %{
         duration_us: duration_us,
-        node_id: short_id(node_id)
+        step_id: short_id(step_id)
       })
 
     {:noreply, socket}
   end
 
   @impl true
-  def handle_info({:node_failed, payload}, socket) do
-    node_id = payload.node_id
-    node_name = get_node_name(socket.assigns.node_map, node_id)
-    existing = Map.get(socket.assigns.node_states, node_id, %{})
+  def handle_info({:step_failed, payload}, socket) do
+    step_id = payload.step_id
+    step_name = get_step_name(socket.assigns.step_map, step_id)
+    existing = Map.get(socket.assigns.step_states, step_id, %{})
     duration_us = payload.duration_us
 
-    node_states =
-      Map.put(socket.assigns.node_states, node_id, %{
+    step_states =
+      Map.put(socket.assigns.step_states, step_id, %{
         status: :failed,
         started_at: existing[:started_at] || payload.started_at,
         completed_at: payload.completed_at,
@@ -735,10 +736,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
     socket =
       socket
-      |> assign(:node_states, node_states)
+      |> assign(:step_states, step_states)
       |> append_trace_log(
         :error,
-        "Node failed: #{node_name}",
+        "Step failed: #{step_name}",
         format_error_for_log(payload.error)
       )
 
@@ -752,10 +753,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # Private Helpers
   # ============================================================================
 
-  defp get_node_name(node_map, node_id) do
-    case Map.get(node_map, node_id) do
-      nil -> node_id
-      node -> node.name
+  defp get_step_name(step_map, step_id) do
+    case Map.get(step_map, step_id) do
+      nil -> step_id
+      step -> step.name
     end
   end
 
@@ -780,54 +781,54 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
-  defp maybe_update_presence_selection(socket, selected_node_id) do
+  defp maybe_update_presence_selection(socket, selected_step_id) do
     if socket.assigns.presence_tracked? do
-      node_ids = if selected_node_id, do: [selected_node_id], else: []
+      step_ids = if selected_step_id, do: [selected_step_id], else: []
 
       _ =
         Presence.update_selection(
           socket.assigns.workflow.id,
           socket.assigns.current_scope.user.id,
-          node_ids
+          step_ids
         )
     end
 
     socket
   end
 
-  defp maybe_update_presence_focus(socket, node_id) do
+  defp maybe_update_presence_focus(socket, step_id) do
     if socket.assigns.presence_tracked? do
       user_id = socket.assigns.current_scope.user.id
 
-      case node_id do
+      case step_id do
         nil -> Presence.clear_focus(socket.assigns.workflow.id, user_id)
-        _ -> Presence.update_focus(socket.assigns.workflow.id, user_id, node_id)
+        _ -> Presence.update_focus(socket.assigns.workflow.id, user_id, step_id)
       end
     end
 
     socket
   end
 
-  defp acquire_node_lock(socket, node_id) do
+  defp acquire_step_lock(socket, step_id) do
     workflow_id = socket.assigns.workflow.id
     user_id = socket.assigns.current_scope.user.id
 
-    case Server.acquire_node_lock(workflow_id, node_id, user_id) do
-      :ok -> {:ok, assign(socket, :locked_node_id, node_id)}
+    case Server.acquire_step_lock(workflow_id, step_id, user_id) do
+      :ok -> {:ok, assign(socket, :locked_step_id, step_id)}
       {:error, _} = error -> error
     end
   end
 
-  defp release_node_lock(socket) do
-    case socket.assigns.locked_node_id do
+  defp release_step_lock(socket) do
+    case socket.assigns.locked_step_id do
       nil ->
         socket
 
-      node_id ->
+      step_id ->
         workflow_id = socket.assigns.workflow.id
         user_id = socket.assigns.current_scope.user.id
-        Server.release_node_lock(workflow_id, node_id, user_id)
-        assign(socket, :locked_node_id, nil)
+        Server.release_step_lock(workflow_id, step_id, user_id)
+        assign(socket, :locked_step_id, nil)
     end
   end
 
@@ -847,19 +848,19 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     {workflow.draft || %Imgd.Workflows.WorkflowDraft{}, 0}
   end
 
-  defp build_pins_with_status(%EditorState{} = editor_state, node_map, pin_labels) do
+  defp build_pins_with_status(%EditorState{} = editor_state, step_map, pin_labels) do
     editor_state.pinned_outputs
-    |> Enum.map(fn {node_id, output_data} ->
-      node = Map.get(node_map, node_id)
-      label = Map.get(pin_labels, node_id) || (node && node.name)
+    |> Enum.map(fn {step_id, output_data} ->
+      step = Map.get(step_map, step_id)
+      label = Map.get(pin_labels, step_id) || (step && step.name)
 
-      {node_id,
+      {step_id,
        %{
          "data" => output_data,
          "label" => label,
          "pinned_at" => nil,
          "stale" => false,
-         "node_exists" => not is_nil(node)
+         "step_exists" => not is_nil(step)
        }}
     end)
     |> Map.new()
@@ -927,13 +928,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         socket
         |> assign(:draft, draft)
         |> assign_source_graph(draft)
-        |> assign(:can_run?, length((draft && draft.nodes) || []) > 0)
-        |> reconcile_node_refs()
+        |> assign(:can_run?, length((draft && draft.steps) || []) > 0)
+        |> reconcile_step_refs()
       else
         assign(socket, :draft, draft)
       end
 
-    pins_with_status = build_pins_with_status(editor_state, socket.assigns.node_map, pin_labels)
+    pins_with_status = build_pins_with_status(editor_state, socket.assigns.step_map, pin_labels)
     assign(socket, :pins_with_status, pins_with_status)
   end
 
@@ -948,76 +949,76 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
-  defp apply_editor_state_operation(editor_state, :pin_node_output, payload) do
-    node_id = payload_value(payload, :node_id)
+  defp apply_editor_state_operation(editor_state, :pin_step_output, payload) do
+    step_id = payload_value(payload, :step_id)
     output_data = payload_value(payload, :output_data) || payload_value(payload, :data)
 
-    if node_id do
-      EditorState.pin_output(editor_state, node_id, output_data)
+    if step_id do
+      EditorState.pin_output(editor_state, step_id, output_data)
     else
       editor_state
     end
   end
 
-  defp apply_editor_state_operation(editor_state, :unpin_node_output, payload) do
-    case payload_value(payload, :node_id) do
+  defp apply_editor_state_operation(editor_state, :unpin_step_output, payload) do
+    case payload_value(payload, :step_id) do
       nil -> editor_state
-      node_id -> EditorState.unpin_output(editor_state, node_id)
+      step_id -> EditorState.unpin_output(editor_state, step_id)
     end
   end
 
-  defp apply_editor_state_operation(editor_state, :disable_node, payload) do
-    node_id = payload_value(payload, :node_id)
+  defp apply_editor_state_operation(editor_state, :disable_step, payload) do
+    step_id = payload_value(payload, :step_id)
     mode = payload_value(payload, :mode) || :skip
 
-    if node_id do
-      EditorState.disable_node(editor_state, node_id, mode)
+    if step_id do
+      EditorState.disable_step(editor_state, step_id, mode)
     else
       editor_state
     end
   end
 
-  defp apply_editor_state_operation(editor_state, :enable_node, payload) do
-    case payload_value(payload, :node_id) do
+  defp apply_editor_state_operation(editor_state, :enable_step, payload) do
+    case payload_value(payload, :step_id) do
       nil -> editor_state
-      node_id -> EditorState.enable_node(editor_state, node_id)
+      step_id -> EditorState.enable_step(editor_state, step_id)
     end
   end
 
   defp apply_editor_state_operation(editor_state, _type, _payload), do: editor_state
 
-  defp update_pin_labels(pin_labels, :pin_node_output, payload) do
-    node_id = payload_value(payload, :node_id)
+  defp update_pin_labels(pin_labels, :pin_step_output, payload) do
+    step_id = payload_value(payload, :step_id)
     label = payload_value(payload, :label)
 
     cond do
-      is_nil(node_id) -> pin_labels
-      is_binary(label) and label != "" -> Map.put(pin_labels, node_id, label)
+      is_nil(step_id) -> pin_labels
+      is_binary(label) and label != "" -> Map.put(pin_labels, step_id, label)
       true -> pin_labels
     end
   end
 
-  defp update_pin_labels(pin_labels, :unpin_node_output, payload) do
-    case payload_value(payload, :node_id) do
+  defp update_pin_labels(pin_labels, :unpin_step_output, payload) do
+    case payload_value(payload, :step_id) do
       nil -> pin_labels
-      node_id -> Map.delete(pin_labels, node_id)
+      step_id -> Map.delete(pin_labels, step_id)
     end
   end
 
   defp update_pin_labels(pin_labels, _type, _payload), do: pin_labels
 
   defp normalize_operation_type(type) when is_atom(type), do: type
-  defp normalize_operation_type("add_node"), do: :add_node
-  defp normalize_operation_type("remove_node"), do: :remove_node
-  defp normalize_operation_type("update_node_config"), do: :update_node_config
-  defp normalize_operation_type("update_node_position"), do: :update_node_position
-  defp normalize_operation_type("update_node_metadata"), do: :update_node_metadata
+  defp normalize_operation_type("add_step"), do: :add_step
+  defp normalize_operation_type("remove_step"), do: :remove_step
+  defp normalize_operation_type("update_step_config"), do: :update_step_config
+  defp normalize_operation_type("update_step_position"), do: :update_step_position
+  defp normalize_operation_type("update_step_metadata"), do: :update_step_metadata
   defp normalize_operation_type("add_connection"), do: :add_connection
   defp normalize_operation_type("remove_connection"), do: :remove_connection
-  defp normalize_operation_type("pin_node_output"), do: :pin_node_output
-  defp normalize_operation_type("unpin_node_output"), do: :unpin_node_output
-  defp normalize_operation_type("disable_node"), do: :disable_node
-  defp normalize_operation_type("enable_node"), do: :enable_node
+  defp normalize_operation_type("pin_step_output"), do: :pin_step_output
+  defp normalize_operation_type("unpin_step_output"), do: :unpin_step_output
+  defp normalize_operation_type("disable_step"), do: :disable_step
+  defp normalize_operation_type("enable_step"), do: :enable_step
   defp normalize_operation_type(type), do: type
 
   defp payload_value(payload, key) do
@@ -1027,55 +1028,55 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
-  defp reconcile_node_refs(socket) do
-    node_map = socket.assigns.node_map
+  defp reconcile_step_refs(socket) do
+    step_map = socket.assigns.step_map
 
     socket =
-      case socket.assigns.selected_node_id do
+      case socket.assigns.selected_step_id do
         nil ->
           socket
 
-        node_id ->
-          if Map.has_key?(node_map, node_id) do
+        step_id ->
+          if Map.has_key?(step_map, step_id) do
             socket
           else
             socket
-            |> assign(:selected_node_id, nil)
+            |> assign(:selected_step_id, nil)
             |> maybe_update_presence_selection(nil)
           end
       end
 
     socket =
-      case socket.assigns.context_menu_node_id do
+      case socket.assigns.context_menu_step_id do
         nil ->
           socket
 
-        node_id ->
-          if Map.has_key?(node_map, node_id) do
+        step_id ->
+          if Map.has_key?(step_map, step_id) do
             socket
           else
             socket
             |> assign(:show_context_menu, false)
-            |> assign(:context_menu_node_id, nil)
+            |> assign(:context_menu_step_id, nil)
           end
       end
 
     socket =
-      case socket.assigns.config_modal_node do
+      case socket.assigns.config_modal_step do
         nil ->
           socket
 
-        %{id: node_id} ->
-          case Map.get(node_map, node_id) do
+        %{id: step_id} ->
+          case Map.get(step_map, step_id) do
             nil ->
               socket
-              |> release_node_lock()
+              |> release_step_lock()
               |> assign(:show_config_modal, false)
-              |> assign(:config_modal_node, nil)
+              |> assign(:config_modal_step, nil)
               |> maybe_update_presence_focus(nil)
 
-            updated_node ->
-              assign(socket, :config_modal_node, updated_node)
+            updated_step ->
+              assign(socket, :config_modal_step, updated_step)
           end
       end
 
@@ -1112,7 +1113,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     draft = socket.assigns.draft || %Imgd.Workflows.WorkflowDraft{}
 
     attrs = %{
-      nodes: Enum.map(draft.nodes || [], &Map.from_struct/1),
+      steps: Enum.map(draft.steps || [], &Map.from_struct/1),
       connections: Enum.map(draft.connections || [], &Map.from_struct/1),
       triggers: Enum.map(draft.triggers || [], &Map.from_struct/1),
       settings: draft.settings || %{}
@@ -1193,8 +1194,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   defp build_initial_pin_states(_workflow, pins_with_status) do
     pins_with_status
-    |> Enum.map(fn {node_id, pin} ->
-      {node_id,
+    |> Enum.map(fn {step_id, pin} ->
+      {step_id,
        %{
          status: :skipped,
          output_data: Map.get(pin, "data") || Map.get(pin, :data),
@@ -1204,9 +1205,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     |> Map.new()
   end
 
-  defp format_error({:node_not_found, id}), do: "Node not found: #{id}"
-  defp format_error({:node_not_pinned, id}), do: "Node not pinned: #{id}"
-  defp format_error({:nodes_not_found, ids}), do: "Nodes not found: #{Enum.join(ids, ", ")}"
+  defp format_error({:step_not_found, id}), do: "Step not found: #{id}"
+  defp format_error({:step_not_pinned, id}), do: "Step not pinned: #{id}"
+  defp format_error({:steps_not_found, ids}), do: "Steps not found: #{Enum.join(ids, ", ")}"
   defp format_error(:no_executable_version), do: "No executable version available"
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason), do: inspect(reason)
@@ -1252,7 +1253,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       |> maybe_put_extra("demo_input", label)
       |> maybe_put_extra("version_id", Keyword.get(opts, :version_id))
       |> maybe_put_extra("partial", Keyword.get(opts, :partial))
-      |> maybe_put_extra("target_node_id", Keyword.get(opts, :target))
+      |> maybe_put_extra("target_step_id", Keyword.get(opts, :target))
 
     %{extras: extras}
   end
@@ -1321,8 +1322,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   defp generate_demo_inputs(workflow) do
     workflow = Imgd.Repo.preload(workflow, :draft)
     draft = workflow.draft || %Imgd.Workflows.WorkflowDraft{}
-    nodes = draft.nodes || []
-    type_ids = Enum.map(nodes, & &1.type_id)
+    steps = draft.steps || []
+    type_ids = Enum.map(steps, & &1.type_id)
 
     []
     |> maybe_add_math_demo(type_ids)
@@ -1458,18 +1459,18 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       }
     ]
 
-    node_logs =
-      (execution.node_executions || [])
-      |> Enum.flat_map(fn ne ->
+    step_logs =
+      (execution.step_executions || [])
+      |> Enum.flat_map(fn se ->
         started =
-          if ne.started_at do
+          if se.started_at do
             [
               %{
-                id: "node-start-#{ne.id}",
+                id: "step-start-#{se.id}",
                 level: :info,
-                message: "Node started: #{ne.node_id}",
-                timestamp: ne.started_at,
-                data: %{node_type: ne.node_type_id}
+                message: "Step started: #{se.step_id}",
+                timestamp: se.started_at,
+                data: %{step_type: se.step_type_id}
               }
             ]
           else
@@ -1477,26 +1478,26 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           end
 
         completed =
-          case ne.status do
+          case se.status do
             :completed ->
               [
                 %{
-                  id: "node-complete-#{ne.id}",
+                  id: "step-complete-#{se.id}",
                   level: :success,
-                  message: "Node completed: #{ne.node_id}",
-                  timestamp: ne.completed_at,
-                  data: %{duration_us: NodeExecution.duration_us(ne)}
+                  message: "Step completed: #{se.step_id}",
+                  timestamp: se.completed_at,
+                  data: %{duration_us: StepExecution.duration_us(se)}
                 }
               ]
 
             :failed ->
               [
                 %{
-                  id: "node-fail-#{ne.id}",
+                  id: "step-fail-#{se.id}",
                   level: :error,
-                  message: "Node failed: #{ne.node_id}",
-                  timestamp: ne.completed_at,
-                  data: ne.error
+                  message: "Step failed: #{se.step_id}",
+                  timestamp: se.completed_at,
+                  data: se.error
                 }
               ]
 
@@ -1524,7 +1525,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         []
       end
 
-    (base_logs ++ node_logs ++ end_log)
+    (base_logs ++ step_logs ++ end_log)
     |> Enum.sort_by(& &1.timestamp, DateTime)
   end
 
@@ -1608,13 +1609,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         <%!-- DAG Visualization --%>
         <div class="xl:col-span-2">
           <.dag_panel
-            nodes={@graph_nodes}
+            steps={@graph_steps}
             layout={@dag_layout}
             edges={@dag_edges}
             meta={@dag_meta}
-            node_map={@node_map}
-            node_states={@node_states}
-            selected_node_id={@selected_node_id}
+            step_map={@step_map}
+            step_states={@step_states}
+            selected_step_id={@selected_step_id}
             pins_with_status={@pins_with_status}
           />
         </div>
@@ -1625,10 +1626,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
             workflow={@workflow}
             pins_with_status={@pins_with_status}
           />
-          <.node_details_panel
-            node_map={@node_map}
-            node_states={@node_states}
-            selected_node_id={@selected_node_id}
+          <.step_details_panel
+            step_map={@step_map}
+            step_states={@step_states}
+            selected_step_id={@selected_step_id}
           />
 
           <.trace_log_panel
@@ -1641,28 +1642,28 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       <%!-- Execution Metadata --%>
       <.execution_metadata_panel :if={@execution} execution={@execution} />
 
-      <%!-- Node Config Modal --%>
-      <%= if @show_config_modal and @config_modal_node do %>
+      <%!-- Step Config Modal --%>
+      <%= if @show_config_modal and @config_modal_step do %>
         <.live_component
-          module={NodeConfigModal}
-          id={"node-config-#{@config_modal_node.id}"}
-          node={@config_modal_node}
+          module={StepConfigModal}
+          id={"step-config-#{@config_modal_step.id}"}
+          step={@config_modal_step}
           execution={@execution}
-          node_output={get_in(@node_states, [@config_modal_node.id, :output_data])}
-          pinned_data={Map.get(@pins_with_status, @config_modal_node.id)}
+          step_output={get_in(@step_states, [@config_modal_step.id, :output_data])}
+          pinned_data={Map.get(@pins_with_status, @config_modal_step.id)}
         />
       <% end %>
 
       <%!-- Context Menu --%>
-      <%= if @show_context_menu and @context_menu_node_id do %>
-        <% node = Map.get(@node_map, @context_menu_node_id) %>
-        <% pin_status = Map.get(@pins_with_status || %{}, @context_menu_node_id) %>
-        <.node_context_menu
-          node_id={@context_menu_node_id}
-          node_name={(node && node.name) || @context_menu_node_id}
-          pinned={Map.has_key?(@pins_with_status || %{}, @context_menu_node_id)}
+      <%= if @show_context_menu and @context_menu_step_id do %>
+        <% step = Map.get(@step_map, @context_menu_step_id) %>
+        <% pin_status = Map.get(@pins_with_status || %{}, @context_menu_step_id) %>
+        <.step_context_menu
+          step_id={@context_menu_step_id}
+          step_name={(step && step.name) || @context_menu_step_id}
+          pinned={Map.has_key?(@pins_with_status || %{}, @context_menu_step_id)}
           pin_stale={(pin_status && pin_status["stale"]) || false}
-          has_output={get_in(@node_states, [@context_menu_node_id, :output_data]) != nil}
+          has_output={get_in(@step_states, [@context_menu_step_id, :output_data]) != nil}
           position={@context_menu_position}
         />
       <% end %>

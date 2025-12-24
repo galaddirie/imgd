@@ -1,5 +1,5 @@
-defmodule Imgd.Nodes.Executors.HttpRequest do
-  use Imgd.Nodes.Definition,
+defmodule Imgd.Steps.Executors.HttpRequest do
+  use Imgd.Steps.Definition,
     id: "http_request",
     name: "HTTP Request",
     category: "Integrations",
@@ -7,7 +7,7 @@ defmodule Imgd.Nodes.Executors.HttpRequest do
     icon: "hero-globe-alt",
     kind: :action
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @config_schema %{
     "type" => "object",

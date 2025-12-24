@@ -5,11 +5,11 @@ defmodule Imgd.Workflows.WorkflowDraft do
   use Imgd.Schema
 
   alias Imgd.Workflows.Workflow
-  alias Imgd.Workflows.Embeds.{Node, Connection, Trigger}
+  alias Imgd.Workflows.Embeds.{Step, Connection, Trigger}
 
   @type t :: %__MODULE__{
           workflow_id: Ecto.UUID.t(),
-          nodes: [Node.t()],
+          steps: [Step.t()],
           connections: [Connection.t()],
           triggers: [Trigger.t()],
           settings: map(),
@@ -22,7 +22,7 @@ defmodule Imgd.Workflows.WorkflowDraft do
   schema "workflow_drafts" do
     belongs_to :workflow, Workflow, define_field: false
 
-    embeds_many :nodes, Node, on_replace: :delete
+    embeds_many :steps, Step, on_replace: :delete
     embeds_many :connections, Connection, on_replace: :delete
     embeds_many :triggers, Trigger, on_replace: :delete
 
@@ -38,7 +38,7 @@ defmodule Imgd.Workflows.WorkflowDraft do
   def changeset(draft, attrs) do
     draft
     |> cast(attrs, [:workflow_id, :settings])
-    |> cast_embed(:nodes)
+    |> cast_embed(:steps)
     |> cast_embed(:connections)
     |> cast_embed(:triggers)
     |> validate_required([:workflow_id])

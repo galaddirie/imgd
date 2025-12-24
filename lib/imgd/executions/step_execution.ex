@@ -1,8 +1,8 @@
-defmodule Imgd.Executions.NodeExecution do
+defmodule Imgd.Executions.StepExecution do
   @moduledoc """
-  Tracks individual node execution within a workflow execution.
+  Tracks individual step execution within a workflow execution.
 
-  Each time a node runs (including retries), a new NodeExecution record
+  Each time a step runs (including retries), a new StepExecution record
   is created to capture input, output, timing, and any errors.
   """
   @derive {Jason.Encoder, except: [:__meta__, :execution]}
@@ -28,8 +28,8 @@ defmodule Imgd.Executions.NodeExecution do
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
           execution_id: Ecto.UUID.t(),
-          node_id: String.t(),
-          node_type_id: String.t(),
+          step_id: String.t(),
+          step_type_id: String.t(),
           status: status(),
           input_data: map() | nil,
           output_data: map() | nil,
@@ -44,16 +44,16 @@ defmodule Imgd.Executions.NodeExecution do
           updated_at: DateTime.t()
         }
 
-  schema "node_executions" do
+  schema "step_executions" do
     belongs_to :execution, Execution
 
-    # Which node in the workflow definition
-    field :node_id, :string
-    field :node_type_id, :string
+    # Which step in the workflow definition
+    field :step_id, :string
+    field :step_type_id, :string
 
     field :status, Ecto.Enum, values: @statuses, default: :pending
 
-    # Data flowing through this node
+    # Data flowing through this step
     field :input_data, :map
     field :output_data, :map
     field :error, :map
@@ -73,12 +73,12 @@ defmodule Imgd.Executions.NodeExecution do
     timestamps()
   end
 
-  def changeset(node_execution, attrs) do
-    node_execution
+  def changeset(step_execution, attrs) do
+    step_execution
     |> cast(attrs, [
       :execution_id,
-      :node_id,
-      :node_type_id,
+      :step_id,
+      :step_type_id,
       :status,
       :input_data,
       :output_data,
@@ -90,7 +90,7 @@ defmodule Imgd.Executions.NodeExecution do
       :attempt,
       :retry_of_id
     ])
-    |> validate_required([:execution_id, :node_id, :node_type_id, :status])
+    |> validate_required([:execution_id, :step_id, :step_type_id, :status])
     |> validate_number(:attempt, greater_than: 0)
     |> validate_map_field(:input_data, allow_nil: true)
     |> validate_map_field(:output_data, allow_nil: true)
@@ -101,13 +101,13 @@ defmodule Imgd.Executions.NodeExecution do
 
   # Convenience functions
 
-  @doc "Checks if the node execution is in a terminal state."
+  @doc "Checks if the step execution is in a terminal state."
   def terminal?(%__MODULE__{status: status}) when status in [:completed, :failed, :skipped],
     do: true
 
   def terminal?(%__MODULE__{}), do: false
 
-  @doc "Checks if the node execution succeeded."
+  @doc "Checks if the step execution succeeded."
   def succeeded?(%__MODULE__{status: :completed}), do: true
   def succeeded?(%__MODULE__{}), do: false
 

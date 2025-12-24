@@ -5,7 +5,7 @@ defmodule Imgd.Runtime.Execution.ServerTest do
   alias Imgd.Executions.Execution
   alias Imgd.Runtime.Execution.Server
   alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.{Connection, Node}
+  alias Imgd.Workflows.Embeds.{Connection, Step}
 
   setup do
     ensure_execution_registry_started()
@@ -15,16 +15,16 @@ defmodule Imgd.Runtime.Execution.ServerTest do
   test "completes a workflow execution and persists runic results" do
     workflow = insert(:workflow)
 
-    nodes = [
-      %Node{id: "node_1", type_id: "debug", name: "Debug 1", config: %{}},
-      %Node{id: "node_2", type_id: "debug", name: "Debug 2", config: %{}}
+    steps = [
+      %Step{id: "step_1", type_id: "debug", name: "Debug 1", config: %{}},
+      %Step{id: "step_2", type_id: "debug", name: "Debug 2", config: %{}}
     ]
 
     connections = [
-      %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+      %Connection{id: "conn_1", source_step_id: "step_1", target_step_id: "step_2"}
     ]
 
-    insert_draft(workflow, nodes, connections)
+    insert_draft(workflow, steps, connections)
 
     execution =
       insert_execution(workflow,
@@ -44,23 +44,23 @@ defmodule Imgd.Runtime.Execution.ServerTest do
     assert execution.completed_at
     assert length(execution.runic_log) > 0
     assert is_binary(execution.runic_snapshot)
-    assert execution.context["node_1"] == %{"value" => 1}
-    assert execution.context["node_2"] == %{"value" => 1}
+    assert execution.context["step_1"] == %{"value" => 1}
+    assert execution.context["step_2"] == %{"value" => 1}
   end
 
-  test "marks execution as failed when a node raises an expression error" do
+  test "marks execution as failed when a step raises an expression error" do
     workflow = insert(:workflow)
 
-    nodes = [
-      %Node{
-        id: "node_1",
+    steps = [
+      %Step{
+        id: "step_1",
         type_id: "debug",
         name: "Debug 1",
         config: %{"label" => "{{ json.value | missing_filter }}"}
       }
     ]
 
-    insert_draft(workflow, nodes, [])
+    insert_draft(workflow, steps, [])
 
     execution =
       insert_execution(workflow,
@@ -76,15 +76,15 @@ defmodule Imgd.Runtime.Execution.ServerTest do
 
     execution = Repo.get!(Execution, execution.id)
     assert execution.status == :failed
-    assert execution.error["type"] == "node_failure"
-    assert execution.error["node_id"] == "node_1"
+    assert execution.error["type"] == "step_failure"
+    assert execution.error["step_id"] == "step_1"
     assert execution.completed_at
   end
 
-  defp insert_draft(workflow, nodes, connections) do
+  defp insert_draft(workflow, steps, connections) do
     %WorkflowDraft{
       workflow_id: workflow.id,
-      nodes: nodes,
+      steps: steps,
       connections: connections,
       triggers: []
     }

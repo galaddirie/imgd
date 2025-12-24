@@ -219,7 +219,7 @@ defmodule Imgd.Workflows do
 
         draft =
           workflow.draft ||
-            %WorkflowDraft{nodes: [], connections: [], triggers: [], settings: %{}}
+            %WorkflowDraft{steps: [], connections: [], triggers: [], settings: %{}}
 
         workflow_attrs = %{
           name: "Copy of #{workflow.name}",
@@ -233,7 +233,7 @@ defmodule Imgd.Workflows do
         {:ok, duplicated} = create_workflow(scope, workflow_attrs)
 
         draft_attrs = %{
-          nodes: Enum.map(draft.nodes || [], &Map.from_struct/1),
+          steps: Enum.map(draft.steps || [], &Map.from_struct/1),
           connections: Enum.map(draft.connections || [], &Map.from_struct/1),
           triggers: Enum.map(draft.triggers || [], &Map.from_struct/1),
           settings: draft.settings || %{}
@@ -277,7 +277,7 @@ defmodule Imgd.Workflows do
           version_attrs
           |> Map.put(:workflow_id, workflow.id)
           |> Map.put(:source_hash, compute_source_hash(draft))
-          |> Map.put(:nodes, Enum.map(draft.nodes, &Map.from_struct/1))
+          |> Map.put(:steps, Enum.map(draft.steps, &Map.from_struct/1))
           |> Map.put(:connections, Enum.map(draft.connections || [], &Map.from_struct/1))
           |> Map.put(:triggers, Enum.map(draft.triggers || [], &Map.from_struct/1))
           |> Map.put(:published_by, scope.user.id)
@@ -436,7 +436,7 @@ defmodule Imgd.Workflows do
   defp compute_source_hash(%WorkflowDraft{} = draft) do
     # Create a deterministic hash of the workflow structure
     data = %{
-      nodes: draft.nodes,
+      steps: draft.steps,
       connections: draft.connections,
       triggers: draft.triggers,
       settings: draft.settings

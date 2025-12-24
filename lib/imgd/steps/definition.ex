@@ -1,14 +1,14 @@
-defmodule Imgd.Nodes.Definition do
+defmodule Imgd.Steps.Definition do
   @moduledoc """
-  Macro for declaring node type definitions within executor modules.
+  Macro for declaring step type definitions within executor modules.
 
-  This provides a declarative way to define node types alongside their
+  This provides a declarative way to define step types alongside their
   executor implementation, keeping the definition and logic co-located.
 
   ## Usage
 
-      defmodule Imgd.Nodes.Executors.HttpRequest do
-        use Imgd.Nodes.Definition,
+      defmodule Imgd.Steps.Executors.HttpRequest do
+        use Imgd.Steps.Definition,
           id: "http_request",
           name: "HTTP Request",
           category: "Integrations",
@@ -28,7 +28,7 @@ defmodule Imgd.Nodes.Definition do
         @input_schema %{"type" => "object"}
         @output_schema %{"type" => "object"}
 
-        @behaviour Imgd.Nodes.Executors.Behaviour
+        @behaviour Imgd.Steps.Executors.Behaviour
 
         @impl true
         def execute(config, input, execution) do
@@ -38,10 +38,10 @@ defmodule Imgd.Nodes.Definition do
 
   ## Options
 
-  - `:id` (required) - Unique identifier for the node type (snake_case)
+  - `:id` (required) - Unique identifier for the step type (snake_case)
   - `:name` (required) - Human-readable display name
   - `:category` (required) - Category for grouping in the UI
-  - `:description` (required) - Description of what the node does
+  - `:description` (required) - Description of what the step does
   - `:icon` (required) - Heroicon name (e.g., "hero-globe-alt")
   - `:kind` (required) - One of :action, :trigger, :control_flow, :transform
 
@@ -49,7 +49,7 @@ defmodule Imgd.Nodes.Definition do
 
   After `use`, you can define these module attributes:
 
-  - `@config_schema` - JSON Schema for node configuration (what users fill in)
+  - `@config_schema` - JSON Schema for step configuration (what users fill in)
   - `@input_schema` - JSON Schema describing expected input
   - `@output_schema` - JSON Schema describing output
 
@@ -63,7 +63,7 @@ defmodule Imgd.Nodes.Definition do
     # Validate required options at compile time
     for key <- @required_opts do
       unless Keyword.has_key?(opts, key) do
-        raise ArgumentError, "#{key} is required for Imgd.Nodes.Definition"
+        raise ArgumentError, "#{key} is required for Imgd.Steps.Definition"
       end
     end
 
@@ -74,22 +74,22 @@ defmodule Imgd.Nodes.Definition do
     end
 
     quote do
-      @before_compile Imgd.Nodes.Definition
+      @before_compile Imgd.Steps.Definition
 
       # Store the definition metadata
-      Module.register_attribute(__MODULE__, :node_id, persist: true)
-      Module.register_attribute(__MODULE__, :node_name, persist: true)
-      Module.register_attribute(__MODULE__, :node_category, persist: true)
-      Module.register_attribute(__MODULE__, :node_description, persist: true)
-      Module.register_attribute(__MODULE__, :node_icon, persist: true)
-      Module.register_attribute(__MODULE__, :node_kind, persist: true)
+      Module.register_attribute(__MODULE__, :step_id, persist: true)
+      Module.register_attribute(__MODULE__, :step_name, persist: true)
+      Module.register_attribute(__MODULE__, :step_category, persist: true)
+      Module.register_attribute(__MODULE__, :step_description, persist: true)
+      Module.register_attribute(__MODULE__, :step_icon, persist: true)
+      Module.register_attribute(__MODULE__, :step_kind, persist: true)
 
-      @node_id unquote(opts[:id])
-      @node_name unquote(opts[:name])
-      @node_category unquote(opts[:category])
-      @node_description unquote(opts[:description])
-      @node_icon unquote(opts[:icon])
-      @node_kind unquote(opts[:kind])
+      @step_id unquote(opts[:id])
+      @step_name unquote(opts[:name])
+      @step_category unquote(opts[:category])
+      @step_description unquote(opts[:description])
+      @step_icon unquote(opts[:icon])
+      @step_kind unquote(opts[:kind])
 
       # Default schemas (can be overridden)
       @config_schema %{"type" => "object", "properties" => %{}}
@@ -106,16 +106,16 @@ defmodule Imgd.Nodes.Definition do
   defmacro __before_compile__(_env) do
     quote do
       @doc """
-      Returns the node type definition struct for this executor.
+      Returns the step type definition struct for this executor.
       """
-      def __node_definition__ do
-        %Imgd.Nodes.Type{
-          id: @node_id,
-          name: @node_name,
-          category: @node_category,
-          description: @node_description,
-          icon: @node_icon,
-          node_kind: @node_kind,
+      def __step_definition__ do
+        %Imgd.Steps.Type{
+          id: @step_id,
+          name: @step_name,
+          category: @step_category,
+          description: @step_description,
+          icon: @step_icon,
+          step_kind: @step_kind,
           executor: Atom.to_string(__MODULE__),
           config_schema: @config_schema,
           input_schema: @input_schema,
@@ -126,9 +126,9 @@ defmodule Imgd.Nodes.Definition do
       end
 
       @doc """
-      Returns the node type ID.
+      Returns the step type ID.
       """
-      def __node_id__, do: @node_id
+      def __step_id__, do: @step_id
     end
   end
 end

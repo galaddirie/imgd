@@ -7,15 +7,15 @@ defmodule Imgd.Runtime.Expression.Context do
 
   This module builds the context **on-demand** from the single source of truth:
   - Static data from `Execution` (trigger, metadata, workflow info)
-  - Dynamic data from `ExecutionState` (node outputs, current input)
+  - Dynamic data from `ExecutionState` (step outputs, current input)
 
   ## Variable Structure
 
   ```
   %{
     "json" => current_input,
-    "nodes" => %{
-      "NodeName" => %{"json" => output_data, ...},
+    "steps" => %{
+      "StepName" => %{"json" => output_data, ...},
       ...
     },
     "execution" => %{
@@ -39,7 +39,7 @@ defmodule Imgd.Runtime.Expression.Context do
   # Configure via application env: config :imgd, :allowed_env_vars, [...]
   @default_allowed_env_vars ~w(
     MIX_ENV
-    NODE_ENV
+    STEP_ENV
     APP_ENV
   )
 
@@ -51,21 +51,21 @@ defmodule Imgd.Runtime.Expression.Context do
   ## Parameters
 
   - `execution` - The Execution struct
-  - `node_outputs` - Map of node_id -> output data
-  - `current_input` - The input data for the current node (optional)
+  - `step_outputs` - Map of step_id -> output data
+  - `current_input` - The input data for the current step (optional)
   """
   @spec build(Execution.t(), term(), term()) :: map()
-  def build(%Execution{} = execution, node_outputs \\ %{}, current_input \\ nil) do
+  def build(%Execution{} = execution, step_outputs \\ %{}, current_input \\ nil) do
     # Merge persisted context with runtime data
     execution_context = execution.context || %{}
-    node_outputs_map = if is_map(node_outputs), do: node_outputs, else: %{}
-    all_outputs = Map.merge(execution_context, node_outputs_map)
+    step_outputs_map = if is_map(step_outputs), do: step_outputs, else: %{}
+    all_outputs = Map.merge(execution_context, step_outputs_map)
     current_input = current_input || Execution.trigger_data(execution)
 
     %{
       "json" => normalize_value(current_input),
       "input" => normalize_value(current_input),
-      "nodes" => build_nodes_map(all_outputs),
+      "steps" => build_steps_map(all_outputs),
       "execution" => build_execution_map(execution),
       "workflow" => build_workflow_map(execution),
       "variables" => extract_variables(execution),
@@ -84,7 +84,7 @@ defmodule Imgd.Runtime.Expression.Context do
     %{
       "json" => normalize_value(input),
       "input" => normalize_value(input),
-      "nodes" => %{},
+      "steps" => %{},
       "execution" => %{},
       "workflow" => %{},
       "variables" => %{},
@@ -99,30 +99,30 @@ defmodule Imgd.Runtime.Expression.Context do
   # Private Builders
   # ============================================================================
 
-  defp build_nodes_map(node_outputs) when is_map(node_outputs) do
-    Map.new(node_outputs, fn {node_id, output} ->
-      node_data = %{
+  defp build_steps_map(step_outputs) when is_map(step_outputs) do
+    Map.new(step_outputs, fn {step_id, output} ->
+      step_data = %{
         "json" => normalize_value(output),
         "data" => normalize_value(output)
       }
 
       # Also extract common fields for convenience
-      node_data =
+      step_data =
         if is_map(output) do
-          node_data
+          step_data
           |> maybe_put("status", output["status"] || output[:status])
           |> maybe_put("body", output["body"] || output[:body])
           |> maybe_put("headers", output["headers"] || output[:headers])
           |> maybe_put("error", output["error"] || output[:error])
         else
-          node_data
+          step_data
         end
 
-      {node_id, node_data}
+      {step_id, step_data}
     end)
   end
 
-  defp build_nodes_map(_), do: %{}
+  defp build_steps_map(_), do: %{}
 
   defp build_execution_map(%Execution{} = execution) do
     trigger_type = Execution.trigger_type(execution)

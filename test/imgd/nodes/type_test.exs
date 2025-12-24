@@ -1,27 +1,27 @@
-defmodule Imgd.Nodes.TypeTest do
+defmodule Imgd.Steps.TypeTest do
   use Imgd.DataCase
 
-  alias Imgd.Nodes.Type
+  alias Imgd.Steps.Type
 
   describe "struct" do
     test "can create a valid Type struct" do
       type = %Type{
-        id: "test_node",
-        name: "Test Node",
+        id: "test_step",
+        name: "Test Step",
         category: "Test",
-        description: "A test node",
+        description: "A test step",
         icon: "hero-cube",
-        executor: "Imgd.Nodes.Executors.Test",
-        node_kind: :action
+        executor: "Imgd.Steps.Executors.Test",
+        step_kind: :action
       }
 
-      assert type.id == "test_node"
-      assert type.name == "Test Node"
+      assert type.id == "test_step"
+      assert type.name == "Test Step"
       assert type.category == "Test"
-      assert type.description == "A test node"
+      assert type.description == "A test step"
       assert type.icon == "hero-cube"
-      assert type.executor == "Imgd.Nodes.Executors.Test"
-      assert type.node_kind == :action
+      assert type.executor == "Imgd.Steps.Executors.Test"
+      assert type.step_kind == :action
       assert type.config_schema == %{}
       assert type.input_schema == %{}
       assert type.output_schema == %{}
@@ -30,9 +30,11 @@ defmodule Imgd.Nodes.TypeTest do
     end
 
     test "enforces required fields" do
-      assert_raise ArgumentError, "the following keys must also be given when building struct Imgd.Nodes.Type: [:id, :name, :category, :description, :icon, :executor, :node_kind]", fn ->
-        struct!(Type, %{})
-      end
+      assert_raise ArgumentError,
+                   "the following keys must also be given when building struct Imgd.Steps.Type: [:id, :name, :category, :description, :icon, :executor, :step_kind]",
+                   fn ->
+                     struct!(Type, %{})
+                   end
     end
 
     test "has default values for optional fields" do
@@ -43,7 +45,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test.Executor",
-        node_kind: :action
+        step_kind: :action
       }
 
       assert type.config_schema == %{}
@@ -60,11 +62,11 @@ defmodule Imgd.Nodes.TypeTest do
         category: "Test",
         description: "Test",
         icon: "hero-cube",
-        executor: "Imgd.Nodes.Executors.HttpRequest",
-        node_kind: :action
+        executor: "Imgd.Steps.Executors.HttpRequest",
+        step_kind: :action
       }
 
-      assert {:ok, Imgd.Nodes.Executors.HttpRequest} = Type.executor_module(type)
+      assert {:ok, Imgd.Steps.Executors.HttpRequest} = Type.executor_module(type)
     end
 
     test "handles Elixir prefix" do
@@ -74,11 +76,11 @@ defmodule Imgd.Nodes.TypeTest do
         category: "Test",
         description: "Test",
         icon: "hero-cube",
-        executor: "Elixir.Imgd.Nodes.Executors.HttpRequest",
-        node_kind: :action
+        executor: "Elixir.Imgd.Steps.Executors.HttpRequest",
+        step_kind: :action
       }
 
-      assert {:ok, Imgd.Nodes.Executors.HttpRequest} = Type.executor_module(type)
+      assert {:ok, Imgd.Steps.Executors.HttpRequest} = Type.executor_module(type)
     end
 
     test "returns error for non-existent module" do
@@ -89,7 +91,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "NonExistent.Module",
-        node_kind: :action
+        step_kind: :action
       }
 
       assert {:error, :module_not_loaded} = Type.executor_module(type)
@@ -103,7 +105,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: nil,
-        node_kind: :action
+        step_kind: :action
       }
 
       assert {:error, :no_executor} = Type.executor_module(type)
@@ -118,11 +120,11 @@ defmodule Imgd.Nodes.TypeTest do
         category: "Test",
         description: "Test",
         icon: "hero-cube",
-        executor: "Imgd.Nodes.Executors.HttpRequest",
-        node_kind: :action
+        executor: "Imgd.Steps.Executors.HttpRequest",
+        step_kind: :action
       }
 
-      assert Imgd.Nodes.Executors.HttpRequest = Type.executor_module!(type)
+      assert Imgd.Steps.Executors.HttpRequest = Type.executor_module!(type)
     end
 
     test "raises for invalid executor" do
@@ -133,7 +135,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "NonExistent.Module",
-        node_kind: :action
+        step_kind: :action
       }
 
       assert_raise RuntimeError, "Failed to get executor module: :module_not_loaded", fn ->
@@ -151,7 +153,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test",
-        node_kind: :trigger
+        step_kind: :trigger
       }
 
       action_type = %Type{
@@ -161,7 +163,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test",
-        node_kind: :action
+        step_kind: :action
       }
 
       assert Type.trigger?(trigger_type)
@@ -176,7 +178,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test",
-        node_kind: :control_flow
+        step_kind: :control_flow
       }
 
       action_type = %Type{
@@ -186,7 +188,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test",
-        node_kind: :action
+        step_kind: :action
       }
 
       assert Type.control_flow?(control_type)
@@ -201,7 +203,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test",
-        node_kind: :action
+        step_kind: :action
       }
 
       trigger_type = %Type{
@@ -211,7 +213,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test",
-        node_kind: :trigger
+        step_kind: :trigger
       }
 
       assert Type.action?(action_type)
@@ -226,7 +228,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test",
-        node_kind: :transform
+        step_kind: :transform
       }
 
       action_type = %Type{
@@ -236,7 +238,7 @@ defmodule Imgd.Nodes.TypeTest do
         description: "Test",
         icon: "hero-cube",
         executor: "Test",
-        node_kind: :action
+        step_kind: :action
       }
 
       assert Type.transform?(transform_type)

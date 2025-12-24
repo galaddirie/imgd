@@ -1,53 +1,53 @@
-defmodule Imgd.Nodes.Registry do
+defmodule Imgd.Steps.Registry do
   @moduledoc """
-  In-memory registry for node types.
+  In-memory registry for step types.
 
-  Node types are defined as code (not in DB) and loaded at startup. This provides:
+  Step types are defined as code (not in DB) and loaded at startup. This provides:
   - Type-safe definitions with compile-time validation
   - Easy versioning through git
   - Fast lookups via ETS
 
   ## Usage
 
-      # Get all node types
-      Imgd.Nodes.Registry.all()
+      # Get all step types
+      Imgd.Steps.Registry.all()
 
-      # Get a specific node type
-      {:ok, type} = Imgd.Nodes.Registry.get("http_request")
+      # Get a specific step type
+      {:ok, type} = Imgd.Steps.Registry.get("http_request")
 
       # List by category
-      Imgd.Nodes.Registry.list_by_category("Integrations")
+      Imgd.Steps.Registry.list_by_category("Integrations")
 
       # List by kind
-      Imgd.Nodes.Registry.list_by_kind(:action)
+      Imgd.Steps.Registry.list_by_kind(:action)
 
-  ## Adding New Node Types
+  ## Adding New Step Types
 
-  Create an executor module that uses `Imgd.Nodes.Definition`:
+  Create an executor module that uses `Imgd.Steps.Definition`:
 
-      defmodule Imgd.Nodes.Executors.MyNode do
-        use Imgd.Nodes.Definition,
-          id: "my_node",
-          name: "My Node",
+      defmodule Imgd.Steps.Executors.MyStep do
+        use Imgd.Steps.Definition,
+          id: "my_step",
+          name: "My Step",
           category: "Custom",
           description: "Does something cool",
           icon: "hero-sparkles",
           kind: :action
 
-        @behaviour Imgd.Nodes.Executors.Behaviour
+        @behaviour Imgd.Steps.Executors.Behaviour
         # ... implementation
       end
 
-  The node type will be automatically discovered and registered on startup.
+  The step type will be automatically discovered and registered on startup.
   """
 
   use GenServer
 
-  alias Imgd.Nodes.Type
+  alias Imgd.Steps.Type
 
   require Logger
 
-  @ets_table :imgd_node_types
+  @ets_table :imgd_step_types
 
   # ============================================================================
   # Client API
@@ -58,7 +58,7 @@ defmodule Imgd.Nodes.Registry do
   end
 
   @doc """
-  Returns all registered node types.
+  Returns all registered step types.
   """
   @spec all() :: [Type.t()]
   def all do
@@ -69,7 +69,7 @@ defmodule Imgd.Nodes.Registry do
   end
 
   @doc """
-  Gets a node type by ID.
+  Gets a step type by ID.
   """
   @spec get(String.t()) :: {:ok, Type.t()} | {:error, :not_found}
   def get(type_id) when is_binary(type_id) do
@@ -80,18 +80,18 @@ defmodule Imgd.Nodes.Registry do
   end
 
   @doc """
-  Gets a node type by ID or raises.
+  Gets a step type by ID or raises.
   """
   @spec get!(String.t()) :: Type.t()
   def get!(type_id) do
     case get(type_id) do
       {:ok, type} -> type
-      {:error, :not_found} -> raise "Node type not found: #{type_id}"
+      {:error, :not_found} -> raise "Step type not found: #{type_id}"
     end
   end
 
   @doc """
-  Checks if a node type exists.
+  Checks if a step type exists.
   """
   @spec exists?(String.t()) :: boolean()
   def exists?(type_id) when is_binary(type_id) do
@@ -99,7 +99,7 @@ defmodule Imgd.Nodes.Registry do
   end
 
   @doc """
-  Lists node types by category.
+  Lists step types by category.
   """
   @spec list_by_category(String.t()) :: [Type.t()]
   def list_by_category(category) when is_binary(category) do
@@ -108,12 +108,12 @@ defmodule Imgd.Nodes.Registry do
   end
 
   @doc """
-  Lists node types by kind.
+  Lists step types by kind.
   """
-  @spec list_by_kind(Type.node_kind()) :: [Type.t()]
+  @spec list_by_kind(Type.step_kind()) :: [Type.t()]
   def list_by_kind(kind) when kind in [:action, :trigger, :control_flow, :transform] do
     all()
-    |> Enum.filter(&(&1.node_kind == kind))
+    |> Enum.filter(&(&1.step_kind == kind))
   end
 
   @doc """
@@ -128,7 +128,7 @@ defmodule Imgd.Nodes.Registry do
   end
 
   @doc """
-  Returns node types grouped by category.
+  Returns step types grouped by category.
   """
   @spec grouped_by_category() :: %{String.t() => [Type.t()]}
   def grouped_by_category do
@@ -137,7 +137,7 @@ defmodule Imgd.Nodes.Registry do
   end
 
   @doc """
-  Returns the count of registered node types.
+  Returns the count of registered step types.
   """
   @spec count() :: non_neg_integer()
   def count do
@@ -153,14 +153,14 @@ defmodule Imgd.Nodes.Registry do
     # Create ETS table for fast lookups
     :ets.new(@ets_table, [:named_table, :set, :protected, read_concurrency: true])
 
-    # Load all built-in node types
-    types = discover_node_types()
+    # Load all built-in step types
+    types = discover_step_types()
 
     for type <- types do
       :ets.insert(@ets_table, {type.id, type})
     end
 
-    Logger.info("Node Registry initialized with #{length(types)} node types")
+    Logger.info("Step Registry initialized with #{length(types)} step types")
 
     {:ok, %{}}
   end
@@ -170,26 +170,26 @@ defmodule Imgd.Nodes.Registry do
     # Clear and reload all types
     :ets.delete_all_objects(@ets_table)
 
-    types = discover_node_types()
+    types = discover_step_types()
 
     for type <- types do
       :ets.insert(@ets_table, {type.id, type})
     end
 
-    Logger.info("Node Registry reloaded with #{length(types)} node types")
+    Logger.info("Step Registry reloaded with #{length(types)} step types")
 
     {:reply, :ok, state}
   end
 
   # ============================================================================
-  # Node Type Discovery
+  # Step Type Discovery
   # ============================================================================
 
-  defp discover_node_types do
+  defp discover_step_types do
     # Get all executor modules and load their definitions
     builtin_executor_modules()
-    |> Enum.filter(&has_node_definition?/1)
-    |> Enum.map(& &1.__node_definition__())
+    |> Enum.filter(&has_step_definition?/1)
+    |> Enum.map(& &1.__step_definition__())
     |> validate_unique_ids()
   end
 
@@ -198,26 +198,26 @@ defmodule Imgd.Nodes.Registry do
   # Add new executor modules here as they are created.
   defp builtin_executor_modules do
     [
-      Imgd.Nodes.Executors.ManualInput,
-      Imgd.Nodes.Executors.HttpRequest,
-      Imgd.Nodes.Executors.JsonParser,
-      Imgd.Nodes.Executors.DataFilter,
-      Imgd.Nodes.Executors.DataTransform,
-      Imgd.Nodes.Executors.DataOutput,
-      Imgd.Nodes.Executors.Condition,
-      Imgd.Nodes.Executors.Switch,
-      Imgd.Nodes.Executors.Format,
-      Imgd.Nodes.Executors.Debug,
-      Imgd.Nodes.Executors.Math,
-      Imgd.Nodes.Executors.Aggregator,
-      Imgd.Nodes.Executors.Splitter
+      Imgd.Steps.Executors.ManualInput,
+      Imgd.Steps.Executors.HttpRequest,
+      Imgd.Steps.Executors.JsonParser,
+      Imgd.Steps.Executors.DataFilter,
+      Imgd.Steps.Executors.DataTransform,
+      Imgd.Steps.Executors.DataOutput,
+      Imgd.Steps.Executors.Condition,
+      Imgd.Steps.Executors.Switch,
+      Imgd.Steps.Executors.Format,
+      Imgd.Steps.Executors.Debug,
+      Imgd.Steps.Executors.Math,
+      Imgd.Steps.Executors.Aggregator,
+      Imgd.Steps.Executors.Splitter
     ]
   end
 
-  defp has_node_definition?(module) do
+  defp has_step_definition?(module) do
     # Ensure module is loaded
     Code.ensure_loaded(module)
-    function_exported?(module, :__node_definition__, 0)
+    function_exported?(module, :__step_definition__, 0)
   end
 
   defp validate_unique_ids(types) do
@@ -227,7 +227,7 @@ defmodule Imgd.Nodes.Registry do
     if length(ids) != length(unique_ids) do
       duplicates = ids -- unique_ids
 
-      raise "Duplicate node type IDs found: #{inspect(duplicates)}"
+      raise "Duplicate step type IDs found: #{inspect(duplicates)}"
     end
 
     types

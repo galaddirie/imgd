@@ -1,6 +1,6 @@
-defmodule Imgd.Workflows.Embeds.Node do
+defmodule Imgd.Workflows.Embeds.Step do
   @moduledoc """
-  Embedded schema for workflow nodes.
+  Embedded schema for workflow steps.
   Shared between Workflow (mutable) and WorkflowVersion (immutable).
   """
   @derive Jason.Encoder
@@ -28,8 +28,8 @@ defmodule Imgd.Workflows.Embeds.Node do
     field :notes, :string
   end
 
-  def changeset(node, attrs) do
-    node
+  def changeset(step, attrs) do
+    step
     |> cast(attrs, [:id, :type_id, :name, :config, :position, :notes])
     |> validate_required([:id, :type_id, :name])
     |> validate_map_field(:config)

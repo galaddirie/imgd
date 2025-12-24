@@ -6,7 +6,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
   - Maintain canonical workflow draft state
   - Process and linearize operations from all clients
   - Broadcast changes to all participants
-  - Manage editor state (pins, disabled nodes, locks)
+  - Manage editor state (pins, disabled steps, locks)
   - Persist operations and snapshots
   """
   use GenServer, restart: :transient
@@ -67,14 +67,14 @@ defmodule Imgd.Collaboration.EditSession.Server do
     GenServer.call(via_tuple(workflow_id), {:get_sync_state, client_seq})
   end
 
-  @doc "Acquire a soft lock on a node for editing."
-  def acquire_node_lock(workflow_id, node_id, user_id) do
-    GenServer.call(via_tuple(workflow_id), {:acquire_lock, node_id, user_id})
+  @doc "Acquire a soft lock on a step for editing."
+  def acquire_step_lock(workflow_id, step_id, user_id) do
+    GenServer.call(via_tuple(workflow_id), {:acquire_lock, step_id, user_id})
   end
 
-  @doc "Release a node lock."
-  def release_node_lock(workflow_id, node_id, user_id) do
-    GenServer.cast(via_tuple(workflow_id), {:release_lock, node_id, user_id})
+  @doc "Release a step lock."
+  def release_step_lock(workflow_id, step_id, user_id) do
+    GenServer.cast(via_tuple(workflow_id), {:release_lock, step_id, user_id})
   end
 
   @doc "Get current editor state (pins, disabled, locks)."
@@ -123,11 +123,11 @@ defmodule Imgd.Collaboration.EditSession.Server do
     {:reply, {:ok, response}, state}
   end
 
-  def handle_call({:acquire_lock, node_id, user_id}, _from, state) do
-    case EditorState.acquire_lock(state.editor_state, node_id, user_id) do
+  def handle_call({:acquire_lock, step_id, user_id}, _from, state) do
+    case EditorState.acquire_lock(state.editor_state, step_id, user_id) do
       {:ok, new_editor_state} ->
         new_state = %{state | editor_state: new_editor_state}
-        PubSub.broadcast_lock_acquired(state.workflow_id, node_id, user_id)
+        PubSub.broadcast_lock_acquired(state.workflow_id, step_id, user_id)
         {:reply, :ok, new_state}
 
       {:locked, other_user_id} ->
@@ -144,10 +144,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
   end
 
   @impl true
-  def handle_cast({:release_lock, node_id, user_id}, state) do
-    new_editor_state = EditorState.release_lock(state.editor_state, node_id, user_id)
+  def handle_cast({:release_lock, step_id, user_id}, state) do
+    new_editor_state = EditorState.release_lock(state.editor_state, step_id, user_id)
     new_state = %{state | editor_state: new_editor_state}
-    PubSub.broadcast_lock_released(state.workflow_id, node_id)
+    PubSub.broadcast_lock_released(state.workflow_id, step_id)
     {:noreply, new_state}
   end
 
@@ -284,24 +284,24 @@ defmodule Imgd.Collaboration.EditSession.Server do
       # Workflow structure operations - modify draft
       type
       when type in [
-             :add_node,
-             :remove_node,
-             :update_node_config,
-             :update_node_position,
-             :update_node_metadata,
+             :add_step,
+             :remove_step,
+             :update_step_config,
+             :update_step_position,
+             :update_step_metadata,
              :add_connection,
              :remove_connection
            ] ->
         {:ok, new_draft} = Operations.apply(draft, operation)
 
-        # Clean up editor state if node was removed
+        # Clean up editor state if step was removed
         new_editor_state =
-          if type == :remove_node do
-            node_id = operation.payload.node_id
+          if type == :remove_step do
+            step_id = operation.payload.step_id
 
             editor_state
-            |> EditorState.unpin_output(node_id)
-            |> EditorState.enable_node(node_id)
+            |> EditorState.unpin_output(step_id)
+            |> EditorState.enable_step(step_id)
           else
             editor_state
           end
@@ -309,40 +309,40 @@ defmodule Imgd.Collaboration.EditSession.Server do
         {new_draft, new_editor_state}
 
       # Editor-only operations - modify editor state only
-      :pin_node_output ->
+      :pin_step_output ->
         new_editor_state =
           EditorState.pin_output(
             editor_state,
-            operation.payload.node_id,
+            operation.payload.step_id,
             operation.payload.output_data
           )
 
         {draft, new_editor_state}
 
-      :unpin_node_output ->
+      :unpin_step_output ->
         new_editor_state =
           EditorState.unpin_output(
             editor_state,
-            operation.payload.node_id
+            operation.payload.step_id
           )
 
         {draft, new_editor_state}
 
-      :disable_node ->
+      :disable_step ->
         new_editor_state =
-          EditorState.disable_node(
+          EditorState.disable_step(
             editor_state,
-            operation.payload.node_id,
+            operation.payload.step_id,
             operation.payload[:mode] || :skip
           )
 
         {draft, new_editor_state}
 
-      :enable_node ->
+      :enable_step ->
         new_editor_state =
-          EditorState.enable_node(
+          EditorState.enable_step(
             editor_state,
-            operation.payload.node_id
+            operation.payload.step_id
           )
 
         {draft, new_editor_state}
@@ -394,9 +394,9 @@ defmodule Imgd.Collaboration.EditSession.Server do
   defp serialize_editor_state(editor_state) do
     %{
       pinned_outputs: editor_state.pinned_outputs,
-      disabled_nodes: MapSet.to_list(editor_state.disabled_nodes),
+      disabled_steps: MapSet.to_list(editor_state.disabled_steps),
       disabled_mode: editor_state.disabled_mode,
-      node_locks: editor_state.node_locks
+      step_locks: editor_state.step_locks
     }
   end
 

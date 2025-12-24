@@ -6,8 +6,8 @@ defmodule Imgd.Collaboration.EditSession.Presence do
 
   - Who is currently in the session
   - Cursor positions
-  - Node selections
-  - Node focus (config panel open)
+  - Step selections
+  - Step focus (config panel open)
 
   Note: Subscription to presence updates should go through
   `Imgd.Collaboration.EditSession.PubSub.subscribe_presence/2` which
@@ -22,8 +22,8 @@ defmodule Imgd.Collaboration.EditSession.Presence do
   @type presence_meta :: %{
           user: map(),
           cursor: %{x: number(), y: number()} | nil,
-          selected_nodes: [String.t()],
-          focused_node: String.t() | nil,
+          selected_steps: [String.t()],
+          focused_step: String.t() | nil,
           joined_at: DateTime.t()
         }
 
@@ -50,17 +50,17 @@ defmodule Imgd.Collaboration.EditSession.Presence do
     end)
   end
 
-  @doc "Update user's node selection."
-  def update_selection(workflow_id, user_id, node_ids) do
+  @doc "Update user's step selection."
+  def update_selection(workflow_id, user_id, step_ids) do
     update(self(), topic(workflow_id), user_id, fn meta ->
-      Map.put(meta, :selected_nodes, node_ids)
+      Map.put(meta, :selected_steps, step_ids)
     end)
   end
 
-  @doc "Update user's focused node (config panel open)."
-  def update_focus(workflow_id, user_id, node_id) do
+  @doc "Update user's focused step (config panel open)."
+  def update_focus(workflow_id, user_id, step_id) do
     update(self(), topic(workflow_id), user_id, fn meta ->
-      Map.put(meta, :focused_node, node_id)
+      Map.put(meta, :focused_step, step_id)
     end)
   end
 
@@ -99,8 +99,8 @@ defmodule Imgd.Collaboration.EditSession.Presence do
         name: name
       },
       cursor: nil,
-      selected_nodes: [],
-      focused_node: nil,
+      selected_steps: [],
+      focused_step: nil,
       joined_at: DateTime.utc_now()
     }
   end

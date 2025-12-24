@@ -1,6 +1,6 @@
-defmodule Imgd.Nodes.Executors.Aggregator do
+defmodule Imgd.Steps.Executors.Aggregator do
   @moduledoc """
-  Executor for Aggregator nodes.
+  Executor for Aggregator steps.
 
   Aggregates items from a split/parallel processing back into a single value.
   In Runic, this creates a `Runic.reduce` component.
@@ -32,7 +32,7 @@ defmodule Imgd.Nodes.Executors.Aggregator do
       # Output: 15
   """
 
-  use Imgd.Nodes.Definition,
+  use Imgd.Steps.Definition,
     id: "aggregator",
     name: "Aggregate Items",
     category: "Data",
@@ -62,7 +62,7 @@ defmodule Imgd.Nodes.Executors.Aggregator do
     "description" => "The aggregated result"
   }
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @supported_operations ~w(collect sum count concat first last min max)
 

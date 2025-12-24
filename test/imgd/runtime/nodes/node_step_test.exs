@@ -1,12 +1,12 @@
-defmodule Imgd.Runtime.Nodes.NodeStepTest do
+defmodule Imgd.Runtime.Steps.StepRunnerTest do
   use ExUnit.Case, async: true
 
-  alias Imgd.Runtime.Nodes.NodeStep
-  alias Imgd.Workflows.Embeds.Node
+  alias Imgd.Runtime.Steps.StepRunner
+  alias Imgd.Workflows.Embeds.Step
 
   describe "execute_with_context/3" do
-    test "evaluates expressions in config before executing the node" do
-      node = %Node{
+    test "evaluates expressions in config before executing the step" do
+      step = %Step{
         id: "math_1",
         type_id: "math",
         name: "Math",
@@ -18,8 +18,8 @@ defmodule Imgd.Runtime.Nodes.NodeStepTest do
       }
 
       result =
-        NodeStep.execute_with_context(
-          node,
+        StepRunner.execute_with_context(
+          step,
           %{"amount" => 2, "tax" => 3},
           execution_id: "exec-1",
           workflow_id: "wf-1"
@@ -29,7 +29,7 @@ defmodule Imgd.Runtime.Nodes.NodeStepTest do
     end
 
     test "throws when the executor returns an error" do
-      node = %Node{
+      step = %Step{
         id: "math_2",
         type_id: "math",
         name: "Math",
@@ -40,10 +40,10 @@ defmodule Imgd.Runtime.Nodes.NodeStepTest do
         }
       }
 
-      assert {:node_error, "math_2", "division by zero"} =
+      assert {:step_error, "math_2", "division by zero"} =
                catch_throw(
-                 NodeStep.execute_with_context(
-                   node,
+                 StepRunner.execute_with_context(
+                   step,
                    %{"amount" => 10},
                    execution_id: "exec-1",
                    workflow_id: "wf-1"
@@ -52,7 +52,7 @@ defmodule Imgd.Runtime.Nodes.NodeStepTest do
     end
 
     test "throws when expression evaluation fails" do
-      node = %Node{
+      step = %Step{
         id: "math_3",
         type_id: "math",
         name: "Math",
@@ -63,10 +63,10 @@ defmodule Imgd.Runtime.Nodes.NodeStepTest do
         }
       }
 
-      assert {:node_error, "math_3", {:expression_error, _}} =
+      assert {:step_error, "math_3", {:expression_error, _}} =
                catch_throw(
-                 NodeStep.execute_with_context(
-                   node,
+                 StepRunner.execute_with_context(
+                   step,
                    %{"amount" => 10},
                    execution_id: "exec-1",
                    workflow_id: "wf-1"

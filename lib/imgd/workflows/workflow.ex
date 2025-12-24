@@ -3,12 +3,12 @@ defmodule Imgd.Workflows.Workflow do
   Workflow definition schema.
 
   Stores the design-time workflow configuration including
-  nodes, connections, and trigger configuration.
+  steps, connections, and trigger configuration.
 
   This is the mutable "draft" state. When published, an immutable
   `WorkflowVersion` snapshot is created.
 
-  The actual graph definition (nodes, connections, triggers) is stored in
+  The actual graph definition (steps, connections, triggers) is stored in
   `Imgd.Workflows.WorkflowDraft`, which is kept private to the owner.
   """
   use Imgd.Schema

@@ -5,17 +5,17 @@ defmodule Imgd.Collaboration.EditOperation do
   use Imgd.Schema
 
   @type op_type ::
-          :add_node
-          | :remove_node
-          | :update_node_config
-          | :update_node_position
-          | :update_node_metadata
+          :add_step
+          | :remove_step
+          | :update_step_config
+          | :update_step_position
+          | :update_step_metadata
           | :add_connection
           | :remove_connection
-          | :pin_node_output
-          | :unpin_node_output
-          | :disable_node
-          | :enable_node
+          | :pin_step_output
+          | :unpin_step_output
+          | :disable_step
+          | :enable_step
 
   schema "edit_operations" do
     # Client-generated UUID
@@ -25,11 +25,11 @@ defmodule Imgd.Collaboration.EditOperation do
 
     field :type, Ecto.Enum,
       values: [
-        :add_node,
-        :remove_node,
-        :update_node_config,
-        :update_node_position,
-        :update_node_metadata,
+        :add_step,
+        :remove_step,
+        :update_step_config,
+        :update_step_position,
+        :update_step_metadata,
         :add_connection,
         :remove_connection
       ]

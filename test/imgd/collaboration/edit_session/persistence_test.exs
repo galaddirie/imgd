@@ -5,7 +5,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
   alias Imgd.Collaboration.EditOperation
   alias Imgd.Workflows
   alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.Node
+  alias Imgd.Workflows.Embeds.Step
   alias Imgd.Accounts
   alias Imgd.Accounts.Scope
 
@@ -18,9 +18,9 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
 
     # Create a basic draft
     draft_attrs = %{
-      nodes: [
+      steps: [
         %{
-          id: "node_1",
+          id: "step_1",
           type_id: "http_request",
           name: "HTTP Request",
           position: %{x: 100, y: 100}
@@ -40,8 +40,8 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
         %EditOperation{
           operation_id: "op_1",
           seq: 1,
-          type: :update_node_metadata,
-          payload: %{node_id: "node_1", changes: %{name: "Updated 1"}},
+          type: :update_step_metadata,
+          payload: %{step_id: "step_1", changes: %{name: "Updated 1"}},
           user_id: scope.user.id,
           client_seq: 1,
           workflow_id: workflow.id,
@@ -50,8 +50,8 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
         %EditOperation{
           operation_id: "op_2",
           seq: 2,
-          type: :update_node_position,
-          payload: %{node_id: "node_1", position: %{x: 200, y: 150}},
+          type: :update_step_position,
+          payload: %{step_id: "step_1", position: %{x: 200, y: 150}},
           user_id: scope.user.id,
           client_seq: 2,
           workflow_id: workflow.id,
@@ -60,8 +60,8 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
         %EditOperation{
           operation_id: "op_3",
           seq: 3,
-          type: :add_node,
-          payload: %{node: %{id: "node_2", type_id: "json_parser", name: "JSON Parser"}},
+          type: :add_step,
+          payload: %{step: %{id: "step_2", type_id: "json_parser", name: "JSON Parser"}},
           user_id: scope.user.id,
           client_seq: 1,
           workflow_id: workflow.id,
@@ -108,8 +108,8 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
         %EditOperation{
           operation_id: "op_1",
           seq: 1,
-          type: :update_node_metadata,
-          payload: %{node_id: "node_1", changes: %{name: "Persisted Name"}},
+          type: :update_step_metadata,
+          payload: %{step_id: "step_1", changes: %{name: "Persisted Name"}},
           user_id: scope.user.id,
           client_seq: 1,
           workflow_id: workflow.id
@@ -142,8 +142,8 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       op = %EditOperation{
         operation_id: "op_1",
         seq: 1,
-        type: :update_node_metadata,
-        payload: %{node_id: "node_1", changes: %{name: "Name"}},
+        type: :update_step_metadata,
+        payload: %{step_id: "step_1", changes: %{name: "Name"}},
         user_id: scope.user.id,
         client_seq: 1,
         workflow_id: workflow.id
@@ -171,10 +171,10 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       # Modify draft
       modified_draft = %{
         draft
-        | nodes:
-            draft.nodes ++
+        | steps:
+            draft.steps ++
               [
-                %Node{id: "node_2", type_id: "json_parser", name: "JSON Parser"}
+                %Step{id: "step_2", type_id: "json_parser", name: "JSON Parser"}
               ]
       }
 
@@ -189,8 +189,8 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
 
       # Check draft was persisted
       updated_draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
-      assert length(updated_draft.nodes) == 2
-      assert Enum.any?(updated_draft.nodes, &(&1.id == "node_2"))
+      assert length(updated_draft.steps) == 2
+      assert Enum.any?(updated_draft.steps, &(&1.id == "step_2"))
     end
   end
 
@@ -201,10 +201,10 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       # Modify draft
       modified_draft = %{
         draft
-        | nodes:
-            draft.nodes ++
+        | steps:
+            draft.steps ++
               [
-                %Node{id: "node_2", type_id: "json_parser", name: "JSON Parser"}
+                %Step{id: "step_2", type_id: "json_parser", name: "JSON Parser"}
               ]
       }
 
@@ -213,7 +213,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       # Check draft was persisted with new seq
       updated_draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
       assert updated_draft.settings["last_persisted_seq"] == 5
-      assert length(updated_draft.nodes) == 2
+      assert length(updated_draft.steps) == 2
     end
   end
 
@@ -223,7 +223,7 @@ defmodule Imgd.Collaboration.EditSession.PersistenceTest do
       draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
       # This would be caught by normal validation, but let's test error handling
       # Invalid
-      corrupted_draft = %{draft | nodes: nil}
+      corrupted_draft = %{draft | steps: nil}
 
       state = %{
         workflow_id: workflow.id,

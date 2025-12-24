@@ -1,6 +1,6 @@
-defmodule Imgd.Nodes.Executors.Condition do
+defmodule Imgd.Steps.Executors.Condition do
   @moduledoc """
-  Executor for Condition (If/Else) nodes.
+  Executor for Condition (If/Else) steps.
 
   Evaluates a condition expression and routes data accordingly.
   In Runic, this becomes a `Runic.rule` that only fires when the condition passes.
@@ -8,11 +8,11 @@ defmodule Imgd.Nodes.Executors.Condition do
   ## Configuration
 
   - `condition` (required) - Liquid expression that evaluates to truthy/falsy.
-    Supports the standard expression variables: `{{ json }}`, `{{ nodes.X.json }}`, etc.
+    Supports the standard expression variables: `{{ json }}`, `{{ steps.X.json }}`, etc.
 
   ## Input
 
-  Receives input from parent node(s). The input is available as `{{ json }}` in expressions.
+  Receives input from parent step(s). The input is available as `{{ json }}` in expressions.
 
   ## Output
 
@@ -26,7 +26,7 @@ defmodule Imgd.Nodes.Executors.Condition do
       # Output: %{"status" => "active", "data" => 123}  (if condition passes)
   """
 
-  use Imgd.Nodes.Definition,
+  use Imgd.Steps.Definition,
     id: "condition",
     name: "If/Else",
     category: "Control Flow",
@@ -66,7 +66,7 @@ defmodule Imgd.Nodes.Executors.Condition do
     "description" => "Input data, passed through if condition is true"
   }
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   alias Imgd.Runtime.Expression
 
@@ -132,9 +132,9 @@ defmodule Imgd.Nodes.Executors.Condition do
   # ===========================================================================
 
   defp build_vars(input, ctx) do
-    node_outputs =
+    step_outputs =
       case ctx do
-        %{node_outputs: outputs} when is_map(outputs) ->
+        %{step_outputs: outputs} when is_map(outputs) ->
           Map.new(outputs, fn {k, v} -> {k, %{"json" => v}} end)
 
         _ ->
@@ -143,7 +143,7 @@ defmodule Imgd.Nodes.Executors.Condition do
 
     %{
       "json" => input,
-      "nodes" => node_outputs,
+      "steps" => step_outputs,
       "variables" => Map.get(ctx, :variables, %{}),
       "metadata" => Map.get(ctx, :metadata, %{})
     }

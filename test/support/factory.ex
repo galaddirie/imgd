@@ -20,7 +20,7 @@ defmodule Imgd.Factory do
   def workflow_draft_factory do
     %Imgd.Workflows.WorkflowDraft{
       workflow_id: sequence(:workflow_id, &"#{&1}"),
-      nodes: [],
+      steps: [],
       connections: [],
       triggers: [],
       settings: %{}
@@ -28,8 +28,8 @@ defmodule Imgd.Factory do
   end
 
   def workflow_version_factory do
-    nodes = [
-      %{id: "node_1", type_id: "debug", name: "Debug 1", config: %{}, position: %{}}
+    steps = [
+      %{id: "step_1", type_id: "debug", name: "Debug 1", config: %{}, position: %{}}
     ]
 
     connections = []
@@ -37,11 +37,11 @@ defmodule Imgd.Factory do
 
     %Imgd.Workflows.WorkflowVersion{
       version_tag: sequence(:version_tag, &"1.0.#{&1}"),
-      nodes: nodes,
+      steps: steps,
       connections: connections,
       triggers: triggers,
       source_hash:
-        Imgd.Workflows.WorkflowVersion.compute_source_hash(nodes, connections, triggers),
+        Imgd.Workflows.WorkflowVersion.compute_source_hash(steps, connections, triggers),
       workflow: insert(:workflow)
     }
   end

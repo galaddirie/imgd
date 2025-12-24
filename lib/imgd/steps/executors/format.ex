@@ -1,6 +1,6 @@
-defmodule Imgd.Nodes.Executors.Format do
+defmodule Imgd.Steps.Executors.Format do
   @moduledoc """
-  Executor for Format nodes.
+  Executor for Format steps.
 
   Formats a string using a template and configured data.
 
@@ -11,7 +11,7 @@ defmodule Imgd.Nodes.Executors.Format do
   - `data` (optional) - Data object used for placeholder replacement. Supports expressions like `{{ json }}`.
   """
 
-  use Imgd.Nodes.Definition,
+  use Imgd.Steps.Definition,
     id: "format",
     name: "Format String",
     category: "Data",
@@ -45,7 +45,7 @@ defmodule Imgd.Nodes.Executors.Format do
     "description" => "The formatted string"
   }
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @impl true
   def execute(config, _input, _execution) do

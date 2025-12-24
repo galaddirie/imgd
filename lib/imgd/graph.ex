@@ -8,20 +8,21 @@ defmodule Imgd.Graph do
 
   ## Usage
 
-      # From workflow nodes and connections
-      graph = Graph.from_workflow(nodes, connections)
+      # From workflow steps and connections
+      graph = Graph.from_workflow(steps, connections)
 
       # Query structure
-      Graph.parents(graph, "node_1")
-      Graph.children(graph, "node_1")
+      # Query structure
+      Graph.parents(graph, "step_1")
+      Graph.children(graph, "step_1")
 
       # Traversal
-      Graph.upstream(graph, "node_1")   # all ancestors
-      Graph.downstream(graph, "node_1") # all descendants
+      Graph.upstream(graph, "step_1")   # all ancestors
+      Graph.downstream(graph, "step_1") # all descendants
 
       # Algorithms
       {:ok, sorted} = Graph.topological_sort(graph)
-      subgraph = Graph.subgraph(graph, ["node_1", "node_2"])
+      subgraph = Graph.subgraph(graph, ["step_1", "step_2"])
   """
 
   defstruct [
@@ -74,28 +75,28 @@ defmodule Imgd.Graph do
   end
 
   @doc """
-  Creates a graph from workflow nodes and connections.
+  Creates a graph from workflow steps and connections.
 
   This is the primary constructor for workflow DAGs.
 
   ## Options
 
-  - `:validate` - Whether to validate edges reference existing nodes (default: true)
+  - `:validate` - Whether to validate edges reference existing steps (default: true)
 
   ## Returns
 
   - `{:ok, graph}` - Successfully built graph
-  - `{:error, {:invalid_edges, edges}}` - Some edges reference non-existent nodes
+  - `{:error, {:invalid_edges, edges}}` - Some edges reference non-existent steps
   """
   @spec from_workflow(list(), list(), keyword()) :: {:ok, t()} | {:error, term()}
-  def from_workflow(nodes, connections, opts \\ []) do
+  def from_workflow(steps, connections, opts \\ []) do
     validate? = Keyword.get(opts, :validate, true)
-    vertex_ids = Enum.map(nodes, & &1.id)
+    vertex_ids = Enum.map(steps, & &1.id)
     vertices = MapSet.new(vertex_ids)
 
     edges =
       Enum.map(connections, fn conn ->
-        {conn.source_node_id, conn.target_node_id}
+        {conn.source_step_id, conn.target_step_id}
       end)
 
     if validate? do
@@ -118,8 +119,8 @@ defmodule Imgd.Graph do
   Creates a graph from workflow, raising on error.
   """
   @spec from_workflow!(list(), list(), keyword()) :: t()
-  def from_workflow!(nodes, connections, opts \\ []) do
-    case from_workflow(nodes, connections, opts) do
+  def from_workflow!(steps, connections, opts \\ []) do
+    case from_workflow(steps, connections, opts) do
       {:ok, graph} -> graph
       {:error, reason} -> raise "Failed to build graph: #{inspect(reason)}"
     end
@@ -371,32 +372,32 @@ defmodule Imgd.Graph do
   end
 
   @doc """
-  Extracts the induced subgraph for executing to target nodes.
+  Extracts the induced subgraph for executing to target steps.
 
   Returns a subgraph containing the targets and all their upstream dependencies,
 
   ## Options
 
   - `:exclude` - List of vertex IDs to exclude completely
-  - `:include_targets` - Whether to include target nodes (default: true)
+  - `:include_targets` - Whether to include target steps (default: true)
   """
   @spec execution_subgraph(t(), [vertex_id()], keyword()) :: t()
   def execution_subgraph(%__MODULE__{} = graph, target_ids, opts \\ []) do
     exclude = Keyword.get(opts, :exclude, []) |> MapSet.new()
     include_targets = Keyword.get(opts, :include_targets, true)
 
-    # Collect nodes to run by traversing upstream from targets,
-    nodes_to_run = collect_upstream_with_boundary(graph, target_ids, MapSet.new(), exclude)
+    # Collect steps to run by traversing upstream from targets,
+    steps_to_run = collect_upstream_with_boundary(graph, target_ids, MapSet.new(), exclude)
 
     # Remove targets if explicitly requested
-    nodes_to_run =
+    steps_to_run =
       if include_targets do
-        nodes_to_run
+        steps_to_run
       else
-        MapSet.difference(nodes_to_run, MapSet.new(target_ids))
+        MapSet.difference(steps_to_run, MapSet.new(target_ids))
       end
 
-    subgraph(graph, nodes_to_run)
+    subgraph(graph, steps_to_run)
   end
 
   defp collect_upstream_with_boundary(graph, start_ids, boundary, exclude) do
@@ -414,12 +415,12 @@ defmodule Imgd.Graph do
         do_collect_upstream(graph, rest, boundary, exclude, acc)
 
       MapSet.member?(boundary, id) ->
-        # Include the boundary node but don't go upstream
+        # Include the boundary step but don't go upstream
         acc = MapSet.put(acc, id)
         do_collect_upstream(graph, rest, boundary, exclude, acc)
 
       true ->
-        # Include node and recurse to parents
+        # Include step and recurse to parents
         acc = MapSet.put(acc, id)
         parents = parents(graph, id)
         do_collect_upstream(graph, parents ++ rest, boundary, exclude, acc)
@@ -427,9 +428,9 @@ defmodule Imgd.Graph do
   end
 
   @doc """
-  Extracts the downstream subgraph from a starting node.
+  Extracts the downstream subgraph from a starting step.
 
-  Returns a subgraph containing the start node and all its descendants.
+  Returns a subgraph containing the start step and all its descendants.
   """
   @spec downstream_subgraph(t(), vertex_id()) :: t()
   def downstream_subgraph(%__MODULE__{} = graph, start_id) do

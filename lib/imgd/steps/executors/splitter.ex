@@ -1,6 +1,6 @@
-defmodule Imgd.Nodes.Executors.Splitter do
+defmodule Imgd.Steps.Executors.Splitter do
   @moduledoc """
-  Executor for Splitter nodes.
+  Executor for Splitter steps.
 
   Splits a collection into individual items for parallel processing.
   In Runic, this creates a `Runic.map` component that iterates over items.
@@ -18,7 +18,7 @@ defmodule Imgd.Nodes.Executors.Splitter do
   ## Output
 
   When used with Runic's map, each item becomes a separate fact that flows
-  to downstream nodes.
+  to downstream steps.
 
   ## Example
 
@@ -27,7 +27,7 @@ defmodule Imgd.Nodes.Executors.Splitter do
       # Output: Each of 1, 2, 3 flows as separate facts
   """
 
-  use Imgd.Nodes.Definition,
+  use Imgd.Steps.Definition,
     id: "splitter",
     name: "Split Items",
     category: "Data",
@@ -54,7 +54,7 @@ defmodule Imgd.Nodes.Executors.Splitter do
     "description" => "Each item from the collection as a separate output"
   }
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @impl true
   def execute(config, input, _ctx) do

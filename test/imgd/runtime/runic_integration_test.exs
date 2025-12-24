@@ -8,8 +8,8 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
   require Runic
   alias Runic.Workflow
   alias Imgd.Runtime.{ExecutionContext, RunicAdapter, Events}
-  alias Imgd.Runtime.Nodes.NodeStep
-  alias Imgd.Workflows.Embeds.{Node, Connection}
+  alias Imgd.Runtime.Steps.StepRunner
+  alias Imgd.Workflows.Embeds.{Step, Connection}
 
   # ===========================================================================
   # ExecutionContext Tests
@@ -20,7 +20,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       ctx = ExecutionContext.new()
 
       assert ctx.execution_id == nil
-      assert ctx.node_outputs == %{}
+      assert ctx.step_outputs == %{}
       assert ctx.variables == %{}
       assert ctx.input == nil
     end
@@ -30,59 +30,59 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
         ExecutionContext.new(
           execution_id: "exec_123",
           workflow_id: "wf_456",
-          node_id: "node_1",
+          step_id: "step_1",
           variables: %{"key" => "value"},
           input: %{"data" => 42}
         )
 
       assert ctx.execution_id == "exec_123"
       assert ctx.workflow_id == "wf_456"
-      assert ctx.node_id == "node_1"
+      assert ctx.step_id == "step_1"
       assert ctx.variables == %{"key" => "value"}
       assert ctx.input == %{"data" => 42}
     end
 
-    test "put_output/3 adds node output" do
+    test "put_output/3 adds step output" do
       ctx = ExecutionContext.new()
-      ctx = ExecutionContext.put_output(ctx, "node_1", %{"result" => 100})
+      ctx = ExecutionContext.put_output(ctx, "step_1", %{"result" => 100})
 
-      assert ExecutionContext.get_output(ctx, "node_1") == %{"result" => 100}
+      assert ExecutionContext.get_output(ctx, "step_1") == %{"result" => 100}
     end
 
-    test "get_output/2 returns nil for missing node" do
+    test "get_output/2 returns nil for missing step" do
       ctx = ExecutionContext.new()
       assert ExecutionContext.get_output(ctx, "missing") == nil
     end
   end
 
   # ===========================================================================
-  # NodeStep Tests
+  # StepStep Tests
   # ===========================================================================
 
-  describe "NodeStep.create/2" do
-    test "creates a Runic step from a node" do
-      node = %Node{
+  describe "StepRunner.create/2" do
+    test "creates a Runic step from a step" do
+      step = %Step{
         id: "debug_1",
         type_id: "debug",
         name: "Test Debug",
         config: %{"label" => "Test"}
       }
 
-      step = NodeStep.create(node)
+      step = StepRunner.create(step)
 
       assert %Runic.Workflow.Step{} = step
       assert step.name == "debug_1"
     end
 
-    test "executes debug node and returns input unchanged" do
-      node = %Node{
+    test "executes debug step and returns input unchanged" do
+      step = %Step{
         id: "debug_1",
         type_id: "debug",
         name: "Test Debug",
         config: %{"label" => "Test", "level" => "debug"}
       }
 
-      step = NodeStep.create(node)
+      step = StepRunner.create(step)
 
       # Create a minimal workflow and execute
       wrk = Workflow.new(name: "test")
@@ -102,11 +102,11 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
   # ===========================================================================
 
   describe "RunicAdapter.to_runic_workflow/2" do
-    test "builds workflow from source with single node" do
+    test "builds workflow from source with single step" do
       source = %{
         id: "test_wf",
-        nodes: [
-          %Node{id: "node_1", type_id: "debug", name: "Debug 1", config: %{}}
+        steps: [
+          %Step{id: "step_1", type_id: "debug", name: "Debug 1", config: %{}}
         ],
         connections: []
       }
@@ -120,38 +120,38 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
     test "builds workflow with linear pipeline" do
       source = %{
         id: "linear_wf",
-        nodes: [
-          %Node{id: "node_1", type_id: "debug", name: "Debug 1", config: %{"label" => "First"}},
-          %Node{id: "node_2", type_id: "debug", name: "Debug 2", config: %{"label" => "Second"}}
+        steps: [
+          %Step{id: "step_1", type_id: "debug", name: "Debug 1", config: %{"label" => "First"}},
+          %Step{id: "step_2", type_id: "debug", name: "Debug 2", config: %{"label" => "Second"}}
         ],
         connections: [
-          %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+          %Connection{id: "conn_1", source_step_id: "step_1", target_step_id: "step_2"}
         ]
       }
 
       workflow = RunicAdapter.to_runic_workflow(source)
 
-      # Execute and verify both nodes ran
+      # Execute and verify both steps ran
       result =
         workflow
         |> Workflow.react_until_satisfied(%{"input" => "test"})
         |> Workflow.raw_productions()
 
-      # Both debug nodes should pass through the same input
+      # Both debug steps should pass through the same input
       assert length(result) >= 2
     end
 
     test "handles fan-out pattern (one parent, multiple children)" do
       source = %{
         id: "fanout_wf",
-        nodes: [
-          %Node{id: "root", type_id: "debug", name: "Root", config: %{}},
-          %Node{id: "child_a", type_id: "debug", name: "Child A", config: %{}},
-          %Node{id: "child_b", type_id: "debug", name: "Child B", config: %{}}
+        steps: [
+          %Step{id: "root", type_id: "debug", name: "Root", config: %{}},
+          %Step{id: "child_a", type_id: "debug", name: "Child A", config: %{}},
+          %Step{id: "child_b", type_id: "debug", name: "Child B", config: %{}}
         ],
         connections: [
-          %Connection{id: "c1", source_node_id: "root", target_node_id: "child_a"},
-          %Connection{id: "c2", source_node_id: "root", target_node_id: "child_b"}
+          %Connection{id: "c1", source_step_id: "root", target_step_id: "child_a"},
+          %Connection{id: "c2", source_step_id: "root", target_step_id: "child_b"}
         ]
       }
 
@@ -173,7 +173,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
 
   describe "Splitter executor" do
     test "splits list input" do
-      node = %Node{
+      step = %Step{
         id: "split_1",
         type_id: "splitter",
         name: "Splitter",
@@ -181,13 +181,13 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       }
 
       # Test executor directly
-      {:ok, result} = Imgd.Nodes.Executors.Splitter.execute(%{}, [1, 2, 3], nil)
+      {:ok, result} = Imgd.Steps.Executors.Splitter.execute(%{}, [1, 2, 3], nil)
       assert result == [1, 2, 3]
     end
 
     test "extracts nested field" do
       {:ok, result} =
-        Imgd.Nodes.Executors.Splitter.execute(
+        Imgd.Steps.Executors.Splitter.execute(
           %{"field" => "items"},
           %{"items" => [1, 2, 3]},
           nil
@@ -197,7 +197,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
     end
 
     test "wraps single item in list" do
-      {:ok, result} = Imgd.Nodes.Executors.Splitter.execute(%{}, "single", nil)
+      {:ok, result} = Imgd.Steps.Executors.Splitter.execute(%{}, "single", nil)
       assert result == ["single"]
     end
   end
@@ -205,7 +205,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
   describe "Aggregator executor" do
     test "sum operation" do
       {:ok, result} =
-        Imgd.Nodes.Executors.Aggregator.execute(
+        Imgd.Steps.Executors.Aggregator.execute(
           %{"operation" => "sum"},
           [1, 2, 3, 4],
           nil
@@ -216,7 +216,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
 
     test "count operation" do
       {:ok, result} =
-        Imgd.Nodes.Executors.Aggregator.execute(
+        Imgd.Steps.Executors.Aggregator.execute(
           %{"operation" => "count"},
           [1, 2, 3, 4, 5],
           nil
@@ -227,7 +227,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
 
     test "collect operation" do
       {:ok, result} =
-        Imgd.Nodes.Executors.Aggregator.execute(
+        Imgd.Steps.Executors.Aggregator.execute(
           %{"operation" => "collect"},
           [1, 2, 3],
           nil
@@ -238,7 +238,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
 
     test "concat operation" do
       {:ok, result} =
-        Imgd.Nodes.Executors.Aggregator.execute(
+        Imgd.Steps.Executors.Aggregator.execute(
           %{"operation" => "concat"},
           ["a", "b", "c"],
           nil
@@ -257,7 +257,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       ctx = ExecutionContext.new(input: %{"value" => 10})
 
       {:ok, result} =
-        Imgd.Nodes.Executors.Condition.execute(
+        Imgd.Steps.Executors.Condition.execute(
           %{"condition" => "true"},
           %{"value" => 10},
           ctx
@@ -270,7 +270,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       ctx = ExecutionContext.new(input: %{"value" => 10})
 
       result =
-        Imgd.Nodes.Executors.Condition.execute(
+        Imgd.Steps.Executors.Condition.execute(
           %{"condition" => "false"},
           %{"value" => 10},
           ctx
@@ -284,7 +284,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
 
       # When expression evaluates to truthy
       {:ok, _} =
-        Imgd.Nodes.Executors.Condition.execute(
+        Imgd.Steps.Executors.Condition.execute(
           %{"condition" => "{{ json.status }}"},
           %{"status" => "active"},
           ctx
@@ -297,7 +297,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       ctx = ExecutionContext.new()
 
       {:ok, {:branch, output, _data}} =
-        Imgd.Nodes.Executors.Switch.execute(
+        Imgd.Steps.Executors.Switch.execute(
           %{
             "value" => "{{ json.type }}",
             "cases" => [
@@ -316,7 +316,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       ctx = ExecutionContext.new()
 
       {:ok, {:branch, output, _data}} =
-        Imgd.Nodes.Executors.Switch.execute(
+        Imgd.Steps.Executors.Switch.execute(
           %{
             "value" => "{{ json.type }}",
             "cases" => [
@@ -338,7 +338,7 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
 
   describe "Events" do
     test "emit/3 returns :ok" do
-      result = Events.emit(:step_completed, "test_exec", %{step: "node_1"})
+      result = Events.emit(:step_completed, "test_exec", %{step: "step_1"})
       assert result == :ok
     end
   end
@@ -348,18 +348,18 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
   # ===========================================================================
 
   describe "Full workflow execution" do
-    test "executes multi-node workflow end to end" do
-      # Create a simple 3-node pipeline
+    test "executes multi-step workflow end to end" do
+      # Create a simple 3-step pipeline
       source = %{
         id: "integration_test",
-        nodes: [
-          %Node{id: "start", type_id: "debug", name: "Start", config: %{"label" => "Start"}},
-          %Node{id: "middle", type_id: "debug", name: "Middle", config: %{"label" => "Middle"}},
-          %Node{id: "end", type_id: "debug", name: "End", config: %{"label" => "End"}}
+        steps: [
+          %Step{id: "start", type_id: "debug", name: "Start", config: %{"label" => "Start"}},
+          %Step{id: "middle", type_id: "debug", name: "Middle", config: %{"label" => "Middle"}},
+          %Step{id: "end", type_id: "debug", name: "End", config: %{"label" => "End"}}
         ],
         connections: [
-          %Connection{id: "c1", source_node_id: "start", target_node_id: "middle"},
-          %Connection{id: "c2", source_node_id: "middle", target_node_id: "end"}
+          %Connection{id: "c1", source_step_id: "start", target_step_id: "middle"},
+          %Connection{id: "c2", source_step_id: "middle", target_step_id: "end"}
         ]
       }
 

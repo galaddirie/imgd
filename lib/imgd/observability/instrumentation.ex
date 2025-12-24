@@ -14,10 +14,10 @@ defmodule Imgd.Observability.Instrumentation do
         end)
       end
 
-  ## Node Tracing
+  ## Step Tracing
 
-  Node-level tracing is handled via Runic hooks installed by the execution engine.
-  This ensures all node lifecycle events (start/complete/fail) are tracked
+  Step-level tracing is handled via Runic hooks installed by the execution engine.
+  This ensures all step lifecycle events (start/complete/fail) are tracked
   consistently with proper timing, PubSub broadcasts, and telemetry.
 
   ## Context Propagation
@@ -34,7 +34,7 @@ defmodule Imgd.Observability.Instrumentation do
 
   alias OpenTelemetry.Ctx
   alias Imgd.Executions.Execution
-  alias Imgd.Executions.NodeExecution
+  alias Imgd.Executions.StepExecution
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
 
   # ============================================================================
@@ -68,78 +68,78 @@ defmodule Imgd.Observability.Instrumentation do
   end
 
   # ============================================================================
-  # Node Lifecycle
+  # Step Lifecycle
   # ============================================================================
 
   @doc """
-  Records that a node has started executing.
+  Records that a step has started executing.
   """
-  def record_node_started(%Execution{} = execution, %NodeExecution{} = node_execution) do
+  def record_step_started(%Execution{} = execution, %StepExecution{} = step_execution) do
     :telemetry.execute(
-      [:imgd, :node, :start],
+      [:imgd, :step, :start],
       %{system_time: System.system_time(), queue_time_us: nil},
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
-        node_id: node_execution.node_id,
-        node_type_id: node_execution.node_type_id,
-        attempt: node_execution.attempt
+        step_id: step_execution.step_id,
+        step_type_id: step_execution.step_type_id,
+        attempt: step_execution.attempt
       }
     )
 
-    ExecutionPubSub.broadcast_node_started(execution, node_execution)
+    ExecutionPubSub.broadcast_step_started(execution, step_execution)
   end
 
   @doc """
-  Records that a node has completed successfully.
+  Records that a step has completed successfully.
   """
-  def record_node_completed(
+  def record_step_completed(
         %Execution{} = execution,
-        %NodeExecution{} = node_execution,
+        %StepExecution{} = step_execution,
         duration_us
       ) do
     :telemetry.execute(
-      [:imgd, :node, :stop],
+      [:imgd, :step, :stop],
       %{duration_us: duration_us},
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
-        node_id: node_execution.node_id,
-        node_type_id: node_execution.node_type_id,
-        attempt: node_execution.attempt,
+        step_id: step_execution.step_id,
+        step_type_id: step_execution.step_type_id,
+        attempt: step_execution.attempt,
         status: :completed
       }
     )
 
-    ExecutionPubSub.broadcast_node_completed(execution, node_execution)
+    ExecutionPubSub.broadcast_step_completed(execution, step_execution)
   end
 
   @doc """
-  Records that a node has failed.
+  Records that a step has failed.
   """
-  def record_node_failed(
+  def record_step_failed(
         %Execution{} = execution,
-        %NodeExecution{} = node_execution,
+        %StepExecution{} = step_execution,
         reason,
         duration_us
       ) do
     error = Execution.format_error(reason)
 
     :telemetry.execute(
-      [:imgd, :node, :stop],
+      [:imgd, :step, :stop],
       %{duration_us: duration_us},
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
-        node_id: node_execution.node_id,
-        node_type_id: node_execution.node_type_id,
-        attempt: node_execution.attempt,
+        step_id: step_execution.step_id,
+        step_type_id: step_execution.step_type_id,
+        attempt: step_execution.attempt,
         status: :failed,
         error: error
       }
     )
 
-    ExecutionPubSub.broadcast_node_failed(execution, node_execution, error)
+    ExecutionPubSub.broadcast_step_failed(execution, step_execution, error)
   end
 
   # ============================================================================
@@ -212,29 +212,29 @@ defmodule Imgd.Observability.Instrumentation do
   end
 
   @doc """
-  Records a node retry event.
+  Records a step retry event.
 
   Call this when scheduling a retry to track retry patterns.
   """
-  def record_node_retry(%Execution{} = execution, node_info, attempt, backoff_us) do
+  def record_step_retry(%Execution{} = execution, step_info, attempt, backoff_us) do
     :telemetry.execute(
-      [:imgd, :node, :retry],
+      [:imgd, :step, :retry],
       %{backoff_us: backoff_us},
       %{
         execution_id: execution.id,
         workflow_id: execution.workflow_id,
-        node_id: node_info.id,
-        node_type_id: node_info.type_id,
+        step_id: step_info.id,
+        step_type_id: step_info.type_id,
         attempt: attempt
       }
     )
 
-    Logger.info("Node retry scheduled",
-      event: "node.retry",
+    Logger.info("Step retry scheduled",
+      event: "step.retry",
       execution_id: execution.id,
       workflow_id: execution.workflow_id,
-      node_id: node_info.id,
-      node_type_id: node_info.type_id,
+      step_id: step_info.id,
+      step_type_id: step_info.type_id,
       attempt: attempt,
       backoff_us: backoff_us
     )

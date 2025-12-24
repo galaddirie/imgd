@@ -1,5 +1,5 @@
-defmodule Imgd.Nodes.Executors.ManualInput do
-  use Imgd.Nodes.Definition,
+defmodule Imgd.Steps.Executors.ManualInput do
+  use Imgd.Steps.Definition,
     id: "manual_input",
     name: "Manual Input",
     category: "Triggers",
@@ -7,7 +7,7 @@ defmodule Imgd.Nodes.Executors.ManualInput do
     icon: "hero-cursor-arrow-rays",
     kind: :trigger
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @impl true
   def execute(_config, input, _context) do

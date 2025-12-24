@@ -1,7 +1,7 @@
 # TODO: this has lots of LEGACY lets update
-defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
+defmodule ImgdWeb.WorkflowLive.Components.StepConfigModal do
   @moduledoc """
-  Modal component for configuring node inputs with expression support.
+  Modal component for configuring step inputs with expression support.
 
   Features:
   - Toggle between literal values and expressions for any field
@@ -26,7 +26,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
      |> assign(:pin_label, "")
      |> assign(:show_pin_form, false)
      |> assign(:variable_search, "")
-     |> assign(:explorer_expanded, %{"json" => true, "nodes" => true, "variables" => true})}
+     |> assign(:explorer_expanded, %{"json" => true, "steps" => true, "variables" => true})}
   end
 
   @impl true
@@ -34,8 +34,8 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
     socket = assign(socket, assigns)
 
     socket =
-      if assign_changed?(assigns, :node) and assigns[:node] do
-        init_field_state(socket, assigns.node)
+      if assign_changed?(assigns, :step) and assigns[:step] do
+        init_field_state(socket, assigns.step)
       else
         socket
       end
@@ -47,8 +47,8 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
     Map.has_key?(assigns, key)
   end
 
-  defp init_field_state(socket, node) do
-    config = node.config || %{}
+  defp init_field_state(socket, step) do
+    config = step.config || %{}
 
     # Determine which fields are expressions vs literals
     {modes, values} =
@@ -174,23 +174,23 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
   def handle_event("save_config", _, socket) do
     # Build the final config with expression markers
     config = build_final_config(socket)
-    send(self(), {:node_config_saved, socket.assigns.node.id, config})
+    send(self(), {:step_config_saved, socket.assigns.step.id, config})
     {:noreply, socket}
   end
 
   @impl true
   def handle_event("pin_output", _, socket) do
     label = socket.assigns.pin_label
-    node_id = socket.assigns.node.id
-    output_data = socket.assigns[:node_output]
+    step_id = socket.assigns.step.id
+    output_data = socket.assigns[:step_output]
 
-    send(self(), {:pin_node_output, node_id, output_data, label})
+    send(self(), {:pin_step_output, step_id, output_data, label})
     {:noreply, assign(socket, :show_pin_form, false)}
   end
 
   @impl true
   def handle_event("close", _, socket) do
-    send(self(), :close_node_config_modal)
+    send(self(), :close_step_config_modal)
     {:noreply, socket}
   end
 
@@ -230,11 +230,11 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
     end)
   end
 
-  # Get field schema for the node type
-  defp get_field_schema(node) do
-    # This would ideally come from a node type registry
+  # Get field schema for the step type
+  defp get_field_schema(step) do
+    # This would ideally come from a step type registry
     # For now, we'll infer from existing config
-    config = node.config || %{}
+    config = step.config || %{}
 
     Enum.map(config, fn {key, value} ->
       %{
@@ -296,14 +296,14 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
             </div>
             <div>
               <div class="flex items-center gap-2">
-                <h2 class="text-lg font-bold text-base-content leading-none">{@node.name}</h2>
+                <h2 class="text-lg font-bold text-base-content leading-none">{@step.name}</h2>
                 <span class="badge badge-primary badge-sm font-mono opacity-80">
-                  {short_id(@node.id)}
+                  {short_id(@step.id)}
                 </span>
               </div>
               <p class="text-xs text-base-content/50 mt-1 font-medium flex items-center gap-1.5">
                 <span class="size-1.5 rounded-full bg-success"></span>
-                {node_type_label(@node.type_id)} Node
+                {step_type_label(@step.type_id)} Step
               </p>
             </div>
           </div>
@@ -405,7 +405,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
             <%= case @active_tab do %>
               <% :config -> %>
                 <.config_tab
-                  node={@node}
+                  step={@step}
                   field_modes={@field_modes}
                   field_values={@field_values}
                   expression_previews={@expression_previews}
@@ -415,7 +415,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
                 />
               <% :output -> %>
                 <.output_tab
-                  node_output={@node_output}
+                  step_output={@step_output}
                   show_pin_form={@show_pin_form}
                   pin_label={@pin_label}
                   myself={@myself}
@@ -423,7 +423,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
               <% :pinned -> %>
                 <.pinned_tab
                   pinned_data={@pinned_data}
-                  node_id={@node.id}
+                  step_id={@step.id}
                 />
             <% end %>
           </div>
@@ -500,10 +500,10 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
         data: context_map && context_map["json"]
       },
       %{
-        id: "nodes",
-        label: "Upstream Nodes",
+        id: "steps",
+        label: "Upstream Steps",
         icon: "hero-cpu-chip",
-        data: context_map && context_map["nodes"]
+        data: context_map && context_map["steps"]
       },
       %{
         id: "variables",
@@ -564,7 +564,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
               <%= if is_nil(section.data) or section.data == %{} do %>
                 <div class="p-2 text-[10px] text-base-content/40 italic">No data available</div>
               <% else %>
-                <.tree_node
+                <.tree_step
                   data={section.data}
                   path={if section.id == "system", do: "", else: section.id}
                   search={@search}
@@ -579,7 +579,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
     """
   end
 
-  defp tree_node(assigns) do
+  defp tree_step(assigns) do
     data = assigns.data
     search = assigns.search |> String.downcase()
 
@@ -600,17 +600,17 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
         <% full_expr = "{{ #{current_path} }}" %>
 
         <%= if is_map(value) and value != %{} do %>
-          <details class="group/node">
+          <details class="group/step">
             <summary class="flex items-center gap-1.5 p-1.5 rounded-lg hover:bg-base-200 cursor-pointer transition-colors list-none">
               <.icon
                 name="hero-chevron-right"
-                class="size-3 opacity-30 group-open/node:rotate-90 transition-transform"
+                class="size-3 opacity-30 group-open/step:rotate-90 transition-transform"
               />
               <span class="text-[11px] font-mono text-base-content/70">{key}</span>
               <span class="text-[9px] text-base-content/30 italic">Map</span>
             </summary>
             <div class="ml-3 pl-2 border-l border-base-200/50 mt-0.5">
-              <.tree_node data={value} path={current_path} search={@search} level={@level + 1} />
+              <.tree_step data={value} path={current_path} search={@search} level={@level + 1} />
             </div>
           </details>
         <% else %>
@@ -669,7 +669,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
   defp format_short_value(v) when is_number(v), do: to_string(v)
   defp format_short_value(_), do: "..."
 
-  attr :node, :map, required: true
+  attr :step, :map, required: true
   attr :field_modes, :map, required: true
   attr :field_values, :map, required: true
   attr :expression_previews, :map, required: true
@@ -678,15 +678,15 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
   attr :myself, :any, required: true
 
   defp config_tab(assigns) do
-    fields = get_field_schema(assigns.node)
+    fields = get_field_schema(assigns.step)
     assigns = assign(assigns, :fields, fields)
 
     ~H"""
     <div class="max-w-3xl mx-auto space-y-12 pb-20">
       <div class="space-y-1">
-        <h3 class="text-lg font-semibold text-base-content tracking-tight">Node Configuration</h3>
+        <h3 class="text-lg font-semibold text-base-content tracking-tight">Step Configuration</h3>
         <p class="text-xs text-base-content/50 font-medium">
-          Configure the parameters for this {@node.type_id} operation.
+          Configure the parameters for this {@step.type_id} operation.
         </p>
       </div>
 
@@ -724,7 +724,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
             <h4 class="text-xs font-bold text-primary mb-1">Using Expressions</h4>
             <p class="text-[11px] text-base-content/60 leading-relaxed">
               Switch any field to <span class="font-bold text-secondary">Expression Mode</span>
-              to use dynamic data from upstream nodes. Use the sidebar to find and copy variable paths.
+              to use dynamic data from upstream steps. Use the sidebar to find and copy variable paths.
             </p>
           </div>
         </div>
@@ -906,7 +906,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
             @error && "border-error/30 focus:border-error/60 focus:ring-error/5"
           ]}
           spellcheck="false"
-          placeholder="{{ nodes.PreviousNode.json.field }}"
+          placeholder="{{ steps.PreviousStep.json.field }}"
           phx-keyup="update_field"
           phx-blur="update_field"
           phx-debounce="300"
@@ -957,7 +957,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
     """
   end
 
-  attr :node_output, :any, default: nil
+  attr :step_output, :any, default: nil
   attr :show_pin_form, :boolean, default: false
   attr :pin_label, :string, default: ""
   attr :myself, :any, required: true
@@ -969,10 +969,10 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
         <div class="space-y-1">
           <h3 class="text-xl font-bold text-base-content tracking-tight">Execution Output</h3>
           <p class="text-sm text-base-content/50 font-medium">
-            Data captured from the last time this node was executed.
+            Data captured from the last time this step was executed.
           </p>
         </div>
-        <%= if @node_output do %>
+        <%= if @step_output do %>
           <button
             type="button"
             class={[
@@ -989,7 +989,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
         <% end %>
       </div>
 
-      <%= if @node_output do %>
+      <%= if @step_output do %>
         <%!-- Pin Form --%>
         <div
           :if={@show_pin_form}
@@ -1019,7 +1019,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
             </button>
           </div>
           <p class="text-[11px] text-primary/40 font-bold uppercase tracking-wider mt-4 text-center">
-            Pinned data will be used instead of re-executing this node during tests.
+            Pinned data will be used instead of re-executing this step during tests.
           </p>
         </div>
 
@@ -1035,7 +1035,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
           <pre
             id="output-code"
             class="text-xs font-mono bg-base-300/20 p-8 rounded-3xl overflow-auto max-h-[500px] border border-base-200 leading-relaxed scrollbar-hide"
-          >{format_json(@node_output)}</pre>
+          >{format_json(@step_output)}</pre>
         </div>
       <% else %>
         <div class="flex flex-col items-center justify-center py-32 bg-base-200/20 rounded-[40px] border-2 border-dashed border-base-300">
@@ -1044,7 +1044,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
           </div>
           <h4 class="text-lg font-bold text-base-content/40">No Output Available</h4>
           <p class="text-sm text-base-content/30 font-medium mt-1">
-            Run the workflow to capture this node's output.
+            Run the workflow to capture this step's output.
           </p>
         </div>
       <% end %>
@@ -1053,7 +1053,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
   end
 
   attr :pinned_data, :map, default: nil
-  attr :node_id, :string, required: true
+  attr :step_id, :string, required: true
 
   defp pinned_tab(assigns) do
     ~H"""
@@ -1073,7 +1073,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
               type="button"
               class="btn btn-ghost btn-sm text-error font-bold hover:bg-error/10 rounded-xl"
               phx-click="clear_pin"
-              phx-value-node-id={@node_id}
+              phx-value-step-id={@step_id}
             >
               <.icon name="hero-trash" class="size-4" /> Remove Pin
             </button>
@@ -1097,7 +1097,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
             <div class="mt-8 p-4 rounded-2xl bg-warning/10 border border-warning/20 flex items-center gap-3">
               <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
               <div class="text-xs font-bold text-warning/80">
-                This pin is stale. The node configuration has changed since it was created.
+                This pin is stale. The step configuration has changed since it was created.
               </div>
             </div>
           <% end %>
@@ -1131,7 +1131,7 @@ defmodule ImgdWeb.WorkflowLive.Components.NodeConfigModal do
   # Helpers
   # ============================================================================
 
-  defp node_type_label(type_id) do
+  defp step_type_label(type_id) do
     type_id
     |> String.replace("_", " ")
     |> String.split()

@@ -10,24 +10,24 @@ defmodule Imgd.Runtime.Expression.ContextTest do
         id: "exec-1",
         workflow_id: "wf-1",
         trigger: %Execution.Trigger{type: :manual, data: %{"fallback" => "input"}},
-        context: %{"node_a" => %{"status" => 200}},
+        context: %{"step_a" => %{"status" => 200}},
         metadata: %Execution.Metadata{
           trace_id: "trace-123",
           correlation_id: "corr-456"
         }
       }
 
-      node_outputs = %{
-        "node_a" => %{"status" => 500, "body" => "boom"},
-        "node_b" => %{"headers" => %{"x" => "y"}}
+      step_outputs = %{
+        "step_a" => %{"status" => 500, "body" => "boom"},
+        "step_b" => %{"headers" => %{"x" => "y"}}
       }
 
-      vars = Context.build(execution, node_outputs, %{"payload" => "input"})
+      vars = Context.build(execution, step_outputs, %{"payload" => "input"})
 
       assert vars["json"] == %{"payload" => "input"}
-      assert vars["nodes"]["node_a"]["status"] == 500
-      assert vars["nodes"]["node_a"]["body"] == "boom"
-      assert vars["nodes"]["node_b"]["headers"] == %{"x" => "y"}
+      assert vars["steps"]["step_a"]["status"] == 500
+      assert vars["steps"]["step_a"]["body"] == "boom"
+      assert vars["steps"]["step_b"]["headers"] == %{"x" => "y"}
       assert vars["execution"]["trace_id"] == "trace-123"
       assert vars["execution"]["correlation_id"] == "corr-456"
     end

@@ -24,7 +24,7 @@ defmodule Imgd.Runtime.ExpressionTest do
                Expression.evaluate("{{ variables.threshold }}", execution, [])
     end
 
-    test "uses node outputs from a state store map" do
+    test "uses step outputs from a state store map" do
       execution = %Execution{
         id: "exec-1",
         workflow_id: "wf-1",
@@ -33,9 +33,9 @@ defmodule Imgd.Runtime.ExpressionTest do
 
       assert {:ok, "10"} =
                Expression.evaluate(
-                 "{{ nodes.node_1.json.value }}",
+                 "{{ steps.step_1.json.value }}",
                  execution,
-                 state_store: %{"node_1" => %{"value" => 10}}
+                 state_store: %{"step_1" => %{"value" => 10}}
                )
     end
 

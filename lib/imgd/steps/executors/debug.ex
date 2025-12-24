@@ -1,6 +1,6 @@
-defmodule Imgd.Nodes.Executors.Debug do
+defmodule Imgd.Steps.Executors.Debug do
   @moduledoc """
-  Executor for Debug nodes.
+  Executor for Debug steps.
 
   Logs the input data and passes it through unchanged. Useful for inspecting
   data flow in a workflow.
@@ -12,11 +12,11 @@ defmodule Imgd.Nodes.Executors.Debug do
 
   ## Input Handling
 
-  This node uses **automatic input wiring**. The previous node's output
+  This step uses **automatic input wiring**. The previous step's output
   is logged and passed through unchanged.
   """
 
-  use Imgd.Nodes.Definition,
+  use Imgd.Steps.Definition,
     id: "debug",
     name: "Debug",
     category: "Utilities",
@@ -30,7 +30,7 @@ defmodule Imgd.Nodes.Executors.Debug do
       "label" => %{
         "type" => "string",
         "title" => "Label",
-        "default" => "Debug Node",
+        "default" => "Debug Step",
         "description" => "Label to prefix the log message"
       },
       "level" => %{
@@ -44,19 +44,19 @@ defmodule Imgd.Nodes.Executors.Debug do
   }
 
   @input_schema %{
-    "description" => "Receives previous node output automatically"
+    "description" => "Receives previous step output automatically"
   }
 
   @output_schema %{
     "description" => "The input data, unchanged"
   }
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
   require Logger
 
   @impl true
   def execute(config, input, _execution) do
-    label = Map.get(config, "label", "Debug Node")
+    label = Map.get(config, "label", "Debug Step")
     level = normalize_level(Map.get(config, "level", "info"))
 
     message = "#{label}: #{inspect(input, pretty: true)}"

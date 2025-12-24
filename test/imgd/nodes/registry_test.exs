@@ -1,8 +1,8 @@
-defmodule Imgd.Nodes.RegistryTest do
+defmodule Imgd.Steps.RegistryTest do
   use Imgd.DataCase, async: false
 
-  alias Imgd.Nodes.Registry
-  alias Imgd.Nodes.Type
+  alias Imgd.Steps.Registry
+  alias Imgd.Steps.Type
 
   setup do
     # The registry should already be started by the application supervisor
@@ -18,7 +18,7 @@ defmodule Imgd.Nodes.RegistryTest do
   end
 
   describe "all/0" do
-    test "returns all registered node types" do
+    test "returns all registered step types" do
       types = Registry.all()
 
       assert is_list(types)
@@ -32,7 +32,7 @@ defmodule Imgd.Nodes.RegistryTest do
         assert is_binary(type.category)
         assert is_binary(type.description)
         assert is_binary(type.icon)
-        assert type.node_kind in [:action, :trigger, :control_flow, :transform]
+        assert type.step_kind in [:action, :trigger, :control_flow, :transform]
       end
     end
 
@@ -72,7 +72,7 @@ defmodule Imgd.Nodes.RegistryTest do
     end
 
     test "raises for non-existent type" do
-      assert_raise RuntimeError, "Node type not found: nonexistent_type", fn ->
+      assert_raise RuntimeError, "Step type not found: nonexistent_type", fn ->
         Registry.get!("nonexistent_type")
       end
     end
@@ -119,7 +119,7 @@ defmodule Imgd.Nodes.RegistryTest do
 
       for type <- types do
         assert %Type{} = type
-        assert type.node_kind == :action
+        assert type.step_kind == :action
       end
     end
 
@@ -130,7 +130,7 @@ defmodule Imgd.Nodes.RegistryTest do
 
       for type <- types do
         assert %Type{} = type
-        assert type.node_kind == :trigger
+        assert type.step_kind == :trigger
       end
     end
 
@@ -141,7 +141,7 @@ defmodule Imgd.Nodes.RegistryTest do
 
       for type <- types do
         assert %Type{} = type
-        assert type.node_kind == :control_flow
+        assert type.step_kind == :control_flow
       end
     end
 
@@ -152,7 +152,7 @@ defmodule Imgd.Nodes.RegistryTest do
 
       for type <- types do
         assert %Type{} = type
-        assert type.node_kind == :transform
+        assert type.step_kind == :transform
       end
     end
 
@@ -236,10 +236,10 @@ defmodule Imgd.Nodes.RegistryTest do
   describe "ETS table" do
     test "uses the correct ETS table name" do
       # The ETS table should exist
-      assert :ets.info(:imgd_node_types) != :undefined
+      assert :ets.info(:imgd_step_types) != :undefined
 
       # Should have read concurrency enabled
-      info = :ets.info(:imgd_node_types)
+      info = :ets.info(:imgd_step_types)
       assert info[:read_concurrency] == true
       assert info[:type] == :set
       assert info[:protection] == :protected
@@ -247,10 +247,11 @@ defmodule Imgd.Nodes.RegistryTest do
 
     test "ETS table contains expected data" do
       # Get some data directly from ETS
-      case :ets.lookup(:imgd_node_types, "http_request") do
+      case :ets.lookup(:imgd_step_types, "http_request") do
         [{_id, type}] ->
           assert %Type{} = type
           assert type.id == "http_request"
+
         [] ->
           flunk("Expected http_request type to be in ETS table")
       end

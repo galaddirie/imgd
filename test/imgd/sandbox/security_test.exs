@@ -127,7 +127,7 @@ defmodule Imgd.SandboxSecurityTest do
       assert {:ok, keys} = Sandbox.eval(code)
       assert is_list(keys)
 
-      # Critical checks: no 'process' (Node.js), no 'window' (Browser)
+      # Critical checks: no 'process' (Step.js), no 'window' (Browser)
       refute "process" in keys
       refute "window" in keys
     end

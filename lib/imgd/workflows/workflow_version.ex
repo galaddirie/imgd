@@ -15,14 +15,14 @@ defmodule Imgd.Workflows.WorkflowVersion do
   import Imgd.ChangesetHelpers
 
   alias Imgd.Workflows.Workflow
-  alias Imgd.Workflows.Embeds.{Node, Connection, Trigger}
+  alias Imgd.Workflows.Embeds.{Step, Connection, Trigger}
   alias Imgd.Accounts.User
 
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
           version_tag: String.t(),
           source_hash: String.t(),
-          nodes: [Node.t()],
+          steps: [Step.t()],
           connections: [Connection.t()],
           triggers: [Trigger.t()],
           changelog: String.t() | nil,
@@ -38,10 +38,10 @@ defmodule Imgd.Workflows.WorkflowVersion do
     # Human-friendly semver, e.g. "1.0.0", "1.2.0-beta.1"
     field :version_tag, :string
 
-    # Content hash of nodes + connections + triggers (SHA-256)
+    # Content hash of steps + connections + triggers (SHA-256)
     field :source_hash, :string
 
-    embeds_many :nodes, Node, on_replace: :delete
+    embeds_many :steps, Step, on_replace: :delete
     embeds_many :connections, Connection, on_replace: :delete
     embeds_many :triggers, Trigger, on_replace: :delete
 
@@ -66,7 +66,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
       :source_hash,
       :workflow_id
     ])
-    |> cast_embed(:nodes, required: true)
+    |> cast_embed(:steps, required: true)
     |> cast_embed(:connections)
     |> cast_embed(:triggers)
     |> validate_required([:version_tag, :workflow_id, :source_hash])
@@ -85,13 +85,13 @@ defmodule Imgd.Workflows.WorkflowVersion do
   end
 
   @doc """
-  Computes a content hash for the given nodes, connections, and triggers.
+  Computes a content hash for the given steps, connections, and triggers.
   Used to detect changes between versions.
   """
-  def compute_source_hash(nodes, connections, triggers) do
+  def compute_source_hash(steps, connections, triggers) do
     content =
       %{
-        nodes: normalize_for_hash(nodes),
+        steps: normalize_for_hash(steps),
         connections: normalize_for_hash(connections),
         triggers: normalize_for_hash(triggers)
       }
@@ -104,12 +104,12 @@ defmodule Imgd.Workflows.WorkflowVersion do
   defp normalize_for_hash(items) when is_list(items) do
     items
     |> Enum.map(fn
-      %Node{} = node ->
+      %Step{} = step ->
         # Position is excluded as it doesn't affect behavior
-        Map.take(node, [:id, :type_id, :name, :config, :notes])
+        Map.take(step, [:id, :type_id, :name, :config, :notes])
 
       %Connection{} = conn ->
-        Map.take(conn, [:id, :source_node_id, :source_output, :target_node_id, :target_input])
+        Map.take(conn, [:id, :source_step_id, :source_output, :target_step_id, :target_input])
 
       %Trigger{} = trigger ->
         Map.take(trigger, [:type, :config])

@@ -4,9 +4,6 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
   alias Imgd.Collaboration.PreviewExecution
   alias Imgd.Collaboration.EditSession.Supervisor, as: SessionSupervisor
   alias Imgd.Workflows
-  alias Imgd.Executions
-  alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.{Node, Connection}
   alias Imgd.Accounts
   alias Imgd.Accounts.Scope
 
@@ -17,39 +14,39 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
 
     {:ok, workflow} = Workflows.create_workflow(scope, %{name: "Test Workflow"})
 
-    # Create a draft with multiple nodes and connections
+    # Create a draft with multiple steps and connections
     draft_attrs = %{
-      nodes: [
+      steps: [
         %{
-          id: "http_node",
+          id: "http_step",
           type_id: "http_request",
           name: "HTTP Request",
           position: %{x: 100, y: 100},
           config: %{url: "https://api.example.com"}
         },
         %{
-          id: "json_node",
+          id: "json_step",
           type_id: "json_parser",
           name: "JSON Parser",
           position: %{x: 300, y: 100}
         },
         %{
-          id: "filter_node",
+          id: "filter_step",
           type_id: "data_filter",
           name: "Data Filter",
           position: %{x: 500, y: 100}
         },
         %{
-          id: "output_node",
+          id: "output_step",
           type_id: "data_output",
           name: "Data Output",
           position: %{x: 700, y: 100}
         }
       ],
       connections: [
-        %{id: "conn_1", source_node_id: "http_node", target_node_id: "json_node"},
-        %{id: "conn_2", source_node_id: "json_node", target_node_id: "filter_node"},
-        %{id: "conn_3", source_node_id: "filter_node", target_node_id: "output_node"}
+        %{id: "conn_1", source_step_id: "http_step", target_step_id: "json_step"},
+        %{id: "conn_2", source_step_id: "json_step", target_step_id: "filter_step"},
+        %{id: "conn_3", source_step_id: "filter_step", target_step_id: "output_step"}
       ]
     }
 
@@ -65,8 +62,8 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
 
       # Pin some output
       Imgd.Collaboration.EditSession.Server.apply_operation(workflow.id, %{
-        type: :pin_node_output,
-        payload: %{node_id: "http_node", output_data: %{"pinned" => "data"}},
+        type: :pin_step_output,
+        payload: %{step_id: "http_step", output_data: %{"pinned" => "data"}},
         id: "pin_op",
         user_id: scope.user.id,
         client_seq: 1
@@ -78,7 +75,7 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
       assert execution.workflow_id == workflow.id
       assert execution.execution_type == :preview
       assert execution.metadata.extras[:preview] == true
-      assert execution.metadata.extras[:pinned_nodes] == ["http_node"]
+      assert execution.metadata.extras[:pinned_steps] == ["http_step"]
     end
 
     test "handles workflow execution failures gracefully", %{workflow: workflow, scope: scope} do
@@ -95,27 +92,27 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
     end
   end
 
-  describe "run/4 - from_node execution" do
-    test "executes from specific node downstream", %{workflow: workflow, scope: scope} do
+  describe "run/4 - from_step execution" do
+    test "executes from specific step downstream", %{workflow: workflow, scope: scope} do
       {:ok, _pid} = SessionSupervisor.ensure_session(workflow.id)
 
-      # Run from json_node (should include json_node, filter_node, output_node)
+      # Run from json_step (should include json_step, filter_step, output_step)
       assert {:ok, execution} =
                PreviewExecution.run(workflow.id, scope,
-                 mode: :from_node,
-                 target_nodes: ["json_node"]
+                 mode: :from_step,
+                 target_steps: ["json_step"]
                )
 
       assert execution.execution_type == :preview
       assert execution.metadata.extras[:preview] == true
     end
 
-    test "handles invalid target node gracefully", %{workflow: workflow, scope: scope} do
+    test "handles invalid target step gracefully", %{workflow: workflow, scope: scope} do
       {:ok, _pid} = SessionSupervisor.ensure_session(workflow.id)
 
-      # Try to run from non-existent node
+      # Try to run from non-existent step
       result =
-        PreviewExecution.run(workflow.id, scope, mode: :from_node, target_nodes: ["non_existent"])
+        PreviewExecution.run(workflow.id, scope, mode: :from_step, target_steps: ["non_existent"])
 
       # Should either succeed with empty graph or fail gracefully
       case result do
@@ -126,15 +123,15 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
     end
   end
 
-  describe "run/4 - to_node execution" do
-    test "executes upstream to specific node", %{workflow: workflow, scope: scope} do
+  describe "run/4 - to_step execution" do
+    test "executes upstream to specific step", %{workflow: workflow, scope: scope} do
       {:ok, _pid} = SessionSupervisor.ensure_session(workflow.id)
 
-      # Run to filter_node (should include http_node, json_node, filter_node)
+      # Run to filter_step (should include http_step, json_step, filter_step)
       assert {:ok, execution} =
                PreviewExecution.run(workflow.id, scope,
-                 mode: :to_node,
-                 target_nodes: ["filter_node"]
+                 mode: :to_step,
+                 target_steps: ["filter_step"]
                )
 
       assert execution.execution_type == :preview
@@ -142,14 +139,14 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
   end
 
   describe "run/4 - selected subgraph execution" do
-    test "executes only selected nodes", %{workflow: workflow, scope: scope} do
+    test "executes only selected steps", %{workflow: workflow, scope: scope} do
       {:ok, _pid} = SessionSupervisor.ensure_session(workflow.id)
 
-      # Run only json_node and filter_node
+      # Run only json_step and filter_step
       assert {:ok, execution} =
                PreviewExecution.run(workflow.id, scope,
                  mode: :selected,
-                 target_nodes: ["json_node", "filter_node"]
+                 target_steps: ["json_step", "filter_step"]
                )
 
       assert execution.execution_type == :preview
@@ -158,34 +155,34 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
     test "uses pinned outputs for missing upstream data", %{workflow: workflow, scope: scope} do
       {:ok, _pid} = SessionSupervisor.ensure_session(workflow.id)
 
-      # Pin output for http_node
+      # Pin output for http_step
       Imgd.Collaboration.EditSession.Server.apply_operation(workflow.id, %{
-        type: :pin_node_output,
-        payload: %{node_id: "http_node", output_data: %{"mock" => "data"}},
+        type: :pin_step_output,
+        payload: %{step_id: "http_step", output_data: %{"mock" => "data"}},
         id: "pin_op",
         user_id: scope.user.id,
         client_seq: 1
       })
 
-      # Run only filter_node and output_node (upstream http_node is pinned)
+      # Run only filter_step and output_step (upstream http_step is pinned)
       assert {:ok, execution} =
                PreviewExecution.run(workflow.id, scope,
                  mode: :selected,
-                 target_nodes: ["filter_node", "output_node"]
+                 target_steps: ["filter_step", "output_step"]
                )
 
-      assert execution.context["http_node"] == %{"mock" => "data"}
+      assert execution.context["http_step"] == %{"mock" => "data"}
     end
   end
 
-  describe "disabled nodes handling" do
-    test "excludes disabled nodes from execution", %{workflow: workflow, scope: scope} do
+  describe "disabled steps handling" do
+    test "excludes disabled steps from execution", %{workflow: workflow, scope: scope} do
       {:ok, _pid} = SessionSupervisor.ensure_session(workflow.id)
 
-      # Disable json_node
+      # Disable json_step
       Imgd.Collaboration.EditSession.Server.apply_operation(workflow.id, %{
-        type: :disable_node,
-        payload: %{node_id: "json_node", mode: :exclude},
+        type: :disable_step,
+        payload: %{step_id: "json_step", mode: :exclude},
         id: "disable_op",
         user_id: scope.user.id,
         client_seq: 1
@@ -193,11 +190,11 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
 
       assert {:ok, execution} = PreviewExecution.run(workflow.id, scope, mode: :full)
 
-      assert execution.metadata.extras[:disabled_nodes] == ["json_node"]
-      # The execution should skip json_node entirely
+      assert execution.metadata.extras[:disabled_steps] == ["json_step"]
+      # The execution should skip json_step entirely
     end
 
-    test "bypasses disabled nodes in execution flow", %{workflow: workflow, scope: scope} do
+    test "bypasses disabled steps in execution flow", %{workflow: workflow, scope: scope} do
       {:ok, _pid} = SessionSupervisor.ensure_session(workflow.id)
 
       # This would test bypass mode, but our current implementation uses exclude mode
@@ -265,16 +262,16 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
 
       # Modify editor state
       Imgd.Collaboration.EditSession.Server.apply_operation(workflow.id, %{
-        type: :pin_node_output,
-        payload: %{node_id: "http_node", output_data: %{"session" => "data"}},
+        type: :pin_step_output,
+        payload: %{step_id: "http_step", output_data: %{"session" => "data"}},
         id: "session_pin",
         user_id: scope.user.id,
         client_seq: 1
       })
 
       Imgd.Collaboration.EditSession.Server.apply_operation(workflow.id, %{
-        type: :disable_node,
-        payload: %{node_id: "filter_node", mode: :exclude},
+        type: :disable_step,
+        payload: %{step_id: "filter_step", mode: :exclude},
         id: "session_disable",
         user_id: scope.user.id,
         client_seq: 2
@@ -283,16 +280,16 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
       # Run execution - should pick up session state
       assert {:ok, execution} = PreviewExecution.run(workflow.id, scope, mode: :full)
 
-      assert execution.metadata.extras[:pinned_nodes] == ["http_node"]
-      assert execution.metadata.extras[:disabled_nodes] == ["filter_node"]
+      assert execution.metadata.extras[:pinned_steps] == ["http_step"]
+      assert execution.metadata.extras[:disabled_steps] == ["filter_step"]
     end
 
     test "works without active session", %{workflow: workflow, scope: scope} do
-      # Should work with default editor state (no pins, no disabled nodes)
+      # Should work with default editor state (no pins, no disabled steps)
       assert {:ok, execution} = PreviewExecution.run(workflow.id, scope, mode: :full)
 
-      assert execution.metadata.extras[:pinned_nodes] == []
-      assert execution.metadata.extras[:disabled_nodes] == []
+      assert execution.metadata.extras[:pinned_steps] == []
+      assert execution.metadata.extras[:disabled_steps] == []
     end
   end
 end

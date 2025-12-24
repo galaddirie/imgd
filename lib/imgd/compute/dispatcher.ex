@@ -16,7 +16,7 @@ defmodule Imgd.Compute.Dispatcher do
   end
 
   defp resolve_runner(:local), do: Runners.Local
-  defp resolve_runner(:node), do: Runners.ClusterNode
+  defp resolve_runner(:compute_node), do: Runners.ComputeNode
   defp resolve_runner(:flame), do: Runners.FlamePool
   defp resolve_runner(_), do: Runners.Local
 end

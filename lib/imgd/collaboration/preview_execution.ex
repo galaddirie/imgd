@@ -1,7 +1,7 @@
 defmodule Imgd.Collaboration.PreviewExecution do
   @moduledoc """
   Builds and runs preview executions that incorporate editor state
-  (pins, disabled nodes, partial execution).
+  (pins, disabled steps, partial execution).
   """
 
   alias Imgd.Collaboration.EditSession.Server, as: EditServer
@@ -11,11 +11,11 @@ defmodule Imgd.Collaboration.PreviewExecution do
   alias Imgd.Executions
   alias Imgd.Accounts.Scope
 
-  @type execution_mode :: :full | :from_node | :to_node | :selected
+  @type execution_mode :: :full | :from_step | :to_step | :selected
 
   @type preview_opts :: [
           mode: execution_mode(),
-          target_nodes: [String.t()],
+          target_steps: [String.t()],
           input_data: map()
         ]
 
@@ -24,7 +24,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
 
   This:
   1. Gets current draft and editor state from the session
-  2. Applies disabled nodes (skip or exclude)
+  2. Applies disabled steps (skip or exclude)
   3. Injects pinned outputs
   4. Builds execution subgraph based on mode
   5. Runs the execution
@@ -35,12 +35,12 @@ defmodule Imgd.Collaboration.PreviewExecution do
           {:ok, Executions.Execution.t()} | {:error, term()}
   def run(workflow_id, scope, opts \\ []) do
     mode = Keyword.get(opts, :mode, :full)
-    target_nodes = Keyword.get(opts, :target_nodes, [])
+    target_steps = Keyword.get(opts, :target_steps, [])
     input_data = Keyword.get(opts, :input_data, %{})
 
     with {:ok, draft} <- get_draft(workflow_id),
          {:ok, editor_state} <- get_editor_state(workflow_id),
-         {:ok, effective_draft} <- apply_editor_state(draft, editor_state, mode, target_nodes),
+         {:ok, effective_draft} <- apply_editor_state(draft, editor_state, mode, target_steps),
          {:ok, execution} <-
            create_preview_execution(workflow_id, scope, effective_draft, editor_state, input_data) do
       # Run synchronously for preview (could also queue)
@@ -72,93 +72,93 @@ defmodule Imgd.Collaboration.PreviewExecution do
     end
   end
 
-  defp apply_editor_state(draft, editor_state, mode, target_nodes) do
-    # 1. Remove or bypass disabled nodes
-    nodes = apply_disabled_nodes(draft.nodes, editor_state)
+  defp apply_editor_state(draft, editor_state, mode, target_steps) do
+    # 1. Remove or bypass disabled steps
+    steps = apply_disabled_steps(draft.steps, editor_state)
 
-    # 2. Filter connections for remaining nodes
-    node_ids = MapSet.new(Enum.map(nodes, & &1.id))
+    # 2. Filter connections for remaining steps
+    step_ids = MapSet.new(Enum.map(steps, & &1.id))
 
     connections =
       Enum.filter(draft.connections, fn conn ->
-        MapSet.member?(node_ids, conn.source_node_id) and
-          MapSet.member?(node_ids, conn.target_node_id)
+        MapSet.member?(step_ids, conn.source_step_id) and
+          MapSet.member?(step_ids, conn.target_step_id)
       end)
 
     # 3. Build subgraph based on execution mode
-    {nodes, connections} = build_subgraph(nodes, connections, mode, target_nodes)
+    {steps, connections} = build_subgraph(steps, connections, mode, target_steps)
 
-    {:ok, %{draft | nodes: nodes, connections: connections}}
+    {:ok, %{draft | steps: steps, connections: connections}}
   end
 
-  defp apply_disabled_nodes(nodes, editor_state) do
-    # For now, just exclude disabled nodes entirely
+  defp apply_disabled_steps(steps, editor_state) do
+    # For now, just exclude disabled steps entirely
     # Could implement bypass mode here
-    Enum.reject(nodes, fn node ->
-      MapSet.member?(editor_state.disabled_nodes, node.id)
+    Enum.reject(steps, fn step ->
+      MapSet.member?(editor_state.disabled_steps, step.id)
     end)
   end
 
-  defp build_subgraph(nodes, connections, :full, _targets) do
-    {nodes, connections}
+  defp build_subgraph(steps, connections, :full, _targets) do
+    {steps, connections}
   end
 
-  defp build_subgraph(nodes, connections, :from_node, [target_id]) do
-    graph = Graph.from_workflow!(nodes, connections)
+  defp build_subgraph(steps, connections, :from_step, [target_id]) do
+    graph = Graph.from_workflow!(steps, connections)
     downstream = Graph.downstream(graph, target_id)
     keep_ids = MapSet.new([target_id | downstream])
 
-    filtered_nodes = Enum.filter(nodes, &MapSet.member?(keep_ids, &1.id))
+    filtered_steps = Enum.filter(steps, &MapSet.member?(keep_ids, &1.id))
 
     filtered_connections =
       Enum.filter(connections, fn conn ->
-        MapSet.member?(keep_ids, conn.source_node_id) and
-          MapSet.member?(keep_ids, conn.target_node_id)
+        MapSet.member?(keep_ids, conn.source_step_id) and
+          MapSet.member?(keep_ids, conn.target_step_id)
       end)
 
-    {filtered_nodes, filtered_connections}
+    {filtered_steps, filtered_connections}
   end
 
-  defp build_subgraph(nodes, connections, :to_node, [target_id]) do
-    graph = Graph.from_workflow!(nodes, connections)
+  defp build_subgraph(steps, connections, :to_step, [target_id]) do
+    graph = Graph.from_workflow!(steps, connections)
     upstream = Graph.upstream(graph, target_id)
     keep_ids = MapSet.new([target_id | upstream])
 
-    filtered_nodes = Enum.filter(nodes, &MapSet.member?(keep_ids, &1.id))
+    filtered_steps = Enum.filter(steps, &MapSet.member?(keep_ids, &1.id))
 
     filtered_connections =
       Enum.filter(connections, fn conn ->
-        MapSet.member?(keep_ids, conn.source_node_id) and
-          MapSet.member?(keep_ids, conn.target_node_id)
+        MapSet.member?(keep_ids, conn.source_step_id) and
+          MapSet.member?(keep_ids, conn.target_step_id)
       end)
 
-    {filtered_nodes, filtered_connections}
+    {filtered_steps, filtered_connections}
   end
 
-  defp build_subgraph(nodes, connections, :selected, target_ids) do
+  defp build_subgraph(steps, connections, :selected, target_ids) do
     keep_ids = MapSet.new(target_ids)
 
-    filtered_nodes = Enum.filter(nodes, &MapSet.member?(keep_ids, &1.id))
+    filtered_steps = Enum.filter(steps, &MapSet.member?(keep_ids, &1.id))
 
     filtered_connections =
       Enum.filter(connections, fn conn ->
-        MapSet.member?(keep_ids, conn.source_node_id) and
-          MapSet.member?(keep_ids, conn.target_node_id)
+        MapSet.member?(keep_ids, conn.source_step_id) and
+          MapSet.member?(keep_ids, conn.target_step_id)
       end)
 
-    {filtered_nodes, filtered_connections}
+    {filtered_steps, filtered_connections}
   end
 
-  defp build_subgraph(nodes, connections, _unknown_mode, _targets) do
+  defp build_subgraph(steps, connections, _unknown_mode, _targets) do
     # For unknown modes, default to full execution
-    {nodes, connections}
+    {steps, connections}
   end
 
   defp create_preview_execution(workflow_id, scope, _draft, editor_state, input_data) do
     # Include pinned outputs in the execution context
     initial_context =
       editor_state.pinned_outputs
-      |> Enum.into(%{}, fn {node_id, data} -> {node_id, data} end)
+      |> Enum.into(%{}, fn {step_id, data} -> {step_id, data} end)
 
     Executions.create_execution(
       scope,
@@ -171,8 +171,8 @@ defmodule Imgd.Collaboration.PreviewExecution do
         metadata: %{
           extras: %{
             preview: true,
-            pinned_nodes: Map.keys(editor_state.pinned_outputs),
-            disabled_nodes: MapSet.to_list(editor_state.disabled_nodes)
+            pinned_steps: Map.keys(editor_state.pinned_outputs),
+            disabled_steps: MapSet.to_list(editor_state.disabled_steps)
           }
         }
       }
@@ -205,7 +205,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
   end
 
   defp extract_context(_workflow) do
-    # Extract node outputs from Runic workflow
+    # Extract step outputs from Runic workflow
     # (Implementation depends on Runic internals)
     %{}
   end

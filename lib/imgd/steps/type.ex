@@ -1,6 +1,6 @@
-defmodule Imgd.Nodes.Type do
+defmodule Imgd.Steps.Type do
   @moduledoc """
-  A Node Type is a template/blueprint for nodes users can add to workflows.
+  A Step Type is a template/blueprint for steps users can add to workflows.
 
   Examples: "HTTP Request", "Transform", "Postgres Query", "If/Else", etc.
 
@@ -11,19 +11,19 @@ defmodule Imgd.Nodes.Type do
 
   ## Usage
 
-  Node types are defined using `Imgd.Nodes.Definition` in executor modules
-  and registered in `Imgd.Nodes.Registry` at startup.
+  Step types are defined using `Imgd.Steps.Definition` in executor modules
+  and registered in `Imgd.Steps.Registry` at startup.
 
-  To get a node type:
+  To get a step type:
 
-      {:ok, type} = Imgd.Nodes.Registry.get("http_request")
+      {:ok, type} = Imgd.Steps.Registry.get("http_request")
 
   To list all types:
 
-      types = Imgd.Nodes.Registry.all()
+      types = Imgd.Steps.Registry.all()
   """
 
-  @type node_kind :: :action | :trigger | :control_flow | :transform
+  @type step_kind :: :action | :trigger | :control_flow | :transform
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -35,12 +35,12 @@ defmodule Imgd.Nodes.Type do
           input_schema: map(),
           output_schema: map(),
           executor: String.t(),
-          node_kind: node_kind(),
+          step_kind: step_kind(),
           inserted_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
 
-  @enforce_keys [:id, :name, :category, :description, :icon, :executor, :node_kind]
+  @enforce_keys [:id, :name, :category, :description, :icon, :executor, :step_kind]
   defstruct [
     :id,
     :name,
@@ -48,7 +48,7 @@ defmodule Imgd.Nodes.Type do
     :description,
     :icon,
     :executor,
-    :node_kind,
+    :step_kind,
     :inserted_at,
     :updated_at,
     config_schema: %{},
@@ -86,26 +86,26 @@ defmodule Imgd.Nodes.Type do
   end
 
   @doc """
-  Returns true if this is a trigger node type.
+  Returns true if this is a trigger step type.
   """
-  def trigger?(%__MODULE__{node_kind: :trigger}), do: true
+  def trigger?(%__MODULE__{step_kind: :trigger}), do: true
   def trigger?(%__MODULE__{}), do: false
 
   @doc """
-  Returns true if this is a control flow node type (if/else, switch, loop, etc.).
+  Returns true if this is a control flow step type (if/else, switch, loop, etc.).
   """
-  def control_flow?(%__MODULE__{node_kind: :control_flow}), do: true
+  def control_flow?(%__MODULE__{step_kind: :control_flow}), do: true
   def control_flow?(%__MODULE__{}), do: false
 
   @doc """
-  Returns true if this is an action node type.
+  Returns true if this is an action step type.
   """
-  def action?(%__MODULE__{node_kind: :action}), do: true
+  def action?(%__MODULE__{step_kind: :action}), do: true
   def action?(%__MODULE__{}), do: false
 
   @doc """
-  Returns true if this is a transform node type.
+  Returns true if this is a transform step type.
   """
-  def transform?(%__MODULE__{node_kind: :transform}), do: true
+  def transform?(%__MODULE__{step_kind: :transform}), do: true
   def transform?(%__MODULE__{}), do: false
 end

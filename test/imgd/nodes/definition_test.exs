@@ -1,15 +1,15 @@
-defmodule Imgd.Nodes.DefinitionTest do
+defmodule Imgd.Steps.DefinitionTest do
   use Imgd.DataCase
 
-  alias Imgd.Nodes.Type
+  alias Imgd.Steps.Type
 
   # Define a test module that uses the Definition macro
-  defmodule TestNode do
-    use Imgd.Nodes.Definition,
-      id: "test_node",
-      name: "Test Node",
+  defmodule TestStep do
+    use Imgd.Steps.Definition,
+      id: "test_step",
+      name: "Test Step",
       category: "Test",
-      description: "A test node for testing the Definition macro",
+      description: "A test step for testing the Definition macro",
       icon: "hero-beaker",
       kind: :action
 
@@ -28,7 +28,7 @@ defmodule Imgd.Nodes.DefinitionTest do
     # Custom output schema
     @output_schema %{"type" => "object", "properties" => %{"output" => %{"type" => "string"}}}
 
-    @behaviour Imgd.Nodes.Executors.Behaviour
+    @behaviour Imgd.Steps.Executors.Behaviour
 
     @impl true
     def execute(_config, _input, _execution) do
@@ -37,45 +37,52 @@ defmodule Imgd.Nodes.DefinitionTest do
   end
 
   describe "macro compilation" do
-    test "__node_definition__/0 returns correct Type struct" do
-      type = TestNode.__node_definition__()
+    test "__step_definition__/0 returns correct Type struct" do
+      type = TestStep.__step_definition__()
 
       assert %Type{} = type
-      assert type.id == "test_node"
-      assert type.name == "Test Node"
+      assert type.id == "test_step"
+      assert type.name == "Test Step"
       assert type.category == "Test"
-      assert type.description == "A test node for testing the Definition macro"
+      assert type.description == "A test step for testing the Definition macro"
       assert type.icon == "hero-beaker"
-      assert type.node_kind == :action
-      assert type.executor == "Elixir.Imgd.Nodes.DefinitionTest.TestNode"
+      assert type.step_kind == :action
+      assert type.executor == "Elixir.Imgd.Steps.DefinitionTest.TestStep"
 
       # Check custom schemas
       assert type.config_schema == %{
-        "type" => "object",
-        "required" => ["value"],
-        "properties" => %{
-          "value" => %{"type" => "string", "title" => "Test Value"}
-        }
-      }
+               "type" => "object",
+               "required" => ["value"],
+               "properties" => %{
+                 "value" => %{"type" => "string", "title" => "Test Value"}
+               }
+             }
 
-      assert type.input_schema == %{"type" => "object", "properties" => %{"input" => %{"type" => "string"}}}
-      assert type.output_schema == %{"type" => "object", "properties" => %{"output" => %{"type" => "string"}}}
+      assert type.input_schema == %{
+               "type" => "object",
+               "properties" => %{"input" => %{"type" => "string"}}
+             }
+
+      assert type.output_schema == %{
+               "type" => "object",
+               "properties" => %{"output" => %{"type" => "string"}}
+             }
 
       # Timestamps should be nil
       assert is_nil(type.inserted_at)
       assert is_nil(type.updated_at)
     end
 
-    test "__node_id__/0 returns the correct ID" do
-      assert TestNode.__node_id__() == "test_node"
+    test "__step_id__/0 returns the correct ID" do
+      assert TestStep.__step_id__() == "test_step"
     end
   end
 
   describe "macro validation" do
     test "raises error for missing required options" do
-      assert_raise ArgumentError, ~r/id is required for Imgd\.Nodes\.Definition/, fn ->
-        defmodule InvalidNode1 do
-          use Imgd.Nodes.Definition,
+      assert_raise ArgumentError, ~r/id is required for Imgd\.Steps\.Definition/, fn ->
+        defmodule InvalidStep1 do
+          use Imgd.Steps.Definition,
             name: "Invalid",
             category: "Test",
             description: "Test",
@@ -84,9 +91,9 @@ defmodule Imgd.Nodes.DefinitionTest do
         end
       end
 
-      assert_raise ArgumentError, ~r/name is required for Imgd\.Nodes\.Definition/, fn ->
-        defmodule InvalidNode2 do
-          use Imgd.Nodes.Definition,
+      assert_raise ArgumentError, ~r/name is required for Imgd\.Steps\.Definition/, fn ->
+        defmodule InvalidStep2 do
+          use Imgd.Steps.Definition,
             id: "invalid",
             category: "Test",
             description: "Test",
@@ -95,9 +102,9 @@ defmodule Imgd.Nodes.DefinitionTest do
         end
       end
 
-      assert_raise ArgumentError, ~r/kind is required for Imgd\.Nodes\.Definition/, fn ->
-        defmodule InvalidNode3 do
-          use Imgd.Nodes.Definition,
+      assert_raise ArgumentError, ~r/kind is required for Imgd\.Steps\.Definition/, fn ->
+        defmodule InvalidStep3 do
+          use Imgd.Steps.Definition,
             id: "invalid",
             name: "Invalid",
             category: "Test",
@@ -109,8 +116,8 @@ defmodule Imgd.Nodes.DefinitionTest do
 
     test "raises error for invalid kind" do
       assert_raise ArgumentError, ~r/kind must be one of/, fn ->
-        defmodule InvalidNode4 do
-          use Imgd.Nodes.Definition,
+        defmodule InvalidStep4 do
+          use Imgd.Steps.Definition,
             id: "invalid",
             name: "Invalid",
             category: "Test",
@@ -123,16 +130,16 @@ defmodule Imgd.Nodes.DefinitionTest do
   end
 
   describe "default schemas" do
-    defmodule MinimalNode do
-      use Imgd.Nodes.Definition,
+    defmodule MinimalStep do
+      use Imgd.Steps.Definition,
         id: "minimal",
-        name: "Minimal Node",
+        name: "Minimal Step",
         category: "Test",
-        description: "Minimal test node",
+        description: "Minimal test step",
         icon: "hero-cube",
         kind: :action
 
-      @behaviour Imgd.Nodes.Executors.Behaviour
+      @behaviour Imgd.Steps.Executors.Behaviour
 
       @impl true
       def execute(_config, _input, _execution) do
@@ -141,7 +148,7 @@ defmodule Imgd.Nodes.DefinitionTest do
     end
 
     test "uses default schemas when not overridden" do
-      type = MinimalNode.__node_definition__()
+      type = MinimalStep.__step_definition__()
 
       assert type.config_schema == %{"type" => "object", "properties" => %{}}
       assert type.input_schema == %{"type" => "object"}
@@ -150,28 +157,32 @@ defmodule Imgd.Nodes.DefinitionTest do
   end
 
   describe "module attributes persistence" do
-    test "persists node attributes correctly" do
+    test "persists step attributes correctly" do
       # Check that the module has the expected attributes
-      assert TestNode.__info__(:attributes)[:node_id] == ["test_node"]
-      assert TestNode.__info__(:attributes)[:node_name] == ["Test Node"]
-      assert TestNode.__info__(:attributes)[:node_category] == ["Test"]
-      assert TestNode.__info__(:attributes)[:node_description] == ["A test node for testing the Definition macro"]
-      assert TestNode.__info__(:attributes)[:node_icon] == ["hero-beaker"]
-      assert TestNode.__info__(:attributes)[:node_kind] == [:action]
+      assert TestStep.__info__(:attributes)[:step_id] == ["test_step"]
+      assert TestStep.__info__(:attributes)[:step_name] == ["Test Step"]
+      assert TestStep.__info__(:attributes)[:step_category] == ["Test"]
+
+      assert TestStep.__info__(:attributes)[:step_description] == [
+               "A test step for testing the Definition macro"
+             ]
+
+      assert TestStep.__info__(:attributes)[:step_icon] == ["hero-beaker"]
+      assert TestStep.__info__(:attributes)[:step_kind] == [:action]
     end
   end
 
   describe "behaviour implementation" do
     test "implements the expected behaviour" do
       # The module should have the execute function
-      assert function_exported?(TestNode, :execute, 3)
+      assert function_exported?(TestStep, :execute, 3)
 
       # Test the execute function
       config = %{"value" => "test"}
       input = %{}
       execution = %{}
 
-      assert {:ok, %{"result" => "test"}} = TestNode.execute(config, input, execution)
+      assert {:ok, %{"result" => "test"}} = TestStep.execute(config, input, execution)
     end
   end
 end

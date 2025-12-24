@@ -1,5 +1,5 @@
-defmodule Imgd.Nodes.Executors.DataTransform do
-  use Imgd.Nodes.Definition,
+defmodule Imgd.Steps.Executors.DataTransform do
+  use Imgd.Steps.Definition,
     id: "data_transform",
     name: "Data Transform",
     category: "Transform",
@@ -7,7 +7,7 @@ defmodule Imgd.Nodes.Executors.DataTransform do
     icon: "hero-adjustments-horizontal",
     kind: :transform
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @impl true
   def execute(_config, input, _context) do

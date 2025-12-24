@@ -1,6 +1,6 @@
-defmodule Imgd.Nodes.Executors.Math do
+defmodule Imgd.Steps.Executors.Math do
   @moduledoc """
-  Executor for Math nodes.
+  Executor for Math steps.
 
   Performs arithmetic and mathematical operations on configured values.
 
@@ -11,7 +11,7 @@ defmodule Imgd.Nodes.Executors.Math do
   - `operand` (required for binary operations: add, subtract, multiply, divide, modulo, power) - The right-hand value. Supports expressions.
   """
 
-  use Imgd.Nodes.Definition,
+  use Imgd.Steps.Definition,
     id: "math",
     name: "Math",
     category: "Data",
@@ -62,7 +62,7 @@ defmodule Imgd.Nodes.Executors.Math do
     "description" => "The result of the arithmetic operation"
   }
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @supported_operations ~w(add subtract multiply divide modulo power square_root abs round ceil floor)
 

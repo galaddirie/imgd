@@ -1,15 +1,15 @@
 defmodule Imgd.Executions do
   @moduledoc """
-  Context for managing workflow executions and node executions.
+  Context for managing workflow executions and step executions.
 
   Provides functions to create, read, update, and manage executions,
-  track execution status, and handle node-level execution details.
+  track execution status, and handle step-level execution details.
   """
 
   import Ecto.Query, warn: false
   alias Imgd.Repo
 
-  alias Imgd.Executions.{Execution, NodeExecution}
+  alias Imgd.Executions.{Execution, StepExecution}
   alias Imgd.Workflows.Workflow
   alias Imgd.Accounts.Scope
 
@@ -21,10 +21,10 @@ defmodule Imgd.Executions do
           optional(:triggered_by_user_id) => Ecto.UUID.t()
         }
 
-  @type node_execution_params :: %{
+  @type step_execution_params :: %{
           required(:execution_id) => Ecto.UUID.t(),
-          required(:node_id) => String.t(),
-          required(:node_type_id) => String.t(),
+          required(:step_id) => String.t(),
+          required(:step_type_id) => String.t(),
           optional(:input_data) => map(),
           optional(:metadata) => map()
         }
@@ -100,15 +100,15 @@ defmodule Imgd.Executions do
   end
 
   @doc """
-  Gets an execution with its node executions preloaded.
+  Gets an execution with its step executions preloaded.
 
-  Returns `{:ok, execution}` with node executions loaded, or `{:error, :not_found}`.
+  Returns `{:ok, execution}` with step executions loaded, or `{:error, :not_found}`.
   """
-  @spec get_execution_with_nodes(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
+  @spec get_execution_with_steps(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
           {:ok, Execution.t()} | {:error, :not_found}
-  def get_execution_with_nodes(scope, id) do
+  def get_execution_with_steps(scope, id) do
     case Repo.get(Execution, id)
-         |> Repo.preload([:workflow, :triggered_by_user, :node_executions]) do
+         |> Repo.preload([:workflow, :triggered_by_user, :step_executions]) do
       nil ->
         {:error, :not_found}
 
@@ -252,20 +252,20 @@ defmodule Imgd.Executions do
   end
 
   @doc """
-  Lists node executions for an execution.
+  Lists step executions for an execution.
 
-  Returns node executions ordered by insertion time.
+  Returns step executions ordered by insertion time.
   """
-  @spec list_node_executions(Scope.t() | nil, Execution.t()) :: [NodeExecution.t()]
-  def list_node_executions(scope, %Execution{} = execution) do
+  @spec list_step_executions(Scope.t() | nil, Execution.t()) :: [StepExecution.t()]
+  def list_step_executions(scope, %Execution{} = execution) do
     # Ensure workflow is loaded
     execution = Repo.preload(execution, :workflow)
 
     if Scope.can_view_workflow?(scope, execution.workflow) do
       Repo.all(
-        from ne in NodeExecution,
-          where: ne.execution_id == ^execution.id,
-          order_by: [asc: ne.inserted_at]
+        from se in StepExecution,
+          where: se.execution_id == ^execution.id,
+          order_by: [asc: se.inserted_at]
       )
     else
       []
@@ -273,20 +273,20 @@ defmodule Imgd.Executions do
   end
 
   @doc """
-  Gets a node execution by ID, checking access permissions.
+  Gets a step execution by ID, checking access permissions.
 
-  Returns `{:ok, node_execution}` if the user has access, `{:error, :not_found}` otherwise.
+  Returns `{:ok, step_execution}` if the user has access, `{:error, :not_found}` otherwise.
   """
-  @spec get_node_execution(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
-          {:ok, NodeExecution.t()} | {:error, :not_found}
-  def get_node_execution(scope, id) do
-    case Repo.get(NodeExecution, id) |> Repo.preload(execution: :workflow) do
+  @spec get_step_execution(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
+          {:ok, StepExecution.t()} | {:error, :not_found}
+  def get_step_execution(scope, id) do
+    case Repo.get(StepExecution, id) |> Repo.preload(execution: :workflow) do
       nil ->
         {:error, :not_found}
 
-      %NodeExecution{execution: execution} = node_execution ->
+      %StepExecution{execution: execution} = step_execution ->
         if Scope.can_view_workflow?(scope, execution.workflow) do
-          {:ok, node_execution}
+          {:ok, step_execution}
         else
           {:error, :not_found}
         end
@@ -294,13 +294,13 @@ defmodule Imgd.Executions do
   end
 
   @doc """
-  Creates a node execution.
+  Creates a step execution.
 
-  Returns `{:ok, node_execution}` if successful, `{:error, changeset}` otherwise.
+  Returns `{:ok, step_execution}` if successful, `{:error, changeset}` otherwise.
   """
-  @spec create_node_execution(Scope.t() | nil, node_execution_params()) ::
-          {:ok, NodeExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
-  def create_node_execution(scope, attrs) do
+  @spec create_step_execution(Scope.t() | nil, step_execution_params()) ::
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
+  def create_step_execution(scope, attrs) do
     execution_id = attrs[:execution_id]
 
     case Repo.get(Execution, execution_id) |> Repo.preload(:workflow) do
@@ -309,8 +309,8 @@ defmodule Imgd.Executions do
 
       execution ->
         if Scope.can_view_workflow?(scope, execution.workflow) do
-          %NodeExecution{}
-          |> NodeExecution.changeset(attrs)
+          %StepExecution{}
+          |> StepExecution.changeset(attrs)
           |> Repo.insert()
         else
           {:error, :access_denied}
@@ -319,20 +319,20 @@ defmodule Imgd.Executions do
   end
 
   @doc """
-  Updates a node execution status.
+  Updates a step execution status.
 
-  Returns `{:ok, node_execution}` if successful, `{:error, changeset | :access_denied}` otherwise.
+  Returns `{:ok, step_execution}` if successful, `{:error, changeset | :access_denied}` otherwise.
   """
-  @spec update_node_execution_status(
+  @spec update_step_execution_status(
           Scope.t() | nil,
-          NodeExecution.t(),
-          NodeExecution.status(),
+          StepExecution.t(),
+          StepExecution.status(),
           keyword()
         ) ::
-          {:ok, NodeExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
-  def update_node_execution_status(scope, %NodeExecution{} = node_execution, status, opts \\ []) do
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
+  def update_step_execution_status(scope, %StepExecution{} = step_execution, status, opts \\ []) do
     # Check access via the execution's workflow
-    execution = Repo.get!(Execution, node_execution.execution_id) |> Repo.preload(:workflow)
+    execution = Repo.get!(Execution, step_execution.execution_id) |> Repo.preload(:workflow)
 
     if Scope.can_view_workflow?(scope, execution.workflow) do
       updates = %{status: status}
@@ -369,8 +369,8 @@ defmodule Imgd.Executions do
           updates
         end
 
-      node_execution
-      |> NodeExecution.changeset(updates)
+      step_execution
+      |> StepExecution.changeset(updates)
       |> Repo.update()
     else
       {:error, :access_denied}
@@ -378,22 +378,22 @@ defmodule Imgd.Executions do
   end
 
   @doc """
-  Creates a retry node execution.
+  Creates a retry step execution.
 
-  Returns `{:ok, node_execution}` if successful, `{:error, changeset | :access_denied}` otherwise.
+  Returns `{:ok, step_execution}` if successful, `{:error, changeset | :access_denied}` otherwise.
   """
-  @spec retry_node_execution(Scope.t() | nil, NodeExecution.t()) ::
-          {:ok, NodeExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
-  def retry_node_execution(scope, %NodeExecution{} = original) do
+  @spec retry_step_execution(Scope.t() | nil, StepExecution.t()) ::
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
+  def retry_step_execution(scope, %StepExecution{} = original) do
     # Check access via the execution's workflow
     execution = Repo.get!(Execution, original.execution_id) |> Repo.preload(:workflow)
 
     if Scope.can_view_workflow?(scope, execution.workflow) do
-      %NodeExecution{}
-      |> NodeExecution.changeset(%{
+      %StepExecution{}
+      |> StepExecution.changeset(%{
         execution_id: original.execution_id,
-        node_id: original.node_id,
-        node_type_id: original.node_type_id,
+        step_id: original.step_id,
+        step_type_id: original.step_type_id,
         input_data: original.input_data,
         metadata: original.metadata,
         attempt: original.attempt + 1,

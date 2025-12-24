@@ -1,4 +1,4 @@
-defmodule Imgd.Compute.Runners.ClusterNode do
+defmodule Imgd.Compute.Runners.ComputeNode do
   @moduledoc """
   Executes code on a specific remote node in the cluster.
   """

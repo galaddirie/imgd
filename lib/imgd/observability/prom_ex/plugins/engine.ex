@@ -10,13 +10,13 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
   - `imgd_engine_execution_active` - Gauge of currently active executions
   - `imgd_engine_execution_pending` - Gauge of pending executions
 
-  ### Node Metrics
-  - `imgd_engine_node_total` - Counter of node executions by status and type
-  - `imgd_engine_node_duration_milliseconds` - Histogram of node duration
-  - `imgd_engine_node_queue_time_milliseconds` - Histogram of node queue wait time
-  - `imgd_engine_node_exception_total` - Counter of node exceptions
-  - `imgd_engine_node_retry_total` - Counter of node retries
-  - `imgd_engine_nodes_running` - Gauge of currently running nodes
+  ### Step Metrics
+  - `imgd_engine_step_total` - Counter of step executions by status and type
+  - `imgd_engine_step_duration_milliseconds` - Histogram of step duration
+  - `imgd_engine_step_queue_time_milliseconds` - Histogram of step queue wait time
+  - `imgd_engine_step_exception_total` - Counter of step exceptions
+  - `imgd_engine_step_retry_total` - Counter of step retries
+  - `imgd_engine_steps_running` - Gauge of currently running steps
 
   ### Expression Metrics
   - `imgd_engine_expression_total` - Counter of expression evaluations
@@ -27,16 +27,16 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
   Be careful with high-cardinality labels. The following are safe:
   - `status` - bounded set of statuses
   - `trigger_type` - bounded set (manual, webhook, schedule, event)
-  - `node_type_id` - bounded by registered node types
+  - `step_type_id` - bounded by registered step types
 
-  Avoid using `execution_id` or `node_id` as labels - use trace correlation instead.
+  Avoid using `execution_id` or `step_id` as labels - use trace correlation instead.
   """
 
   use PromEx.Plugin
 
   require Logger
 
-  alias Imgd.Executions.{Execution, NodeExecution}
+  alias Imgd.Executions.{Execution, StepExecution}
 
   @execution_duration_buckets [
     10,
@@ -52,7 +52,7 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
     60_000,
     300_000
   ]
-  @node_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
+  @step_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
   @queue_time_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 5_000]
   @expression_duration_buckets [10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
 
@@ -107,67 +107,67 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
         ),
 
         # ==================================================================
-        # Node Metrics
+        # Step Metrics
         # ==================================================================
 
         counter(
-          [:imgd, :engine, :node, :total],
-          event_name: [:imgd, :engine, :node, :stop],
-          description: "Total number of node executions",
-          tags: [:workflow_id, :node_type_id, :status],
+          [:imgd, :engine, :step, :total],
+          event_name: [:imgd, :engine, :step, :stop],
+          description: "Total number of step executions",
+          tags: [:workflow_id, :step_type_id, :status],
           tag_values: fn meta ->
             %{
               workflow_id: safe_string(meta.workflow_id),
-              node_type_id: safe_string(meta.node_type_id),
+              step_type_id: safe_string(meta.step_type_id),
               status: safe_atom(meta.status)
             }
           end
         ),
         distribution(
-          [:imgd, :engine, :node, :duration, :milliseconds],
-          event_name: [:imgd, :engine, :node, :stop],
-          description: "Node execution duration in milliseconds",
+          [:imgd, :engine, :step, :duration, :milliseconds],
+          event_name: [:imgd, :engine, :step, :stop],
+          description: "Step execution duration in milliseconds",
           measurement: :duration_ms,
-          tags: [:workflow_id, :node_type_id, :status],
+          tags: [:workflow_id, :step_type_id, :status],
           tag_values: fn meta ->
             %{
               workflow_id: safe_string(meta.workflow_id),
-              node_type_id: safe_string(meta.node_type_id),
+              step_type_id: safe_string(meta.step_type_id),
               status: safe_atom(meta.status)
             }
           end,
-          reporter_options: [buckets: @node_duration_buckets],
+          reporter_options: [buckets: @step_duration_buckets],
           unit: :millisecond
         ),
 
-        # Queue time - how long nodes wait before starting
+        # Queue time - how long steps wait before starting
         distribution(
-          [:imgd, :engine, :node, :queue_time, :milliseconds],
-          event_name: [:imgd, :engine, :node, :start],
-          description: "Node queue wait time in milliseconds",
+          [:imgd, :engine, :step, :queue_time, :milliseconds],
+          event_name: [:imgd, :engine, :step, :start],
+          description: "Step queue wait time in milliseconds",
           measurement: fn measurements ->
             # Return nil if not present, which will skip the measurement
             measurements[:queue_time_ms]
           end,
-          tags: [:workflow_id, :node_type_id],
+          tags: [:workflow_id, :step_type_id],
           tag_values: fn meta ->
             %{
               workflow_id: safe_string(meta.workflow_id),
-              node_type_id: safe_string(meta.node_type_id)
+              step_type_id: safe_string(meta.step_type_id)
             }
           end,
           reporter_options: [buckets: @queue_time_buckets],
           unit: :millisecond
         ),
         counter(
-          [:imgd, :engine, :node, :exception, :total],
-          event_name: [:imgd, :engine, :node, :exception],
-          description: "Total number of node execution exceptions",
-          tags: [:workflow_id, :node_type_id, :exception_type],
+          [:imgd, :engine, :step, :exception, :total],
+          event_name: [:imgd, :engine, :step, :exception],
+          description: "Total number of step execution exceptions",
+          tags: [:workflow_id, :step_type_id, :exception_type],
           tag_values: fn meta ->
             %{
               workflow_id: safe_string(meta.workflow_id),
-              node_type_id: safe_string(meta.node_type_id),
+              step_type_id: safe_string(meta.step_type_id),
               exception_type: exception_type(meta[:exception])
             }
           end
@@ -175,25 +175,25 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
 
         # Retry tracking
         counter(
-          [:imgd, :engine, :node, :retry, :total],
-          event_name: [:imgd, :engine, :node, :retry],
-          description: "Total number of node retries",
-          tags: [:workflow_id, :node_type_id],
+          [:imgd, :engine, :step, :retry, :total],
+          event_name: [:imgd, :engine, :step, :retry],
+          description: "Total number of step retries",
+          tags: [:workflow_id, :step_type_id],
           tag_values: fn meta ->
             %{
               workflow_id: safe_string(meta.workflow_id),
-              node_type_id: safe_string(meta.node_type_id)
+              step_type_id: safe_string(meta.step_type_id)
             }
           end
         ),
         distribution(
-          [:imgd, :engine, :node, :retry, :backoff, :milliseconds],
-          event_name: [:imgd, :engine, :node, :retry],
-          description: "Node retry backoff time in milliseconds",
+          [:imgd, :engine, :step, :retry, :backoff, :milliseconds],
+          event_name: [:imgd, :engine, :step, :retry],
+          description: "Step retry backoff time in milliseconds",
           measurement: :backoff_ms,
-          tags: [:node_type_id],
+          tags: [:step_type_id],
           tag_values: fn meta ->
-            %{node_type_id: safe_string(meta.node_type_id)}
+            %{step_type_id: safe_string(meta.step_type_id)}
           end,
           reporter_options: [buckets: [100, 500, 1_000, 5_000, 10_000, 30_000, 60_000]],
           unit: :millisecond
@@ -257,16 +257,16 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           measurement: :paused_executions
         ),
         last_value(
-          [:imgd, :engine, :nodes, :running],
+          [:imgd, :engine, :steps, :running],
           event_name: [:imgd, :engine, :stats, :poll],
-          description: "Number of currently running nodes",
-          measurement: :running_nodes
+          description: "Number of currently running steps",
+          measurement: :running_steps
         ),
         last_value(
-          [:imgd, :engine, :nodes, :queued],
+          [:imgd, :engine, :steps, :queued],
           event_name: [:imgd, :engine, :stats, :poll],
-          description: "Number of queued nodes waiting to run",
-          measurement: :queued_nodes
+          description: "Number of queued steps waiting to run",
+          measurement: :queued_steps
         )
       ]
     )
@@ -280,8 +280,8 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
       active_executions: count_executions(:running),
       pending_executions: count_executions(:pending),
       paused_executions: count_executions(:paused),
-      running_nodes: count_nodes(:running),
-      queued_nodes: count_nodes(:queued)
+      running_steps: count_steps(:running),
+      queued_steps: count_steps(:queued)
     }
 
     :telemetry.execute([:imgd, :engine, :stats, :poll], stats, %{})
@@ -295,8 +295,8 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
           active_executions: 0,
           pending_executions: 0,
           paused_executions: 0,
-          running_nodes: 0,
-          queued_nodes: 0
+          running_steps: 0,
+          queued_steps: 0
         },
         %{}
       )
@@ -310,11 +310,11 @@ defmodule Imgd.Observability.PromEx.Plugins.Engine do
     |> Imgd.Repo.aggregate(:count, :id)
   end
 
-  defp count_nodes(status) do
+  defp count_steps(status) do
     import Ecto.Query
 
-    NodeExecution
-    |> where([ne], ne.status == ^status)
+    StepExecution
+    |> where([se], se.status == ^status)
     |> Imgd.Repo.aggregate(:count, :id)
   end
 

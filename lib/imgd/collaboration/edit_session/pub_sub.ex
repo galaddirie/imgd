@@ -19,8 +19,8 @@ defmodule Imgd.Collaboration.EditSession.PubSub do
 
   Presence:
   - `{:presence_diff, diff}` - Phoenix.Presence diff
-  - `{:lock_acquired, node_id, user_id}` - Node lock acquired
-  - `{:lock_released, node_id}` - Node lock released
+  - `{:lock_acquired, step_id, user_id}` - Step lock acquired
+  - `{:lock_released, step_id}` - Step lock released
   """
 
   alias Imgd.Accounts.Scope
@@ -198,11 +198,11 @@ defmodule Imgd.Collaboration.EditSession.PubSub do
   Broadcast a lock acquisition to all session subscribers.
   """
   @spec broadcast_lock_acquired(String.t(), String.t(), String.t()) :: :ok
-  def broadcast_lock_acquired(workflow_id, node_id, user_id) do
+  def broadcast_lock_acquired(workflow_id, step_id, user_id) do
     Phoenix.PubSub.broadcast(
       @pubsub,
       session_topic(workflow_id),
-      {:lock_acquired, node_id, user_id}
+      {:lock_acquired, step_id, user_id}
     )
   end
 
@@ -210,7 +210,7 @@ defmodule Imgd.Collaboration.EditSession.PubSub do
   Broadcast a lock release to all session subscribers.
   """
   @spec broadcast_lock_released(String.t(), String.t()) :: :ok
-  def broadcast_lock_released(workflow_id, node_id) do
-    Phoenix.PubSub.broadcast(@pubsub, session_topic(workflow_id), {:lock_released, node_id})
+  def broadcast_lock_released(workflow_id, step_id) do
+    Phoenix.PubSub.broadcast(@pubsub, session_topic(workflow_id), {:lock_released, step_id})
   end
 end

@@ -22,7 +22,7 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowsTables do
       add :id, :binary_id, primary_key: true
       add :version_tag, :string, null: false
       add :source_hash, :string, null: false
-      add :nodes, :map, null: false
+      add :steps, :map, null: false
       add :connections, :map
       add :triggers, :map
       add :changelog, :string
@@ -44,7 +44,7 @@ defmodule Imgd.Repo.Migrations.CreateWorkflowsTables do
           references(:workflows, on_delete: :delete_all, type: :binary_id),
           primary_key: true
 
-      add :nodes, :map
+      add :steps, :map
       add :connections, :map
       add :triggers, :map
       add :settings, :map, null: false, default: %{timeout_ms: 300_000, max_retries: 3}

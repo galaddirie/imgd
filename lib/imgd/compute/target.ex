@@ -5,7 +5,7 @@ defmodule Imgd.Compute.Target do
   Defines where a unit of work (step, task, function) should be executed.
   """
 
-  @type type :: :local | :node | :flame
+  @type type :: :local | :compute_node | :flame
   @type id :: String.t() | nil
 
   @derive Jason.Encoder
@@ -27,9 +27,10 @@ defmodule Imgd.Compute.Target do
   def local, do: %__MODULE__{type: :local, config: %{}}
 
   @doc """
-  Creates a new node target.
+  Creates a new compute node target.
   """
-  def node(node_name), do: %__MODULE__{type: :node, id: to_string(node_name), config: %{}}
+  def compute_node(node_name),
+    do: %__MODULE__{type: :compute_node, id: to_string(node_name), config: %{}}
 
   @doc """
   Creates a new FLAME pool target.

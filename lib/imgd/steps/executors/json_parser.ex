@@ -1,5 +1,5 @@
-defmodule Imgd.Nodes.Executors.JsonParser do
-  use Imgd.Nodes.Definition,
+defmodule Imgd.Steps.Executors.JsonParser do
+  use Imgd.Steps.Definition,
     id: "json_parser",
     name: "JSON Parser",
     category: "Transform",
@@ -7,7 +7,7 @@ defmodule Imgd.Nodes.Executors.JsonParser do
     icon: "hero-code-bracket",
     kind: :transform
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @impl true
   def execute(_config, input, _context) do

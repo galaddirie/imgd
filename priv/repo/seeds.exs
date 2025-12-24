@@ -39,17 +39,17 @@ IO.puts("")
 IO.puts("📋 Creating example workflows...")
 
 # Helper function to create workflow with draft
-create_workflow_with_draft = fn attrs, nodes, connections, triggers ->
-  {:ok, workflow} = Workflows.create_workflow(attrs, scope)
+create_workflow_with_draft = fn attrs, steps, connections, triggers ->
+  {:ok, workflow} = Workflows.create_workflow(scope, attrs)
 
   draft_attrs = %{
-    nodes: nodes,
+    steps: steps,
     connections: connections,
     triggers: triggers,
     settings: %{timeout_ms: 300_000, max_retries: 3}
   }
 
-  {:ok, _draft} = Workflows.update_workflow_draft(workflow, draft_attrs, scope)
+  {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
   workflow
 end
 
@@ -58,7 +58,7 @@ end
 # ============================================================================
 IO.puts("Creating Linear Workflow...")
 
-linear_nodes = [
+linear_steps = [
   %{
     id: "start",
     type_id: "debug",
@@ -92,23 +92,23 @@ linear_nodes = [
 linear_connections = [
   %{
     id: "start_to_format",
-    source_node_id: "start",
+    source_step_id: "start",
     source_output: "main",
-    target_node_id: "format_greeting",
+    target_step_id: "format_greeting",
     target_input: "main"
   },
   %{
     id: "format_to_add_timestamp",
-    source_node_id: "format_greeting",
+    source_step_id: "format_greeting",
     source_output: "main",
-    target_node_id: "add_timestamp",
+    target_step_id: "add_timestamp",
     target_input: "main"
   },
   %{
     id: "add_timestamp_to_end",
-    source_node_id: "add_timestamp",
+    source_step_id: "add_timestamp",
     source_output: "main",
-    target_node_id: "end",
+    target_step_id: "end",
     target_input: "main"
   }
 ]
@@ -129,7 +129,7 @@ linear_workflow =
       description: "A simple linear workflow that processes data sequentially",
       public: true
     },
-    linear_nodes,
+    linear_steps,
     linear_connections,
     linear_triggers
   )
@@ -141,7 +141,7 @@ IO.puts("✅ Created Linear Workflow: #{linear_workflow.name}")
 # ============================================================================
 IO.puts("Creating Branching Workflow...")
 
-branching_nodes = [
+branching_steps = [
   %{
     id: "input",
     type_id: "debug",
@@ -182,37 +182,37 @@ branching_nodes = [
 branching_connections = [
   %{
     id: "input_to_check",
-    source_node_id: "input",
+    source_step_id: "input",
     source_output: "main",
-    target_node_id: "check_status",
+    target_step_id: "check_status",
     target_input: "main"
   },
   %{
     id: "check_to_active",
-    source_node_id: "check_status",
+    source_step_id: "check_status",
     source_output: "true",
-    target_node_id: "active_path",
+    target_step_id: "active_path",
     target_input: "main"
   },
   %{
     id: "check_to_inactive",
-    source_node_id: "check_status",
+    source_step_id: "check_status",
     source_output: "false",
-    target_node_id: "inactive_path",
+    target_step_id: "inactive_path",
     target_input: "main"
   },
   %{
     id: "active_to_output",
-    source_node_id: "active_path",
+    source_step_id: "active_path",
     source_output: "main",
-    target_node_id: "output",
+    target_step_id: "output",
     target_input: "main"
   },
   %{
     id: "inactive_to_output",
-    source_node_id: "inactive_path",
+    source_step_id: "inactive_path",
     source_output: "main",
-    target_node_id: "output",
+    target_step_id: "output",
     target_input: "main"
   }
 ]
@@ -233,7 +233,7 @@ branching_workflow =
       description: "Conditional workflow that routes based on user status",
       public: true
     },
-    branching_nodes,
+    branching_steps,
     branching_connections,
     branching_triggers
   )
@@ -245,7 +245,7 @@ IO.puts("✅ Created Branching Workflow: #{branching_workflow.name}")
 # ============================================================================
 IO.puts("Creating Diamond Workflow...")
 
-diamond_nodes = [
+diamond_steps = [
   %{
     id: "start",
     type_id: "debug",
@@ -308,65 +308,65 @@ diamond_nodes = [
 diamond_connections = [
   %{
     id: "start_to_route",
-    source_node_id: "start",
+    source_step_id: "start",
     source_output: "main",
-    target_node_id: "route_by_type",
+    target_step_id: "route_by_type",
     target_input: "main"
   },
   %{
     id: "route_to_user",
-    source_node_id: "route_by_type",
+    source_step_id: "route_by_type",
     source_output: "user_branch",
-    target_node_id: "user_processing",
+    target_step_id: "user_processing",
     target_input: "main"
   },
   %{
     id: "route_to_admin",
-    source_node_id: "route_by_type",
+    source_step_id: "route_by_type",
     source_output: "admin_branch",
-    target_node_id: "admin_processing",
+    target_step_id: "admin_processing",
     target_input: "main"
   },
   %{
     id: "route_to_guest",
-    source_node_id: "route_by_type",
+    source_step_id: "route_by_type",
     source_output: "guest_branch",
-    target_node_id: "guest_processing",
+    target_step_id: "guest_processing",
     target_input: "main"
   },
   %{
     id: "route_to_other",
-    source_node_id: "route_by_type",
+    source_step_id: "route_by_type",
     source_output: "other_branch",
-    target_node_id: "other_processing",
+    target_step_id: "other_processing",
     target_input: "main"
   },
   %{
     id: "user_to_merge",
-    source_node_id: "user_processing",
+    source_step_id: "user_processing",
     source_output: "main",
-    target_node_id: "merge",
+    target_step_id: "merge",
     target_input: "main"
   },
   %{
     id: "admin_to_merge",
-    source_node_id: "admin_processing",
+    source_step_id: "admin_processing",
     source_output: "main",
-    target_node_id: "merge",
+    target_step_id: "merge",
     target_input: "main"
   },
   %{
     id: "guest_to_merge",
-    source_node_id: "guest_processing",
+    source_step_id: "guest_processing",
     source_output: "main",
-    target_node_id: "merge",
+    target_step_id: "merge",
     target_input: "main"
   },
   %{
     id: "other_to_merge",
-    source_node_id: "other_processing",
+    source_step_id: "other_processing",
     source_output: "main",
-    target_node_id: "merge",
+    target_step_id: "merge",
     target_input: "main"
   }
 ]
@@ -387,7 +387,7 @@ diamond_workflow =
       description: "Multi-branch routing based on user type with diamond pattern",
       public: true
     },
-    diamond_nodes,
+    diamond_steps,
     diamond_connections,
     diamond_triggers
   )
@@ -399,7 +399,7 @@ IO.puts("✅ Created Diamond Workflow: #{diamond_workflow.name}")
 # ============================================================================
 IO.puts("Creating Simple Workflow...")
 
-simple_nodes = [
+simple_steps = [
   %{
     id: "input_data",
     type_id: "debug",
@@ -437,23 +437,23 @@ simple_nodes = [
 simple_connections = [
   %{
     id: "input_to_format",
-    source_node_id: "input_data",
+    source_step_id: "input_data",
     source_output: "main",
-    target_node_id: "format_message",
+    target_step_id: "format_message",
     target_input: "main"
   },
   %{
     id: "format_to_calc",
-    source_node_id: "format_message",
+    source_step_id: "format_message",
     source_output: "main",
-    target_node_id: "perform_calc",
+    target_step_id: "perform_calc",
     target_input: "main"
   },
   %{
     id: "calc_to_result",
-    source_node_id: "perform_calc",
+    source_step_id: "perform_calc",
     source_output: "main",
-    target_node_id: "format_result",
+    target_step_id: "format_result",
     target_input: "main"
   }
 ]
@@ -474,7 +474,7 @@ simple_workflow =
       description: "Basic arithmetic operations with formatting",
       public: true
     },
-    simple_nodes,
+    simple_steps,
     simple_connections,
     simple_triggers
   )
@@ -486,7 +486,7 @@ IO.puts("✅ Created Simple Workflow: #{simple_workflow.name}")
 # ============================================================================
 IO.puts("Creating Complex Workflow...")
 
-complex_nodes = [
+complex_steps = [
   %{
     id: "receive_order",
     type_id: "debug",
@@ -581,72 +581,72 @@ complex_nodes = [
 complex_connections = [
   %{
     id: "receive_to_validate",
-    source_node_id: "receive_order",
+    source_step_id: "receive_order",
     source_output: "main",
-    target_node_id: "validate_order",
+    target_step_id: "validate_order",
     target_input: "main"
   },
   %{
     id: "validate_to_invalid",
-    source_node_id: "validate_order",
+    source_step_id: "validate_order",
     source_output: "false",
-    target_node_id: "invalid_order",
+    target_step_id: "invalid_order",
     target_input: "main"
   },
   %{
     id: "validate_to_tax",
-    source_node_id: "validate_order",
+    source_step_id: "validate_order",
     source_output: "true",
-    target_node_id: "calculate_tax",
+    target_step_id: "calculate_tax",
     target_input: "main"
   },
   %{
     id: "tax_to_total",
-    source_node_id: "calculate_tax",
+    source_step_id: "calculate_tax",
     source_output: "main",
-    target_node_id: "calculate_total",
+    target_step_id: "calculate_total",
     target_input: "main"
   },
   %{
     id: "total_to_discount_check",
-    source_node_id: "calculate_total",
+    source_step_id: "calculate_total",
     source_output: "main",
-    target_node_id: "apply_discount",
+    target_step_id: "apply_discount",
     target_input: "main"
   },
   %{
     id: "discount_check_to_calc_discount",
-    source_node_id: "apply_discount",
+    source_step_id: "apply_discount",
     source_output: "true",
-    target_node_id: "calculate_discount",
+    target_step_id: "calculate_discount",
     target_input: "main"
   },
   %{
     id: "calc_discount_to_apply",
-    source_node_id: "calculate_discount",
+    source_step_id: "calculate_discount",
     source_output: "main",
-    target_node_id: "apply_discount_total",
+    target_step_id: "apply_discount_total",
     target_input: "main"
   },
   %{
     id: "apply_discount_to_format",
-    source_node_id: "apply_discount_total",
+    source_step_id: "apply_discount_total",
     source_output: "main",
-    target_node_id: "format_invoice",
+    target_step_id: "format_invoice",
     target_input: "main"
   },
   %{
     id: "total_to_format",
-    source_node_id: "calculate_total",
+    source_step_id: "calculate_total",
     source_output: "main",
-    target_node_id: "format_invoice",
+    target_step_id: "format_invoice",
     target_input: "main"
   },
   %{
     id: "format_to_complete",
-    source_node_id: "format_invoice",
+    source_step_id: "format_invoice",
     source_output: "main",
-    target_node_id: "complete_order",
+    target_step_id: "complete_order",
     target_input: "main"
   }
 ]
@@ -667,7 +667,7 @@ complex_workflow =
       description: "Multi-step order processing with validation, calculations, and discounts",
       public: true
     },
-    complex_nodes,
+    complex_steps,
     complex_connections,
     complex_triggers
   )
@@ -679,7 +679,7 @@ IO.puts("✅ Created Complex Workflow: #{complex_workflow.name}")
 # ============================================================================
 IO.puts("Creating Map/Aggregate Workflow...")
 
-map_aggregate_nodes = [
+map_aggregate_steps = [
   %{
     id: "input_list",
     type_id: "debug",
@@ -752,65 +752,65 @@ map_aggregate_nodes = [
 map_aggregate_connections = [
   %{
     id: "input_to_split",
-    source_node_id: "input_list",
+    source_step_id: "input_list",
     source_output: "main",
-    target_node_id: "split_items",
+    target_step_id: "split_items",
     target_input: "main"
   },
   %{
     id: "split_to_double",
-    source_node_id: "split_items",
+    source_step_id: "split_items",
     source_output: "main",
-    target_node_id: "double_value",
+    target_step_id: "double_value",
     target_input: "main"
   },
   %{
     id: "split_to_square",
-    source_node_id: "split_items",
+    source_step_id: "split_items",
     source_output: "main",
-    target_node_id: "square_value",
+    target_step_id: "square_value",
     target_input: "main"
   },
   %{
     id: "double_to_aggregate",
-    source_node_id: "double_value",
+    source_step_id: "double_value",
     source_output: "main",
-    target_node_id: "aggregate_doubled",
+    target_step_id: "aggregate_doubled",
     target_input: "main"
   },
   %{
     id: "square_to_aggregate",
-    source_node_id: "square_value",
+    source_step_id: "square_value",
     source_output: "main",
-    target_node_id: "aggregate_squared",
+    target_step_id: "aggregate_squared",
     target_input: "main"
   },
   %{
     id: "aggregate_doubled_to_format",
-    source_node_id: "aggregate_doubled",
+    source_step_id: "aggregate_doubled",
     source_output: "main",
-    target_node_id: "format_results",
+    target_step_id: "format_results",
     target_input: "doubled_sum"
   },
   %{
     id: "aggregate_squared_to_format",
-    source_node_id: "aggregate_squared",
+    source_step_id: "aggregate_squared",
     source_output: "main",
-    target_node_id: "format_results",
+    target_step_id: "format_results",
     target_input: "squared_sum"
   },
   %{
     id: "input_to_format",
-    source_node_id: "input_list",
+    source_step_id: "input_list",
     source_output: "main",
-    target_node_id: "format_results",
+    target_step_id: "format_results",
     target_input: "original_numbers"
   },
   %{
     id: "format_to_output",
-    source_node_id: "format_results",
+    source_step_id: "format_results",
     source_output: "main",
-    target_node_id: "output",
+    target_step_id: "output",
     target_input: "main"
   }
 ]
@@ -831,7 +831,7 @@ map_aggregate_workflow =
       description: "Split numbers, process in parallel (double & square), then aggregate results",
       public: true
     },
-    map_aggregate_nodes,
+    map_aggregate_steps,
     map_aggregate_connections,
     map_aggregate_triggers
   )
@@ -843,7 +843,7 @@ IO.puts("✅ Created Map/Aggregate Workflow: #{map_aggregate_workflow.name}")
 # ============================================================================
 IO.puts("Creating Conditional Workflow...")
 
-conditional_nodes = [
+conditional_steps = [
   %{
     id: "user_input",
     type_id: "debug",
@@ -923,86 +923,86 @@ conditional_nodes = [
 conditional_connections = [
   %{
     id: "input_to_age_check",
-    source_node_id: "user_input",
+    source_step_id: "user_input",
     source_output: "main",
-    target_node_id: "check_age",
+    target_step_id: "check_age",
     target_input: "main"
   },
   %{
     id: "age_to_underage",
-    source_node_id: "check_age",
+    source_step_id: "check_age",
     source_output: "false",
-    target_node_id: "underage",
+    target_step_id: "underage",
     target_input: "main"
   },
   %{
     id: "age_to_membership",
-    source_node_id: "check_age",
+    source_step_id: "check_age",
     source_output: "true",
-    target_node_id: "check_membership",
+    target_step_id: "check_membership",
     target_input: "main"
   },
   %{
     id: "membership_to_premium",
-    source_node_id: "check_membership",
+    source_step_id: "check_membership",
     source_output: "true",
-    target_node_id: "premium_user",
+    target_step_id: "premium_user",
     target_input: "main"
   },
   %{
     id: "membership_to_activity",
-    source_node_id: "check_membership",
+    source_step_id: "check_membership",
     source_output: "false",
-    target_node_id: "check_activity",
+    target_step_id: "check_activity",
     target_input: "main"
   },
   %{
     id: "activity_to_active_regular",
-    source_node_id: "check_activity",
+    source_step_id: "check_activity",
     source_output: "true",
-    target_node_id: "active_regular",
+    target_step_id: "active_regular",
     target_input: "main"
   },
   %{
     id: "activity_to_inactive_regular",
-    source_node_id: "check_activity",
+    source_step_id: "check_activity",
     source_output: "false",
-    target_node_id: "inactive_regular",
+    target_step_id: "inactive_regular",
     target_input: "main"
   },
   %{
     id: "premium_to_inactive_check",
-    source_node_id: "premium_user",
+    source_step_id: "premium_user",
     source_output: "main",
-    target_node_id: "check_activity",
+    target_step_id: "check_activity",
     target_input: "main"
   },
   %{
     id: "inactive_premium_to_output",
-    source_node_id: "inactive_premium",
+    source_step_id: "inactive_premium",
     source_output: "main",
-    target_node_id: "final_output",
+    target_step_id: "final_output",
     target_input: "main"
   },
   %{
     id: "active_regular_to_output",
-    source_node_id: "active_regular",
+    source_step_id: "active_regular",
     source_output: "main",
-    target_node_id: "final_output",
+    target_step_id: "final_output",
     target_input: "main"
   },
   %{
     id: "inactive_regular_to_output",
-    source_node_id: "inactive_regular",
+    source_step_id: "inactive_regular",
     source_output: "main",
-    target_node_id: "final_output",
+    target_step_id: "final_output",
     target_input: "main"
   },
   %{
     id: "underage_to_output",
-    source_node_id: "underage",
+    source_step_id: "underage",
     source_output: "main",
-    target_node_id: "final_output",
+    target_step_id: "final_output",
     target_input: "main"
   }
 ]
@@ -1030,7 +1030,7 @@ conditional_workflow =
       description: "Complex conditional logic with multiple branching paths",
       public: true
     },
-    conditional_nodes,
+    conditional_steps,
     conditional_connections,
     conditional_triggers
   )

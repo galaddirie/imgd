@@ -2,7 +2,7 @@ defmodule Imgd.Compute do
   @moduledoc """
   Context for Compute-Aware Execution.
 
-  Handles dispatching work to different compute targets (Local, Cluster Node, FLAME).
+  Handles dispatching work to different compute targets (Local, ComputeNode, FLAME).
   """
 
   alias Imgd.Compute.Dispatcher

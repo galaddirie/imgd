@@ -39,11 +39,11 @@ defmodule ImgdWeb.WorkflowLive.Components.TracePanel do
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-base-content">{step.node_name}</span>
-                    <span class="text-xs text-base-content/60 font-mono">{step.node_id}</span>
+                    <span class="text-sm font-medium text-base-content">{step.step_name}</span>
+                    <span class="text-xs text-base-content/60 font-mono">{step.step_id}</span>
                   </div>
                   <div class="text-xs text-base-content/60 mt-1">
-                    {step.type_id} • {format_duration(step.duration_us)}
+                    {step.step_type_id} • {format_duration(step.duration_us)}
                   </div>
                   <%= if step.error do %>
                     <div class="mt-2 p-2 bg-error/10 text-error text-xs rounded-lg">

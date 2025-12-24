@@ -10,19 +10,19 @@ defmodule Imgd.Observability.ObanTracing do
 
   When enqueuing a job from an instrumented context:
 
-      def schedule_node_execution(execution, node) do
+      def schedule_step_execution(execution, step) do
         args =
-          %{execution_id: execution.id, node_id: node.id}
+          %{execution_id: execution.id, step_id: step.id}
           |> ObanTracing.inject_trace_context()
 
         %{args: args}
-        |> NodeExecutionWorker.new()
+        |> StepExecutionWorker.new()
         |> Oban.insert()
       end
 
   In your Oban worker:
 
-      defmodule NodeExecutionWorker do
+      defmodule StepExecutionWorker do
         use Oban.Worker
 
         alias Imgd.Observability.ObanTracing

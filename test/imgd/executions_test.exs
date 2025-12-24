@@ -2,7 +2,7 @@ defmodule Imgd.ExecutionsTest do
   use Imgd.DataCase, async: true
 
   alias Imgd.Executions
-  alias Imgd.Executions.{Execution, NodeExecution}
+  alias Imgd.Executions.Execution
   alias Imgd.Workflows
   alias Imgd.Workflows.Workflow
   alias Imgd.Accounts
@@ -18,7 +18,7 @@ defmodule Imgd.ExecutionsTest do
 
       # Create and publish a version
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}]
       }
@@ -34,7 +34,7 @@ defmodule Imgd.ExecutionsTest do
     test "create_execution/2 creates a new execution", %{
       scope: scope,
       workflow: workflow,
-      version: version
+      version: _version
     } do
       execution_attrs = %{
         workflow_id: workflow.id,
@@ -81,7 +81,7 @@ defmodule Imgd.ExecutionsTest do
       {:ok, draft_workflow} = Workflows.create_workflow(scope, %{name: "Draft Preview"})
 
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}]
       }
@@ -133,7 +133,7 @@ defmodule Imgd.ExecutionsTest do
     } do
       {:ok, execution} = create_test_execution(workflow, version, scope)
 
-      assert {:ok, fetched} = Executions.get_execution_with_nodes(scope, execution.id)
+      assert {:ok, fetched} = Executions.get_execution_with_steps(scope, execution.id)
       assert fetched.workflow.id == workflow.id
       assert fetched.triggered_by_user.id == scope.user.id
     end
@@ -168,7 +168,7 @@ defmodule Imgd.ExecutionsTest do
 
       # Create and publish a version
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}]
       }
@@ -210,7 +210,7 @@ defmodule Imgd.ExecutionsTest do
       scope: scope,
       execution: execution
     } do
-      error = {:node_failed, "node1", "connection timeout"}
+      error = {:step_failed, "step1", "connection timeout"}
 
       assert {:ok, updated} =
                Executions.update_execution_status(scope, execution, :failed, error: error)
@@ -252,7 +252,7 @@ defmodule Imgd.ExecutionsTest do
     end
   end
 
-  describe "node execution management" do
+  describe "step execution management" do
     setup do
       {:ok, user} = Accounts.register_user(%{email: "user@example.com", password: "password123"})
       scope = Scope.for_user(user)
@@ -260,7 +260,7 @@ defmodule Imgd.ExecutionsTest do
 
       # Create and publish a version
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}]
       }
@@ -275,69 +275,69 @@ defmodule Imgd.ExecutionsTest do
       %{scope: scope, workflow: workflow, execution: execution}
     end
 
-    test "create_node_execution/2 creates a new node execution", %{
+    test "create_step_execution/2 creates a new step execution", %{
       scope: scope,
       execution: execution
     } do
-      node_attrs = %{
+      step_attrs = %{
         execution_id: execution.id,
-        node_id: "node1",
-        node_type_id: "input_node",
+        step_id: "step1",
+        step_type_id: "input_step",
         input_data: %{"value" => 42},
         metadata: %{"priority" => "high"}
       }
 
-      assert {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
-      assert node_execution.execution_id == execution.id
-      assert node_execution.node_id == "node1"
-      assert node_execution.node_type_id == "input_node"
-      assert node_execution.status == :pending
-      assert node_execution.input_data == %{"value" => 42}
-      assert node_execution.metadata == %{"priority" => "high"}
+      assert {:ok, step_execution} = Executions.create_step_execution(scope, step_attrs)
+      assert step_execution.execution_id == execution.id
+      assert step_execution.step_id == "step1"
+      assert step_execution.step_type_id == "input_step"
+      assert step_execution.status == :pending
+      assert step_execution.input_data == %{"value" => 42}
+      assert step_execution.metadata == %{"priority" => "high"}
     end
 
-    test "create_node_execution/2 fails when execution not found", %{scope: scope} do
-      node_attrs = %{
+    test "create_step_execution/2 fails when execution not found", %{scope: scope} do
+      step_attrs = %{
         execution_id: Ecto.UUID.generate(),
-        node_id: "node1",
-        node_type_id: "input_node"
+        step_id: "step1",
+        step_type_id: "input_step"
       }
 
-      assert {:error, :execution_not_found} = Executions.create_node_execution(scope, node_attrs)
+      assert {:error, :execution_not_found} = Executions.create_step_execution(scope, step_attrs)
     end
 
-    test "create_node_execution/2 fails when user lacks access", %{execution: execution} do
+    test "create_step_execution/2 fails when user lacks access", %{execution: execution} do
       {:ok, other_user} =
         Accounts.register_user(%{email: "other@example.com", password: "password123"})
 
       other_scope = Scope.for_user(other_user)
 
-      node_attrs = %{
+      step_attrs = %{
         execution_id: execution.id,
-        node_id: "node1",
-        node_type_id: "input_node"
+        step_id: "step1",
+        step_type_id: "input_step"
       }
 
-      assert {:error, :access_denied} = Executions.create_node_execution(other_scope, node_attrs)
+      assert {:error, :access_denied} = Executions.create_step_execution(other_scope, step_attrs)
     end
 
-    test "update_node_execution_status/4 updates status through lifecycle", %{
+    test "update_step_execution_status/4 updates status through lifecycle", %{
       scope: scope,
       execution: execution
     } do
-      # Create node execution
-      node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
+      # Create step execution
+      step_attrs = %{execution_id: execution.id, step_id: "step1", step_type_id: "input_step"}
+      {:ok, step_execution} = Executions.create_step_execution(scope, step_attrs)
 
       # Queue it
       assert {:ok, queued} =
-               Executions.update_node_execution_status(scope, node_execution, :queued)
+               Executions.update_step_execution_status(scope, step_execution, :queued)
 
       assert queued.status == :queued
       assert queued.queued_at != nil
 
       # Start it
-      assert {:ok, running} = Executions.update_node_execution_status(scope, queued, :running)
+      assert {:ok, running} = Executions.update_step_execution_status(scope, queued, :running)
       assert running.status == :running
       assert running.started_at != nil
 
@@ -345,7 +345,7 @@ defmodule Imgd.ExecutionsTest do
       output_data = %{"result" => "success"}
 
       assert {:ok, completed} =
-               Executions.update_node_execution_status(scope, running, :completed,
+               Executions.update_step_execution_status(scope, running, :completed,
                  output_data: output_data
                )
 
@@ -354,33 +354,33 @@ defmodule Imgd.ExecutionsTest do
       assert completed.output_data == output_data
     end
 
-    test "update_node_execution_status/4 handles failed status with error", %{
+    test "update_step_execution_status/4 handles failed status with error", %{
       scope: scope,
       execution: execution
     } do
-      # Create and start node execution
-      node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
-      {:ok, running} = Executions.update_node_execution_status(scope, node_execution, :running)
+      # Create and start step execution
+      step_attrs = %{execution_id: execution.id, step_id: "step1", step_type_id: "input_step"}
+      {:ok, step_execution} = Executions.create_step_execution(scope, step_attrs)
+      {:ok, running} = Executions.update_step_execution_status(scope, step_execution, :running)
 
       # Fail it
       error = %{"type" => "timeout", "message" => "Connection timed out"}
 
       assert {:ok, failed} =
-               Executions.update_node_execution_status(scope, running, :failed, error: error)
+               Executions.update_step_execution_status(scope, running, :failed, error: error)
 
       assert failed.status == :failed
       assert failed.completed_at != nil
       assert failed.error == error
     end
 
-    test "update_node_execution_status/4 fails when user lacks access", %{
+    test "update_step_execution_status/4 fails when user lacks access", %{
       scope: scope,
       execution: execution
     } do
-      # Create node execution
-      node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
+      # Create step execution
+      step_attrs = %{execution_id: execution.id, step_id: "step1", step_type_id: "input_step"}
+      {:ok, step_execution} = Executions.create_step_execution(scope, step_attrs)
 
       {:ok, other_user} =
         Accounts.register_user(%{email: "other@example.com", password: "password123"})
@@ -388,35 +388,35 @@ defmodule Imgd.ExecutionsTest do
       other_scope = Scope.for_user(other_user)
 
       assert {:error, :access_denied} =
-               Executions.update_node_execution_status(other_scope, node_execution, :running)
+               Executions.update_step_execution_status(other_scope, step_execution, :running)
     end
 
-    test "retry_node_execution/2 creates a retry node execution", %{
+    test "retry_step_execution/2 creates a retry step execution", %{
       scope: scope,
       execution: execution
     } do
-      # Create and fail original node execution
-      node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
-      {:ok, failed} = Executions.update_node_execution_status(scope, node_execution, :failed)
+      # Create and fail original step execution
+      step_attrs = %{execution_id: execution.id, step_id: "step1", step_type_id: "input_step"}
+      {:ok, step_execution} = Executions.create_step_execution(scope, step_attrs)
+      {:ok, failed} = Executions.update_step_execution_status(scope, step_execution, :failed)
 
       # Retry it
-      assert {:ok, retry} = Executions.retry_node_execution(scope, failed)
+      assert {:ok, retry} = Executions.retry_step_execution(scope, failed)
       assert retry.execution_id == execution.id
-      assert retry.node_id == "node1"
-      assert retry.node_type_id == "input_node"
+      assert retry.step_id == "step1"
+      assert retry.step_type_id == "input_step"
       assert retry.attempt == 2
       assert retry.retry_of_id == failed.id
       assert retry.input_data == failed.input_data
     end
 
-    test "retry_node_execution/2 fails when user lacks access", %{
+    test "retry_step_execution/2 fails when user lacks access", %{
       scope: scope,
       execution: execution
     } do
-      # Create node execution
-      node_attrs = %{execution_id: execution.id, node_id: "node1", node_type_id: "input_node"}
-      {:ok, node_execution} = Executions.create_node_execution(scope, node_attrs)
+      # Create step execution
+      step_attrs = %{execution_id: execution.id, step_id: "step1", step_type_id: "input_step"}
+      {:ok, step_execution} = Executions.create_step_execution(scope, step_attrs)
 
       {:ok, other_user} =
         Accounts.register_user(%{email: "other@example.com", password: "password123"})
@@ -424,34 +424,34 @@ defmodule Imgd.ExecutionsTest do
       other_scope = Scope.for_user(other_user)
 
       assert {:error, :access_denied} =
-               Executions.retry_node_execution(other_scope, node_execution)
+               Executions.retry_step_execution(other_scope, step_execution)
     end
 
-    test "list_node_executions/2 returns node executions for accessible execution", %{
+    test "list_step_executions/2 returns step executions for accessible execution", %{
       scope: scope,
       execution: execution
     } do
-      # Create multiple node executions
-      {:ok, _node1} =
-        Executions.create_node_execution(
+      # Create multiple step executions
+      {:ok, _step1} =
+        Executions.create_step_execution(
           scope,
-          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"}
+          %{execution_id: execution.id, step_id: "step1", step_type_id: "input"}
         )
 
-      {:ok, _node2} =
-        Executions.create_node_execution(
+      {:ok, _step2} =
+        Executions.create_step_execution(
           scope,
-          %{execution_id: execution.id, node_id: "node2", node_type_id: "output"}
+          %{execution_id: execution.id, step_id: "step2", step_type_id: "output"}
         )
 
-      node_executions = Executions.list_node_executions(scope, execution)
-      assert length(node_executions) == 2
+      step_executions = Executions.list_step_executions(scope, execution)
+      assert length(step_executions) == 2
 
-      node_ids = Enum.map(node_executions, & &1.node_id) |> Enum.sort()
-      assert node_ids == ["node1", "node2"]
+      step_ids = Enum.map(step_executions, & &1.step_id) |> Enum.sort()
+      assert step_ids == ["step1", "step2"]
     end
 
-    test "list_node_executions/2 returns empty list when user lacks access", %{
+    test "list_step_executions/2 returns empty list when user lacks access", %{
       execution: execution
     } do
       {:ok, other_user} =
@@ -459,32 +459,32 @@ defmodule Imgd.ExecutionsTest do
 
       other_scope = Scope.for_user(other_user)
 
-      assert Executions.list_node_executions(other_scope, execution) == []
+      assert Executions.list_step_executions(other_scope, execution) == []
     end
 
-    test "get_node_execution/2 returns node execution for user with access", %{
+    test "get_step_execution/2 returns step execution for user with access", %{
       scope: scope,
       execution: execution
     } do
-      {:ok, node_execution} =
-        Executions.create_node_execution(
+      {:ok, step_execution} =
+        Executions.create_step_execution(
           scope,
-          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"}
+          %{execution_id: execution.id, step_id: "step1", step_type_id: "input"}
         )
 
-      assert {:ok, fetched} = Executions.get_node_execution(scope, node_execution.id)
-      assert fetched.id == node_execution.id
+      assert {:ok, fetched} = Executions.get_step_execution(scope, step_execution.id)
+      assert fetched.id == step_execution.id
       assert fetched.execution.workflow_id == execution.workflow_id
     end
 
-    test "get_node_execution/2 returns error when user lacks access", %{
+    test "get_step_execution/2 returns error when user lacks access", %{
       scope: scope,
       execution: execution
     } do
-      {:ok, node_execution} =
-        Executions.create_node_execution(
+      {:ok, step_execution} =
+        Executions.create_step_execution(
           scope,
-          %{execution_id: execution.id, node_id: "node1", node_type_id: "input"}
+          %{execution_id: execution.id, step_id: "step1", step_type_id: "input"}
         )
 
       {:ok, other_user} =
@@ -492,7 +492,7 @@ defmodule Imgd.ExecutionsTest do
 
       other_scope = Scope.for_user(other_user)
 
-      assert {:error, :not_found} = Executions.get_node_execution(other_scope, node_execution.id)
+      assert {:error, :not_found} = Executions.get_step_execution(other_scope, step_execution.id)
     end
   end
 
@@ -514,7 +514,7 @@ defmodule Imgd.ExecutionsTest do
 
       # Publish versions
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}]
       }

@@ -33,14 +33,14 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
 
       # Create and publish a version
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}]
       }
 
       {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
-      {:ok, {_workflow, version}} =
+      {:ok, {_workflow, _version}} =
         Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
 
       # Create execution
@@ -58,7 +58,7 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
 
     test "emits telemetry and pubsub events for step completion", %{
       scope: scope,
-      workflow: workflow,
+      workflow: _workflow,
       execution: execution
     } do
       execution_id = execution.id
@@ -68,7 +68,7 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
 
       :telemetry.attach(
         handler_id,
-        [:imgd, :node, :stop],
+        [:imgd, :step, :stop],
         fn event, measurements, metadata, _config ->
           send(self(), {:telemetry_event, event, measurements, metadata})
         end,
@@ -88,11 +88,11 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
       # Run the workflow
       _finished = Workflow.react_until_satisfied(workflow, :input)
 
-      assert_receive {:node_completed, payload}
-      assert payload.node_id == "list_step"
+      assert_receive {:step_completed, payload}
+      assert payload.step_id == "list_step"
       assert payload.output_item_count == 3
 
-      assert_receive {:telemetry_event, [:imgd, :node, :stop], measurements, metadata}
+      assert_receive {:telemetry_event, [:imgd, :step, :stop], measurements, metadata}
       assert measurements.duration_us >= 0
       assert metadata.output_item_count == 3
     end

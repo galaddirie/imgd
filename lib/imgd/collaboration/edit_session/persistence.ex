@@ -57,7 +57,7 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
         # 2. Update the draft with current state
         draft
         |> WorkflowDraft.changeset(%{
-          nodes: draft.nodes && Enum.map(draft.nodes, &Map.from_struct/1),
+          steps: draft.steps && Enum.map(draft.steps, &Map.from_struct/1),
           connections: draft.connections && Enum.map(draft.connections, &Map.from_struct/1),
           settings: Map.put(draft.settings || %{}, "last_persisted_seq", seq)
         })

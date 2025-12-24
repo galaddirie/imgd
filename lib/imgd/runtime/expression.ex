@@ -2,14 +2,14 @@ defmodule Imgd.Runtime.Expression do
   @moduledoc """
   Expression evaluation engine using Solid (Liquid templates).
 
-  Provides secure, sandboxed expression evaluation for data flow between nodes.
+  Provides secure, sandboxed expression evaluation for data flow between steps.
   Supports n8n-compatible syntax adapted for Liquid templates:
 
   ## Supported Variables
 
-  - `{{ json }}` or `{{ json.field }}` - Current node input data
-  - `{{ nodes["NodeName"].json }}` - Output from a specific node
-  - `{{ nodes.NodeName.json }}` - Alternative dot notation
+  - `{{ json }}` or `{{ json.field }}` - Current step input data
+  - `{{ steps["StepName"].json }}` - Output from a specific step
+  - `{{ steps.StepName.json }}` - Alternative dot notation
   - `{{ execution.id }}` - Execution metadata
   - `{{ workflow.id }}` - Workflow metadata
   - `{{ variables.name }}` - Workflow variables
@@ -34,8 +34,8 @@ defmodule Imgd.Runtime.Expression do
       # Simple field access
       Expression.evaluate("Hello {{ json.name }}!", execution)
 
-      # Node output access
-      Expression.evaluate("Status: {{ nodes.HTTP.json.status }}", execution)
+      # Step output access
+      Expression.evaluate("Status: {{ steps.HTTP.json.status }}", execution)
 
       # With filters
       Expression.evaluate("{{ json.items | size }}", execution)
@@ -274,7 +274,7 @@ defmodule Imgd.Runtime.Expression do
         Context.build(execution, state_store)
 
       is_atom(state_store) and Code.ensure_loaded?(state_store) ->
-        node_outputs =
+        step_outputs =
           if function_exported?(state_store, :outputs, 1) do
             case state_store.outputs(execution) do
               %{} = outputs -> outputs
@@ -291,7 +291,7 @@ defmodule Imgd.Runtime.Expression do
             nil
           end
 
-        Context.build(execution, node_outputs, current_input)
+        Context.build(execution, step_outputs, current_input)
 
       true ->
         Context.build(execution)
@@ -299,7 +299,7 @@ defmodule Imgd.Runtime.Expression do
   end
 
   defp get_timeout_ms(opts) do
-    Keyword.get(opts, :timeout_ms) || Keyword.get(opts, :timeout) || 1_000
+    Keyword.get(opts, :timeout_ms) || Keyword.get(opts, :timeout) || 5_000
   end
 
   defp format_parse_error(%Solid.TemplateError{errors: [first | _]} = error) do

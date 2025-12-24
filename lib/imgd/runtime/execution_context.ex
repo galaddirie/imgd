@@ -1,26 +1,26 @@
 defmodule Imgd.Runtime.ExecutionContext do
   @moduledoc """
-  Rich context for node execution within a Runic workflow.
+  Rich context for step execution within a Runic workflow.
 
-  This struct provides all the context a node executor needs, built from
+  This struct provides all the context a step executor needs, built from
   Runic's workflow state and fact ancestry.
 
   ## Fields
 
   - `:execution_id` - The Imgd Execution record ID
   - `:workflow_id` - The source workflow ID
-  - `:node_id` - The current node being executed
-  - `:node_outputs` - Map of node_id => output for all completed nodes
+  - `:step_id` - The current step being executed
+  - `:step_outputs` - Map of step_id => output for all completed steps
   - `:variables` - Workflow-level variables
   - `:metadata` - Execution metadata (trace_id, etc.)
-  - `:input` - The input value for this node (from parent facts)
+  - `:input` - The input value for this step (from parent facts)
   """
 
   @type t :: %__MODULE__{
           execution_id: String.t() | nil,
           workflow_id: String.t() | nil,
-          node_id: String.t() | nil,
-          node_outputs: %{String.t() => term()},
+          step_id: String.t() | nil,
+          step_outputs: %{String.t() => term()},
           variables: map(),
           metadata: map(),
           input: term()
@@ -29,8 +29,8 @@ defmodule Imgd.Runtime.ExecutionContext do
   defstruct [
     :execution_id,
     :workflow_id,
-    :node_id,
-    node_outputs: %{},
+    :step_id,
+    step_outputs: %{},
     variables: %{},
     metadata: %{},
     input: nil
@@ -39,17 +39,17 @@ defmodule Imgd.Runtime.ExecutionContext do
   @doc """
   Builds an ExecutionContext from Runic workflow state.
 
-  Extracts node outputs by traversing the workflow's graph for `:produced` edges.
+  Extracts step outputs by traversing the workflow's graph for `:produced` edges.
   """
   @spec from_runic_workflow(Runic.Workflow.t(), map()) :: t()
   def from_runic_workflow(workflow, opts \\ %{}) do
-    node_outputs = extract_node_outputs(workflow)
+    step_outputs = extract_step_outputs(workflow)
 
     %__MODULE__{
       execution_id: Map.get(opts, :execution_id),
       workflow_id: Map.get(opts, :workflow_id),
-      node_id: Map.get(opts, :node_id),
-      node_outputs: node_outputs,
+      step_id: Map.get(opts, :step_id),
+      step_outputs: step_outputs,
       variables: Map.get(opts, :variables, %{}),
       metadata: Map.get(opts, :metadata, %{}),
       input: Map.get(opts, :input)
@@ -65,26 +65,26 @@ defmodule Imgd.Runtime.ExecutionContext do
   end
 
   @doc """
-  Updates the context with output from a completed node.
+  Updates the context with output from a completed step.
   """
   @spec put_output(t(), String.t(), term()) :: t()
-  def put_output(%__MODULE__{} = ctx, node_id, output) do
-    %{ctx | node_outputs: Map.put(ctx.node_outputs, node_id, output)}
+  def put_output(%__MODULE__{} = ctx, step_id, output) do
+    %{ctx | step_outputs: Map.put(ctx.step_outputs, step_id, output)}
   end
 
   @doc """
-  Gets the output of a previously completed node.
+  Gets the output of a previously completed step.
   """
   @spec get_output(t(), String.t()) :: term() | nil
-  def get_output(%__MODULE__{node_outputs: outputs}, node_id) do
-    Map.get(outputs, node_id)
+  def get_output(%__MODULE__{step_outputs: outputs}, step_id) do
+    Map.get(outputs, step_id)
   end
 
   # ===========================================================================
   # Private Helpers
   # ===========================================================================
 
-  defp extract_node_outputs(workflow) do
+  defp extract_step_outputs(workflow) do
     graph = workflow.graph
 
     # Find all Facts with :produced edges from Steps

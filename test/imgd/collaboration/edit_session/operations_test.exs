@@ -3,21 +3,21 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
 
   alias Imgd.Collaboration.EditSession.Operations
   alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.{Node, Connection}
+  alias Imgd.Workflows.Embeds.{Step, Connection}
 
   describe "validate/2" do
     setup do
-      # Create a basic draft with nodes and connections
+      # Create a basic draft with steps and connections
       draft = %WorkflowDraft{
         workflow_id: Ecto.UUID.generate(),
-        nodes: [
-          %Node{
-            id: "node_1",
+        steps: [
+          %Step{
+            id: "step_1",
             type_id: "http_request",
             name: "HTTP Request",
             position: %{x: 100, y: 100}
           },
-          %Node{id: "node_2", type_id: "debug", name: "Debug Node", position: %{x: 300, y: 100}}
+          %Step{id: "step_2", type_id: "debug", name: "Debug Step", position: %{x: 300, y: 100}}
         ],
         connections: []
       }
@@ -25,14 +25,14 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       %{draft: draft}
     end
 
-    test "validates add_node operation successfully", %{draft: draft} do
+    test "validates add_step operation successfully", %{draft: draft} do
       operation = %{
-        type: :add_node,
+        type: :add_step,
         payload: %{
-          node: %{
-            id: "node_3",
+          step: %{
+            id: "step_3",
             type_id: "debug",
-            name: "Debug Node",
+            name: "Debug Step",
             position: %{x: 500, y: 100}
           }
         }
@@ -41,53 +41,53 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       assert :ok = Operations.validate(draft, operation)
     end
 
-    test "rejects add_node with duplicate id", %{draft: draft} do
+    test "rejects add_step with duplicate id", %{draft: draft} do
       operation = %{
-        type: :add_node,
+        type: :add_step,
         payload: %{
-          node: %{
+          step: %{
             # Already exists
-            id: "node_1",
+            id: "step_1",
             type_id: "text_formatter",
             name: "Text Formatter"
           }
         }
       }
 
-      assert {:error, {:node_already_exists, "node_1"}} = Operations.validate(draft, operation)
+      assert {:error, {:step_already_exists, "step_1"}} = Operations.validate(draft, operation)
     end
 
-    test "rejects add_node with invalid node type", %{draft: draft} do
+    test "rejects add_step with invalid step type", %{draft: draft} do
       operation = %{
-        type: :add_node,
+        type: :add_step,
         payload: %{
-          node: %{
-            id: "node_3",
+          step: %{
+            id: "step_3",
             type_id: "invalid_type",
-            name: "Invalid Node"
+            name: "Invalid Step"
           }
         }
       }
 
-      assert {:error, :invalid_node_type} = Operations.validate(draft, operation)
+      assert {:error, :invalid_step_type} = Operations.validate(draft, operation)
     end
 
-    test "validates remove_node operation successfully", %{draft: draft} do
+    test "validates remove_step operation successfully", %{draft: draft} do
       operation = %{
-        type: :remove_node,
-        payload: %{node_id: "node_1"}
+        type: :remove_step,
+        payload: %{step_id: "step_1"}
       }
 
       assert :ok = Operations.validate(draft, operation)
     end
 
-    test "rejects remove_node for non-existent node", %{draft: draft} do
+    test "rejects remove_step for non-existent step", %{draft: draft} do
       operation = %{
-        type: :remove_node,
-        payload: %{node_id: "node_999"}
+        type: :remove_step,
+        payload: %{step_id: "step_999"}
       }
 
-      assert {:error, {:node_not_found, "node_999"}} = Operations.validate(draft, operation)
+      assert {:error, {:step_not_found, "step_999"}} = Operations.validate(draft, operation)
     end
 
     test "validates add_connection operation successfully", %{draft: draft} do
@@ -96,9 +96,9 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
         payload: %{
           connection: %{
             id: "conn_1",
-            source_node_id: "node_1",
+            source_step_id: "step_1",
             source_output: "main",
-            target_node_id: "node_2",
+            target_step_id: "step_2",
             target_input: "main"
           }
         }
@@ -111,7 +111,7 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       draft_with_conn = %{
         draft
         | connections: [
-            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+            %Connection{id: "conn_1", source_step_id: "step_1", target_step_id: "step_2"}
           ]
       }
 
@@ -121,8 +121,8 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
           connection: %{
             # Duplicate
             id: "conn_1",
-            source_node_id: "node_1",
-            target_node_id: "node_2"
+            source_step_id: "step_1",
+            target_step_id: "step_2"
           }
         }
       }
@@ -131,46 +131,46 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
                Operations.validate(draft_with_conn, operation)
     end
 
-    test "rejects add_connection with non-existent source node", %{draft: draft} do
+    test "rejects add_connection with non-existent source step", %{draft: draft} do
       operation = %{
         type: :add_connection,
         payload: %{
           connection: %{
             id: "conn_1",
             # Doesn't exist
-            source_node_id: "node_999",
-            target_node_id: "node_2"
+            source_step_id: "step_999",
+            target_step_id: "step_2"
           }
         }
       }
 
-      assert {:error, {:source_node_not_found, "node_999"}} =
+      assert {:error, {:source_step_not_found, "step_999"}} =
                Operations.validate(draft, operation)
     end
 
     test "rejects add_connection that creates a cycle", %{draft: draft} do
-      # Create a draft with a cycle: node_1 -> node_2 -> node_1
+      # Create a draft with a cycle: step_1 -> step_2 -> step_1
       draft_with_cycle = %{
         draft
-        | nodes:
-            draft.nodes ++
+        | steps:
+            draft.steps ++
               [
-                %Node{id: "node_3", type_id: "text_formatter", name: "Node 3"}
+                %Step{id: "step_3", type_id: "text_formatter", name: "Step 3"}
               ],
           connections: [
-            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"},
-            %Connection{id: "conn_2", source_node_id: "node_2", target_node_id: "node_3"}
+            %Connection{id: "conn_1", source_step_id: "step_1", target_step_id: "step_2"},
+            %Connection{id: "conn_2", source_step_id: "step_2", target_step_id: "step_3"}
           ]
       }
 
-      # Try to add node_3 -> node_1, creating a cycle
+      # Try to add step_3 -> step_1, creating a cycle
       operation = %{
         type: :add_connection,
         payload: %{
           connection: %{
             id: "conn_3",
-            source_node_id: "node_3",
-            target_node_id: "node_1"
+            source_step_id: "step_3",
+            target_step_id: "step_1"
           }
         }
       }
@@ -184,9 +184,9 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
         payload: %{
           connection: %{
             id: "conn_1",
-            source_node_id: "node_1",
-            # Same node
-            target_node_id: "node_1"
+            source_step_id: "step_1",
+            # Same step
+            target_step_id: "step_1"
           }
         }
       }
@@ -198,7 +198,7 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       draft_with_conn = %{
         draft
         | connections: [
-            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+            %Connection{id: "conn_1", source_step_id: "step_1", target_step_id: "step_2"}
           ]
       }
 
@@ -222,10 +222,10 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
     test "validates editor operations without draft validation", %{draft: draft} do
       # Editor operations don't need draft validation
       operations = [
-        %{type: :pin_node_output, payload: %{node_id: "node_1", output_data: %{}}},
-        %{type: :unpin_node_output, payload: %{node_id: "node_1"}},
-        %{type: :disable_node, payload: %{node_id: "node_1"}},
-        %{type: :enable_node, payload: %{node_id: "node_1"}}
+        %{type: :pin_step_output, payload: %{step_id: "step_1", output_data: %{}}},
+        %{type: :unpin_step_output, payload: %{step_id: "step_1"}},
+        %{type: :disable_step, payload: %{step_id: "step_1"}},
+        %{type: :enable_step, payload: %{step_id: "step_1"}}
       ]
 
       for operation <- operations do
@@ -238,9 +238,9 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
     setup do
       draft = %WorkflowDraft{
         workflow_id: Ecto.UUID.generate(),
-        nodes: [
-          %Node{
-            id: "node_1",
+        steps: [
+          %Step{
+            id: "step_1",
             type_id: "http_request",
             name: "HTTP Request",
             position: %{x: 100, y: 100},
@@ -253,12 +253,12 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       %{draft: draft}
     end
 
-    test "applies add_node operation", %{draft: draft} do
+    test "applies add_step operation", %{draft: draft} do
       operation = %{
-        type: :add_node,
+        type: :add_step,
         payload: %{
-          node: %{
-            id: "node_2",
+          step: %{
+            id: "step_2",
             type_id: "debug",
             name: "JSON Parser",
             position: %{x: 300, y: 100}
@@ -267,44 +267,44 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       }
 
       assert {:ok, new_draft} = Operations.apply(draft, operation)
-      assert length(new_draft.nodes) == 2
-      assert Enum.find(new_draft.nodes, &(&1.id == "node_2")).name == "JSON Parser"
+      assert length(new_draft.steps) == 2
+      assert Enum.find(new_draft.steps, &(&1.id == "step_2")).name == "JSON Parser"
     end
 
-    test "applies remove_node operation", %{draft: draft} do
-      operation = %{type: :remove_node, payload: %{node_id: "node_1"}}
+    test "applies remove_step operation", %{draft: draft} do
+      operation = %{type: :remove_step, payload: %{step_id: "step_1"}}
 
       assert {:ok, new_draft} = Operations.apply(draft, operation)
-      assert new_draft.nodes == []
+      assert new_draft.steps == []
     end
 
-    test "applies remove_node operation with connections", %{draft: draft} do
+    test "applies remove_step operation with connections", %{draft: draft} do
       draft_with_connections = %{
         draft
-        | nodes:
-            draft.nodes ++
+        | steps:
+            draft.steps ++
               [
-                %Node{id: "node_2", type_id: "debug", name: "Debug Node"}
+                %Step{id: "step_2", type_id: "debug", name: "Debug Step"}
               ],
           connections: [
-            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+            %Connection{id: "conn_1", source_step_id: "step_1", target_step_id: "step_2"}
           ]
       }
 
-      operation = %{type: :remove_node, payload: %{node_id: "node_1"}}
+      operation = %{type: :remove_step, payload: %{step_id: "step_1"}}
 
       assert {:ok, new_draft} = Operations.apply(draft_with_connections, operation)
-      # Both node and connection should be removed
-      assert length(new_draft.nodes) == 1
-      assert new_draft.nodes |> hd() |> Map.get(:id) == "node_2"
+      # Both step and connection should be removed
+      assert length(new_draft.steps) == 1
+      assert new_draft.steps |> hd() |> Map.get(:id) == "step_2"
       assert new_draft.connections == []
     end
 
-    test "applies update_node_config with JSON patch", %{draft: draft} do
+    test "applies update_step_config with JSON patch", %{draft: draft} do
       operation = %{
-        type: :update_node_config,
+        type: :update_step_config,
         payload: %{
-          node_id: "node_1",
+          step_id: "step_1",
           patch: [
             %{"op" => "replace", "path" => "/url", "value" => "https://new-api.example.com"},
             %{"op" => "add", "path" => "/method", "value" => "POST"}
@@ -313,47 +313,47 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       }
 
       assert {:ok, new_draft} = Operations.apply(draft, operation)
-      node = Enum.find(new_draft.nodes, &(&1.id == "node_1"))
-      assert node.config["url"] == "https://new-api.example.com"
-      assert node.config["method"] == "POST"
+      step = Enum.find(new_draft.steps, &(&1.id == "step_1"))
+      assert step.config["url"] == "https://new-api.example.com"
+      assert step.config["method"] == "POST"
     end
 
-    test "applies update_node_position", %{draft: draft} do
+    test "applies update_step_position", %{draft: draft} do
       operation = %{
-        type: :update_node_position,
+        type: :update_step_position,
         payload: %{
-          node_id: "node_1",
+          step_id: "step_1",
           position: %{x: 200, y: 150}
         }
       }
 
       assert {:ok, new_draft} = Operations.apply(draft, operation)
-      node = Enum.find(new_draft.nodes, &(&1.id == "node_1"))
-      assert node.position == %{x: 200, y: 150}
+      step = Enum.find(new_draft.steps, &(&1.id == "step_1"))
+      assert step.position == %{x: 200, y: 150}
     end
 
-    test "applies update_node_metadata", %{draft: draft} do
+    test "applies update_step_metadata", %{draft: draft} do
       operation = %{
-        type: :update_node_metadata,
+        type: :update_step_metadata,
         payload: %{
-          node_id: "node_1",
+          step_id: "step_1",
           changes: %{name: "Updated HTTP Request", notes: "Updated notes"}
         }
       }
 
       assert {:ok, new_draft} = Operations.apply(draft, operation)
-      node = Enum.find(new_draft.nodes, &(&1.id == "node_1"))
-      assert node.name == "Updated HTTP Request"
-      assert node.notes == "Updated notes"
+      step = Enum.find(new_draft.steps, &(&1.id == "step_1"))
+      assert step.name == "Updated HTTP Request"
+      assert step.notes == "Updated notes"
     end
 
     test "applies add_connection operation", %{draft: draft} do
-      draft_with_node = %{
+      draft_with_step = %{
         draft
-        | nodes:
-            draft.nodes ++
+        | steps:
+            draft.steps ++
               [
-                %Node{id: "node_2", type_id: "debug", name: "Debug Node"}
+                %Step{id: "step_2", type_id: "debug", name: "Debug Step"}
               ]
       }
 
@@ -362,25 +362,25 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
         payload: %{
           connection: %{
             id: "conn_1",
-            source_node_id: "node_1",
-            target_node_id: "node_2"
+            source_step_id: "step_1",
+            target_step_id: "step_2"
           }
         }
       }
 
-      assert {:ok, new_draft} = Operations.apply(draft_with_node, operation)
+      assert {:ok, new_draft} = Operations.apply(draft_with_step, operation)
       assert length(new_draft.connections) == 1
       conn = hd(new_draft.connections)
       assert conn.id == "conn_1"
-      assert conn.source_node_id == "node_1"
-      assert conn.target_node_id == "node_2"
+      assert conn.source_step_id == "step_1"
+      assert conn.target_step_id == "step_2"
     end
 
     test "applies remove_connection operation", %{draft: draft} do
       draft_with_conn = %{
         draft
         | connections: [
-            %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+            %Connection{id: "conn_1", source_step_id: "step_1", target_step_id: "step_2"}
           ]
       }
 

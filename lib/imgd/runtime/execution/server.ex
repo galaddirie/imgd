@@ -99,8 +99,8 @@ defmodule Imgd.Runtime.Execution.Server do
 
       {:stop, :normal, new_state}
     catch
-      :throw, {:node_error, node_id, reason} ->
-        handle_failure(state, node_id, reason)
+      :throw, {:step_error, step_id, reason} ->
+        handle_failure(state, step_id, reason)
         {:stop, :normal, state}
 
       kind, reason ->
@@ -228,8 +228,8 @@ defmodule Imgd.Runtime.Execution.Server do
     Logger.info("Execution completed successfully")
   end
 
-  defp handle_failure(state, node_id, reason) do
-    error_map = Execution.format_error({:node_failed, node_id, reason})
+  defp handle_failure(state, step_id, reason) do
+    error_map = Execution.format_error({:step_failed, step_id, reason})
 
     Execution
     |> Repo.get!(state.execution_id)
@@ -240,7 +240,7 @@ defmodule Imgd.Runtime.Execution.Server do
     })
     |> Repo.update!()
 
-    Logger.error("Execution failed at node #{node_id}: #{inspect(reason)}")
+    Logger.error("Execution failed at step #{step_id}: #{inspect(reason)}")
   end
 
   defp build_context_from_runic(wrk) do
@@ -253,7 +253,7 @@ defmodule Imgd.Runtime.Execution.Server do
       |> Enum.filter(&match?(%Runic.Workflow.Fact{}, &1))
 
     # 2. Map each fact to its producing step's name
-    # Runic steps are named with Imgd Node IDs in the adapter
+    # Runic steps are named with Imgd Step IDs in the adapter
     facts
     |> Enum.reduce(%{}, fn fact, acc ->
       producing_step =
@@ -263,7 +263,7 @@ defmodule Imgd.Runtime.Execution.Server do
 
       case producing_step do
         %{name: name} when is_binary(name) ->
-          # If multiple facts from same node (unlikely in current Imgd BUT
+          # If multiple facts from same step (unlikely in current Imgd BUT
           # possible in Runic collections), we might want to store as list
           # or latest. For compatibility, we'll store as single value.
           Map.put(acc, name, fact.value)

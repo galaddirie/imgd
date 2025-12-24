@@ -1,15 +1,15 @@
-defmodule Imgd.Nodes.Executors.Behaviour do
+defmodule Imgd.Steps.Executors.Behaviour do
   @moduledoc """
-  Behaviour for node executors.
+  Behaviour for step executors.
 
-  Each node type in the workflow system has an associated executor module that
+  Each step type in the workflow system has an associated executor module that
   implements this behaviour. The executor is responsible for performing the
-  actual work of the node given its configuration and input data.
+  actual work of the step given its configuration and input data.
 
   ## Example Implementation
 
-      defmodule Imgd.Nodes.Executors.HTTP do
-        @behaviour Imgd.Nodes.Executors.Behaviour
+      defmodule Imgd.Steps.Executors.HTTP do
+        @behaviour Imgd.Steps.Executors.Behaviour
 
         @impl true
         def execute(config, _input, context) do
@@ -50,27 +50,27 @@ defmodule Imgd.Nodes.Executors.Behaviour do
 
   ## Return Values
 
-  - `{:ok, output}` - The node executed successfully with the given output
-  - `{:error, reason}` - The node failed with the given reason
-  - `{:skip, reason}` - The node was skipped (e.g., condition not met)
+  - `{:ok, output}` - The step executed successfully with the given output
+  - `{:error, reason}` - The step failed with the given reason
+  - `{:skip, reason}` - The step was skipped (e.g., condition not met)
   """
 
   alias Imgd.Executions.Execution
 
   @doc """
-  Executes the node with the given configuration, input, and execution.
+  Executes the step with the given configuration, input, and execution.
 
   ## Parameters
 
-  - `config` - The node's configuration map (from `node.config`)
-  - `input` - The input data flowing into this node (from parent nodes)
+  - `config` - The step's configuration map (from `step.config`)
+  - `input` - The input data flowing into this step (from parent steps)
   - `execution` - The current Execution record.
 
   ## Returns
 
   - `{:ok, output}` - Success with output data
   - `{:error, reason}` - Failure with error details
-  - `{:skip, reason}` - Node was skipped
+  - `{:skip, reason}` - Step was skipped
   """
   @callback execute(config :: map(), input :: term(), execution :: Execution.t()) ::
               {:ok, output :: term()}
@@ -78,14 +78,14 @@ defmodule Imgd.Nodes.Executors.Behaviour do
               | {:skip, reason :: term()}
 
   @doc """
-  Validates the node's configuration.
+  Validates the step's configuration.
 
-  Called during workflow publishing to ensure node configurations are valid
+  Called during workflow publishing to ensure step configurations are valid
   before the workflow can be executed.
 
   ## Parameters
 
-  - `config` - The node's configuration map to validate
+  - `config` - The step's configuration map to validate
 
   ## Returns
 
@@ -101,7 +101,7 @@ defmodule Imgd.Nodes.Executors.Behaviour do
   # ============================================================================
 
   @doc """
-  Resolves the executor module for a given node type ID.
+  Resolves the executor module for a given step type ID.
 
   First checks the Registry for the type, falling back to convention-based
   resolution if not found (for backwards compatibility).
@@ -110,9 +110,9 @@ defmodule Imgd.Nodes.Executors.Behaviour do
   """
   def resolve(type_id) when is_binary(type_id) do
     # Try registry first
-    case Imgd.Nodes.Registry.get(type_id) do
+    case Imgd.Steps.Registry.get(type_id) do
       {:ok, type} ->
-        Imgd.Nodes.Type.executor_module(type)
+        Imgd.Steps.Type.executor_module(type)
 
       {:error, :not_found} ->
         # Fallback to convention-based resolution
@@ -121,11 +121,11 @@ defmodule Imgd.Nodes.Executors.Behaviour do
   end
 
   defp resolve_by_convention(type_id) do
-    # Convention: type_id "http_request" -> Imgd.Nodes.Executors.HttpRequest
+    # Convention: type_id "http_request" -> Imgd.Steps.Executors.HttpRequest
     module_name = type_id_to_module_name(type_id)
 
     try do
-      module = Module.safe_concat([Imgd.Nodes.Executors, module_name])
+      module = Module.safe_concat([Imgd.Steps.Executors, module_name])
 
       if function_exported?(module, :execute, 3) do
         {:ok, module}
@@ -149,7 +149,7 @@ defmodule Imgd.Nodes.Executors.Behaviour do
   end
 
   @doc """
-  Executes a node using its type ID to resolve the executor.
+  Executes a step using its type ID to resolve the executor.
 
   This is a convenience function that combines resolution and execution.
   """

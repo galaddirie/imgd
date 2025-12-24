@@ -7,76 +7,76 @@ defmodule Imgd.Collaboration.EditorState do
 
   defstruct [
     :workflow_id,
-    # %{node_id => output_data}
+    # %{step_id => output_data}
     pinned_outputs: %{},
-    disabled_nodes: MapSet.new(),
-    # %{node_id => :skip | :exclude}
+    disabled_steps: MapSet.new(),
+    # %{step_id => :skip | :exclude}
     disabled_mode: %{},
-    # node_id for partial execution
+    # step_id for partial execution
     execution_start: nil,
-    # %{node_id => user_id} - soft locks
-    node_locks: %{},
-    # %{node_id => DateTime} - for timeout
+    # %{step_id => user_id} - soft locks
+    step_locks: %{},
+    # %{step_id => DateTime} - for timeout
     lock_timestamps: %{}
   ]
 
   # 30 seconds
   @lock_timeout_ms 30_000
 
-  def pin_output(state, node_id, output_data) do
-    %{state | pinned_outputs: Map.put(state.pinned_outputs, node_id, output_data)}
+  def pin_output(state, step_id, output_data) do
+    %{state | pinned_outputs: Map.put(state.pinned_outputs, step_id, output_data)}
   end
 
-  def unpin_output(state, node_id) do
-    %{state | pinned_outputs: Map.delete(state.pinned_outputs, node_id)}
+  def unpin_output(state, step_id) do
+    %{state | pinned_outputs: Map.delete(state.pinned_outputs, step_id)}
   end
 
-  def disable_node(state, node_id, mode \\ :skip) do
+  def disable_step(state, step_id, mode \\ :skip) do
     %{
       state
-      | disabled_nodes: MapSet.put(state.disabled_nodes, node_id),
-        disabled_mode: Map.put(state.disabled_mode, node_id, mode)
+      | disabled_steps: MapSet.put(state.disabled_steps, step_id),
+        disabled_mode: Map.put(state.disabled_mode, step_id, mode)
     }
   end
 
-  def enable_node(state, node_id) do
+  def enable_step(state, step_id) do
     %{
       state
-      | disabled_nodes: MapSet.delete(state.disabled_nodes, node_id),
-        disabled_mode: Map.delete(state.disabled_mode, node_id)
+      | disabled_steps: MapSet.delete(state.disabled_steps, step_id),
+        disabled_mode: Map.delete(state.disabled_mode, step_id)
     }
   end
 
-  def acquire_lock(state, node_id, user_id) do
+  def acquire_lock(state, step_id, user_id) do
     now = DateTime.utc_now()
 
-    case Map.get(state.node_locks, node_id) do
+    case Map.get(state.step_locks, step_id) do
       nil ->
-        {:ok, put_lock(state, node_id, user_id, now)}
+        {:ok, put_lock(state, step_id, user_id, now)}
 
       ^user_id ->
         # Already locked by same user - refresh
-        {:ok, put_lock(state, node_id, user_id, now)}
+        {:ok, put_lock(state, step_id, user_id, now)}
 
       other_user_id ->
         # Check if lock has expired
-        lock_time = Map.get(state.lock_timestamps, node_id)
+        lock_time = Map.get(state.lock_timestamps, step_id)
 
         if DateTime.diff(now, lock_time, :millisecond) > @lock_timeout_ms do
-          {:ok, put_lock(state, node_id, user_id, now)}
+          {:ok, put_lock(state, step_id, user_id, now)}
         else
           {:locked, other_user_id}
         end
     end
   end
 
-  def release_lock(state, node_id, user_id) do
-    case Map.get(state.node_locks, node_id) do
+  def release_lock(state, step_id, user_id) do
+    case Map.get(state.step_locks, step_id) do
       ^user_id ->
         %{
           state
-          | node_locks: Map.delete(state.node_locks, node_id),
-            lock_timestamps: Map.delete(state.lock_timestamps, node_id)
+          | step_locks: Map.delete(state.step_locks, step_id),
+            lock_timestamps: Map.delete(state.lock_timestamps, step_id)
         }
 
       _ ->
@@ -84,11 +84,11 @@ defmodule Imgd.Collaboration.EditorState do
     end
   end
 
-  defp put_lock(state, node_id, user_id, timestamp) do
+  defp put_lock(state, step_id, user_id, timestamp) do
     %{
       state
-      | node_locks: Map.put(state.node_locks, node_id, user_id),
-        lock_timestamps: Map.put(state.lock_timestamps, node_id, timestamp)
+      | step_locks: Map.put(state.step_locks, step_id, user_id),
+        lock_timestamps: Map.put(state.lock_timestamps, step_id, timestamp)
     }
   end
 end

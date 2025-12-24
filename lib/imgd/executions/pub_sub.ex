@@ -1,6 +1,6 @@
 defmodule Imgd.Executions.PubSub do
   @moduledoc """
-  PubSub broadcasting for workflow execution and node execution updates.
+  PubSub broadcasting for workflow execution and step execution updates.
 
   All subscriptions require a valid scope with appropriate permissions.
   This ensures users can only receive updates for resources they have access to.
@@ -18,13 +18,13 @@ defmodule Imgd.Executions.PubSub do
   - `{:execution_completed, execution}`
   - `{:execution_failed, execution, error}`
 
-  Node lifecycle:
-  - `{:node_started, node_payload}`
-  - `{:node_completed, node_payload}`
-  - `{:node_failed, node_payload}`
+  Step lifecycle:
+  - `{:step_started, step_payload}`
+  - `{:step_completed, step_payload}`
+  - `{:step_failed, step_payload}`
   """
 
-  alias Imgd.Executions.{Execution, NodeExecution}
+  alias Imgd.Executions.{Execution, StepExecution}
   alias Imgd.Accounts.Scope
 
   @pubsub Imgd.PubSub
@@ -191,37 +191,37 @@ defmodule Imgd.Executions.PubSub do
   end
 
   # ============================================================================
-  # Node execution broadcasts
+  # Step execution broadcasts
   # ============================================================================
 
-  @doc "Broadcast that a node has started executing."
-  def broadcast_node_started(%Execution{} = execution, %NodeExecution{} = node_execution) do
-    payload = build_node_payload(node_execution)
-    broadcast_node(:node_started, execution.id, execution.workflow_id, payload)
+  @doc "Broadcast that a step has started executing."
+  def broadcast_step_started(%Execution{} = execution, %StepExecution{} = step_execution) do
+    payload = build_step_payload(step_execution)
+    broadcast_step(:step_started, execution.id, execution.workflow_id, payload)
   end
 
-  @doc "Broadcast that a node completed successfully."
-  def broadcast_node_completed(%Execution{} = execution, %NodeExecution{} = node_execution) do
-    payload = build_node_payload(node_execution)
-    broadcast_node(:node_completed, execution.id, execution.workflow_id, payload)
+  @doc "Broadcast that a step completed successfully."
+  def broadcast_step_completed(%Execution{} = execution, %StepExecution{} = step_execution) do
+    payload = build_step_payload(step_execution)
+    broadcast_step(:step_completed, execution.id, execution.workflow_id, payload)
   end
 
-  @doc "Broadcast that a node failed."
-  def broadcast_node_failed(
+  @doc "Broadcast that a step failed."
+  def broadcast_step_failed(
         %Execution{} = execution,
-        %NodeExecution{} = node_execution,
+        %StepExecution{} = step_execution,
         error \\ nil
       ) do
     payload =
-      node_execution
-      |> build_node_payload()
-      |> Map.put(:error, error || node_execution.error)
+      step_execution
+      |> build_step_payload()
+      |> Map.put(:error, error || step_execution.error)
 
-    broadcast_node(:node_failed, execution.id, execution.workflow_id, payload)
+    broadcast_step(:step_failed, execution.id, execution.workflow_id, payload)
   end
 
-  @doc "Broadcast a node event with a raw payload."
-  def broadcast_node(event, execution_id, workflow_id, payload) do
+  @doc "Broadcast a step event with a raw payload."
+  def broadcast_step(event, execution_id, workflow_id, payload) do
     message = {event, payload}
     broadcast(execution_id, message)
     broadcast_workflow(workflow_id, message)
@@ -238,26 +238,26 @@ defmodule Imgd.Executions.PubSub do
     broadcast_workflow(execution.workflow_id, message)
   end
 
-  defp build_node_payload(%NodeExecution{} = ne) do
+  defp build_step_payload(%StepExecution{} = se) do
     %{
-      id: ne.id,
-      execution_id: ne.execution_id,
-      node_id: ne.node_id,
-      node_type_id: ne.node_type_id,
-      status: ne.status,
-      attempt: ne.attempt,
-      input_data: ne.input_data,
-      output_data: ne.output_data,
-      error: ne.error,
-      queued_at: ne.queued_at,
-      started_at: ne.started_at,
-      completed_at: ne.completed_at,
-      duration_us: NodeExecution.duration_us(ne),
-      queue_time_us: NodeExecution.queue_time_us(ne)
+      id: se.id,
+      execution_id: se.execution_id,
+      step_id: se.step_id,
+      step_type_id: se.step_type_id,
+      status: se.status,
+      attempt: se.attempt,
+      input_data: se.input_data,
+      output_data: se.output_data,
+      error: se.error,
+      queued_at: se.queued_at,
+      started_at: se.started_at,
+      completed_at: se.completed_at,
+      duration_us: StepExecution.duration_us(se),
+      queue_time_us: StepExecution.queue_time_us(se)
     }
   end
 
-  defp build_node_payload(node_data) when is_map(node_data), do: node_data
+  defp build_step_payload(step_data) when is_map(step_data), do: step_data
 
   defp broadcast(execution_id, message) do
     Phoenix.PubSub.broadcast(@pubsub, execution_topic(execution_id), message)

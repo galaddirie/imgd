@@ -1,5 +1,5 @@
-defmodule Imgd.Nodes.Executors.DataFilter do
-  use Imgd.Nodes.Definition,
+defmodule Imgd.Steps.Executors.DataFilter do
+  use Imgd.Steps.Definition,
     id: "data_filter",
     name: "Data Filter",
     category: "Transform",
@@ -7,7 +7,7 @@ defmodule Imgd.Nodes.Executors.DataFilter do
     icon: "hero-funnel",
     kind: :transform
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   @impl true
   def execute(config, input, _context) do

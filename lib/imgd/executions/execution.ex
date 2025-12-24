@@ -3,7 +3,7 @@ defmodule Imgd.Executions.Execution do
   Workflow execution instance.
 
   Tracks the runtime state of a single workflow execution including
-  status, timing, context (accumulated node outputs), and error information.
+  status, timing, context (accumulated step outputs), and error information.
   """
   @derive {Jason.Encoder,
            only: [
@@ -31,7 +31,7 @@ defmodule Imgd.Executions.Execution do
 
   alias Imgd.Workflows.Workflow
   alias Imgd.Accounts.User
-  alias Imgd.Executions.NodeExecution
+  alias Imgd.Executions.StepExecution
 
   @type status :: :pending | :running | :paused | :completed | :failed | :cancelled | :timeout
   @type trigger_type :: :manual | :schedule | :webhook | :event
@@ -110,10 +110,10 @@ defmodule Imgd.Executions.Execution do
     embeds_one :trigger, Trigger, on_replace: :update
     embeds_one :metadata, Metadata, on_replace: :update
 
-    # Accumulated outputs from all nodes: %{"node_id" => output_data}
+    # Accumulated outputs from all steps: %{"step_id" => output_data}
     field :context, :map, default: %{}
 
-    # Final declared output (from an output node)
+    # Final declared output (from an output step)
     field :output, :map
 
     # Error details if failed
@@ -128,7 +128,7 @@ defmodule Imgd.Executions.Execution do
     field :expires_at, :utc_datetime_usec
 
     belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
-    has_many :node_executions, NodeExecution
+    has_many :step_executions, StepExecution
 
     # Runic dataflow state
     field :runic_log, {:array, :map}, default: []
@@ -213,8 +213,8 @@ defmodule Imgd.Executions.Execution do
       %{"type" => _} = error ->
         error
 
-      {:node_failed, node_id, node_reason} ->
-        %{"type" => "node_failure", "node_id" => node_id, "reason" => inspect(node_reason)}
+      {:step_failed, step_id, step_reason} ->
+        %{"type" => "step_failure", "step_id" => step_id, "reason" => inspect(step_reason)}
 
       {:workflow_build_failed, build_reason} ->
         %{"type" => "workflow_build_failed", "reason" => inspect(build_reason)}
@@ -222,8 +222,8 @@ defmodule Imgd.Executions.Execution do
       {:build_failed, message} ->
         %{"type" => "build_failure", "message" => message}
 
-      {:cycle_detected, node_ids} ->
-        %{"type" => "cycle_detected", "node_ids" => node_ids}
+      {:cycle_detected, step_ids} ->
+        %{"type" => "cycle_detected", "step_ids" => step_ids}
 
       {:invalid_connections, connections} ->
         %{

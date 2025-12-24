@@ -20,14 +20,14 @@ defmodule Imgd.Runtime.EventsTest do
 
     # Create and publish a version
     draft_attrs = %{
-      nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+      steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
       connections: [],
       triggers: [%{type: :manual, config: %{}}]
     }
 
     {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
 
-    {:ok, {_workflow, version}} =
+    {:ok, {_workflow, _version}} =
       Workflows.publish_workflow(scope, workflow, %{version_tag: "1.0.0"})
 
     # Create execution

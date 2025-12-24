@@ -3,10 +3,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
   alias Imgd.Collaboration.EditSession.Server
   alias Imgd.Collaboration.EditSession.Supervisor
-  alias Imgd.Collaboration.{EditorState, EditOperation}
+  alias Imgd.Collaboration.EditOperation
   alias Imgd.Workflows
-  alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.Node
   alias Imgd.Accounts
   alias Imgd.Accounts.Scope
 
@@ -19,9 +17,9 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
     # Create a basic draft
     draft_attrs = %{
-      nodes: [
+      steps: [
         %{
-          id: "node_1",
+          id: "step_1",
           type_id: "http_request",
           name: "HTTP Request",
           position: %{x: 100, y: 100}
@@ -51,8 +49,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       {:ok, state} = Server.get_sync_state(workflow.id)
 
       assert state.draft.workflow_id == workflow.id
-      assert length(state.draft.nodes) == 1
-      assert hd(state.draft.nodes).id == "node_1"
+      assert length(state.draft.steps) == 1
+      assert hd(state.draft.steps).id == "step_1"
     end
 
     test "session terminates after idle timeout", %{workflow: workflow} do
@@ -77,14 +75,14 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "operation processing" do
-    test "applies add_node operation", %{workflow: workflow} do
+    test "applies add_step operation", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
 
       operation = %{
-        type: :add_node,
+        type: :add_step,
         payload: %{
-          node: %{
-            id: "node_2",
+          step: %{
+            id: "step_2",
             type_id: "json_parser",
             name: "JSON Parser",
             position: %{x: 300, y: 100}
@@ -100,21 +98,21 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
       # Verify state was updated
       {:ok, state} = Server.get_sync_state(workflow.id)
-      assert length(state.draft.nodes) == 2
-      assert Enum.any?(state.draft.nodes, &(&1.id == "node_2"))
+      assert length(state.draft.steps) == 2
+      assert Enum.any?(state.draft.steps, &(&1.id == "step_2"))
     end
 
     test "rejects invalid operations", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
 
       operation = %{
-        type: :add_node,
+        type: :add_step,
         payload: %{
-          node: %{
+          step: %{
             # Duplicate ID
-            id: "node_1",
+            id: "step_1",
             type_id: "json_parser",
-            name: "Duplicate Node"
+            name: "Duplicate Step"
           }
         },
         id: "op_1",
@@ -122,7 +120,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
         client_seq: 1
       }
 
-      assert {:error, {:node_already_exists, "node_1"}} =
+      assert {:error, {:step_already_exists, "step_1"}} =
                Server.apply_operation(workflow.id, operation)
     end
 
@@ -130,10 +128,10 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
 
       operation = %{
-        type: :add_node,
+        type: :add_step,
         payload: %{
-          node: %{
-            id: "node_2",
+          step: %{
+            id: "step_2",
             type_id: "json_parser",
             name: "JSON Parser",
             position: %{x: 300, y: 100}
@@ -153,9 +151,9 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       assert result2.status == :duplicate
       assert result1.seq == result2.seq
 
-      # Should still only have 2 nodes total
+      # Should still only have 2 steps total
       {:ok, state} = Server.get_sync_state(workflow.id)
-      assert length(state.draft.nodes) == 2
+      assert length(state.draft.steps) == 2
     end
 
     test "maintains operation sequence numbers", %{workflow: workflow} do
@@ -163,22 +161,22 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
       operations = [
         %{
-          type: :update_node_metadata,
-          payload: %{node_id: "node_1", changes: %{name: "Updated Name"}},
+          type: :update_step_metadata,
+          payload: %{step_id: "step_1", changes: %{name: "Updated Name"}},
           id: "op_1",
           user_id: Ecto.UUID.generate(),
           client_seq: 1
         },
         %{
-          type: :update_node_position,
-          payload: %{node_id: "node_1", position: %{x: 200, y: 150}},
+          type: :update_step_position,
+          payload: %{step_id: "step_1", position: %{x: 200, y: 150}},
           id: "op_2",
           user_id: Ecto.UUID.generate(),
           client_seq: 2
         },
         %{
-          type: :update_node_metadata,
-          payload: %{node_id: "node_1", changes: %{notes: "Added notes"}},
+          type: :update_step_metadata,
+          payload: %{step_id: "step_1", changes: %{notes: "Added notes"}},
           id: "op_3",
           user_id: Ecto.UUID.generate(),
           client_seq: 3
@@ -199,13 +197,13 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
   end
 
   describe "editor state operations" do
-    test "handles pin_node_output operation", %{workflow: workflow} do
+    test "handles pin_step_output operation", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
 
       operation = %{
-        type: :pin_node_output,
+        type: :pin_step_output,
         payload: %{
-          node_id: "node_1",
+          step_id: "step_1",
           output_data: %{"result" => "pinned output"}
         },
         id: "op_1",
@@ -216,15 +214,15 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       assert {:ok, _} = Server.apply_operation(workflow.id, operation)
 
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
-      assert editor_state.pinned_outputs["node_1"] == %{"result" => "pinned output"}
+      assert editor_state.pinned_outputs["step_1"] == %{"result" => "pinned output"}
     end
 
-    test "handles disable_node operation", %{workflow: workflow} do
+    test "handles disable_step operation", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
 
       operation = %{
-        type: :disable_node,
-        payload: %{node_id: "node_1", mode: :exclude},
+        type: :disable_step,
+        payload: %{step_id: "step_1", mode: :exclude},
         id: "op_1",
         user_id: Ecto.UUID.generate(),
         client_seq: 1
@@ -233,50 +231,50 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       assert {:ok, _} = Server.apply_operation(workflow.id, operation)
 
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
-      assert MapSet.member?(editor_state.disabled_nodes, "node_1")
-      assert editor_state.disabled_mode["node_1"] == :exclude
+      assert MapSet.member?(editor_state.disabled_steps, "step_1")
+      assert editor_state.disabled_mode["step_1"] == :exclude
     end
   end
 
-  describe "node locking" do
-    test "acquires node lock", %{workflow: workflow} do
+  describe "step locking" do
+    test "acquires step lock", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      assert :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
+      assert :ok = Server.acquire_step_lock(workflow.id, "step_1", "user_1")
 
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
-      assert editor_state.node_locks["node_1"] == "user_1"
+      assert editor_state.step_locks["step_1"] == "user_1"
     end
 
-    test "rejects lock for already locked node", %{workflow: workflow} do
+    test "rejects lock for already locked step", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
+      :ok = Server.acquire_step_lock(workflow.id, "step_1", "user_1")
 
       assert {:error, {:locked_by, "user_1"}} =
-               Server.acquire_node_lock(workflow.id, "node_1", "user_2")
+               Server.acquire_step_lock(workflow.id, "step_1", "user_2")
     end
 
     test "allows same user to refresh lock", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
+      :ok = Server.acquire_step_lock(workflow.id, "step_1", "user_1")
       # Should succeed
-      :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
+      :ok = Server.acquire_step_lock(workflow.id, "step_1", "user_1")
 
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
-      assert editor_state.node_locks["node_1"] == "user_1"
+      assert editor_state.step_locks["step_1"] == "user_1"
     end
 
-    test "releases node lock", %{workflow: workflow} do
+    test "releases step lock", %{workflow: workflow} do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
-      :ok = Server.acquire_node_lock(workflow.id, "node_1", "user_1")
+      :ok = Server.acquire_step_lock(workflow.id, "step_1", "user_1")
 
       # Release via cast (async)
-      :ok = Server.release_node_lock(workflow.id, "node_1", "user_1")
+      :ok = Server.release_step_lock(workflow.id, "step_1", "user_1")
 
       # Give it a moment to process
       :timer.sleep(10)
 
       {:ok, editor_state} = Server.get_editor_state(workflow.id)
-      refute Map.has_key?(editor_state.node_locks, "node_1")
+      refute Map.has_key?(editor_state.step_locks, "step_1")
     end
   end
 
@@ -298,15 +296,15 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       # Apply some operations first
       operations = [
         %{
-          type: :update_node_metadata,
-          payload: %{node_id: "node_1", changes: %{name: "Updated"}},
+          type: :update_step_metadata,
+          payload: %{step_id: "step_1", changes: %{name: "Updated"}},
           id: "op_1",
           user_id: Ecto.UUID.generate(),
           client_seq: 1
         },
         %{
-          type: :update_node_position,
-          payload: %{node_id: "node_1", position: %{x: 200, y: 150}},
+          type: :update_step_position,
+          payload: %{step_id: "step_1", position: %{x: 200, y: 150}},
           id: "op_2",
           user_id: Ecto.UUID.generate(),
           client_seq: 2
@@ -328,8 +326,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
       # Apply operation, then sync with current seq
       operation = %{
-        type: :update_node_metadata,
-        payload: %{node_id: "node_1", changes: %{name: "Updated"}},
+        type: :update_step_metadata,
+        payload: %{step_id: "step_1", changes: %{name: "Updated"}},
         id: "op_1",
         user_id: Ecto.UUID.generate(),
         client_seq: 1
@@ -350,22 +348,22 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       # Simulate concurrent operations from different users
       operations = [
         %{
-          type: :update_node_metadata,
-          payload: %{node_id: "node_1", changes: %{name: "Name 1"}},
+          type: :update_step_metadata,
+          payload: %{step_id: "step_1", changes: %{name: "Name 1"}},
           id: "op_1",
           user_id: Ecto.UUID.generate(),
           client_seq: 1
         },
         %{
-          type: :update_node_metadata,
-          payload: %{node_id: "node_1", changes: %{name: "Name 2"}},
+          type: :update_step_metadata,
+          payload: %{step_id: "step_1", changes: %{name: "Name 2"}},
           id: "op_2",
           user_id: Ecto.UUID.generate(),
           client_seq: 1
         },
         %{
-          type: :update_node_position,
-          payload: %{node_id: "node_1", position: %{x: 300, y: 200}},
+          type: :update_step_position,
+          payload: %{step_id: "step_1", position: %{x: 300, y: 200}},
           id: "op_3",
           user_id: Ecto.UUID.generate(),
           client_seq: 1
@@ -384,8 +382,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
 
       # Final state should reflect the last operation (position change)
       {:ok, state} = Server.get_sync_state(workflow.id)
-      node = hd(state.draft.nodes)
-      assert node.position == %{x: 300, y: 200}
+      step = hd(state.draft.steps)
+      assert step.position == %{x: 300, y: 200}
     end
   end
 
@@ -394,8 +392,8 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       {:ok, _pid} = Supervisor.ensure_session(workflow.id)
 
       operation = %{
-        type: :update_node_metadata,
-        payload: %{node_id: "node_1", changes: %{name: "Persisted Name"}},
+        type: :update_step_metadata,
+        payload: %{step_id: "step_1", changes: %{name: "Persisted Name"}},
         id: "op_1",
         user_id: user.id,
         client_seq: 1
@@ -415,7 +413,7 @@ defmodule Imgd.Collaboration.EditSession.ServerTest do
       op = hd(operations)
       assert op.operation_id == "op_1"
       assert op.seq == 1
-      assert op.type == :update_node_metadata
+      assert op.type == :update_step_metadata
     end
   end
 end

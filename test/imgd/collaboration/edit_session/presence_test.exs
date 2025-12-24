@@ -33,8 +33,8 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
       assert meta.user.id == user.id
       assert meta.user.email == user.email
       assert meta.cursor == nil
-      assert meta.selected_nodes == []
-      assert meta.focused_node == nil
+      assert meta.selected_steps == []
+      assert meta.focused_step == nil
       assert meta.joined_at != nil
     end
 
@@ -82,17 +82,17 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
   end
 
   describe "update_selection/3" do
-    test "updates user node selection", %{workflow: workflow, user: user} do
+    test "updates user step selection", %{workflow: workflow, user: user} do
       Presence.track_user(workflow.id, user, self())
 
-      selected_nodes = ["node_1", "node_2", "node_3"]
-      Presence.update_selection(workflow.id, user.id, selected_nodes)
+      selected_steps = ["step_1", "step_2", "step_3"]
+      Presence.update_selection(workflow.id, user.id, selected_steps)
 
       :timer.sleep(50)
 
       user_presence = Presence.get_user(workflow.id, user.id)
       meta = List.first(user_presence.metas)
-      assert meta.selected_nodes == selected_nodes
+      assert meta.selected_steps == selected_steps
     end
 
     test "handles empty selection", %{workflow: workflow, user: user} do
@@ -104,7 +104,7 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
 
       user_presence = Presence.get_user(workflow.id, user.id)
       meta = List.first(user_presence.metas)
-      assert meta.selected_nodes == []
+      assert meta.selected_steps == []
     end
   end
 
@@ -113,13 +113,13 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
       Presence.track_user(workflow.id, user, self())
 
       # Set focus
-      Presence.update_focus(workflow.id, user.id, "node_1")
+      Presence.update_focus(workflow.id, user.id, "step_1")
 
       :timer.sleep(50)
 
       user_presence = Presence.get_user(workflow.id, user.id)
       meta = List.first(user_presence.metas)
-      assert meta.focused_node == "node_1"
+      assert meta.focused_step == "step_1"
 
       # Clear focus
       Presence.clear_focus(workflow.id, user.id)
@@ -128,7 +128,7 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
 
       user_presence = Presence.get_user(workflow.id, user.id)
       meta = List.first(user_presence.metas)
-      assert meta.focused_node == nil
+      assert meta.focused_step == nil
     end
   end
 
@@ -212,8 +212,8 @@ defmodule Imgd.Collaboration.EditSession.PresenceTest do
       # Check all required fields are present
       assert Map.has_key?(meta, :user)
       assert Map.has_key?(meta, :cursor)
-      assert Map.has_key?(meta, :selected_nodes)
-      assert Map.has_key?(meta, :focused_node)
+      assert Map.has_key?(meta, :selected_steps)
+      assert Map.has_key?(meta, :focused_step)
       assert Map.has_key?(meta, :joined_at)
 
       # User data structure

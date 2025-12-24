@@ -1,6 +1,6 @@
-defmodule Imgd.Nodes.Executors.Switch do
+defmodule Imgd.Steps.Executors.Switch do
   @moduledoc """
-  Executor for Switch nodes.
+  Executor for Switch steps.
 
   Routes data to different outputs based on matching a value against cases.
   Unlike Condition which is binary, Switch supports multiple branches.
@@ -13,7 +13,7 @@ defmodule Imgd.Nodes.Executors.Switch do
 
   ## Input
 
-  Receives input from parent node(s). Available as `{{ json }}` in expressions.
+  Receives input from parent step(s). Available as `{{ json }}` in expressions.
 
   ## Output
 
@@ -33,7 +33,7 @@ defmodule Imgd.Nodes.Executors.Switch do
       # Output routes to "active" branch
   """
 
-  use Imgd.Nodes.Definition,
+  use Imgd.Steps.Definition,
     id: "switch",
     name: "Switch",
     category: "Control Flow",
@@ -85,7 +85,7 @@ defmodule Imgd.Nodes.Executors.Switch do
     "description" => "Tagged tuple {:branch, output_name, input_data}"
   }
 
-  @behaviour Imgd.Nodes.Executors.Behaviour
+  @behaviour Imgd.Steps.Executors.Behaviour
 
   alias Imgd.Runtime.Expression
 
@@ -153,9 +153,9 @@ defmodule Imgd.Nodes.Executors.Switch do
   # ===========================================================================
 
   defp build_vars(input, ctx) do
-    node_outputs =
+    step_outputs =
       case ctx do
-        %{node_outputs: outputs} when is_map(outputs) ->
+        %{step_outputs: outputs} when is_map(outputs) ->
           Map.new(outputs, fn {k, v} -> {k, %{"json" => v}} end)
 
         _ ->
@@ -164,7 +164,7 @@ defmodule Imgd.Nodes.Executors.Switch do
 
     %{
       "json" => input,
-      "nodes" => node_outputs,
+      "steps" => step_outputs,
       "variables" => Map.get(ctx, :variables, %{}),
       "metadata" => Map.get(ctx, :metadata, %{})
     }

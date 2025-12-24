@@ -2,7 +2,8 @@ defmodule Imgd.WorkflowsTest do
   use Imgd.DataCase, async: true
 
   alias Imgd.Workflows
-  alias Imgd.Workflows.{Workflow, WorkflowVersion, WorkflowDraft, WorkflowShare}
+  alias Imgd.Workflows.Workflow
+  alias Imgd.Workflows.WorkflowShare
   alias Imgd.Executions.Execution
   alias Imgd.Accounts
   alias Imgd.Accounts.Scope
@@ -216,7 +217,7 @@ defmodule Imgd.WorkflowsTest do
 
       # Create a draft for the workflow
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}],
         settings: %{timeout_ms: 300_000, max_retries: 3}
@@ -320,7 +321,7 @@ defmodule Imgd.WorkflowsTest do
       workflow: workflow
     } do
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}],
         settings: %{timeout_ms: 300_000, max_retries: 3}
@@ -328,10 +329,10 @@ defmodule Imgd.WorkflowsTest do
 
       assert {:ok, draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
       assert draft.workflow_id == workflow.id
-      assert length(draft.nodes) == 1
-      assert hd(draft.nodes).id == "node1"
-      assert hd(draft.nodes).type_id == "input"
-      assert hd(draft.nodes).name == "Input Node"
+      assert length(draft.steps) == 1
+      assert hd(draft.steps).id == "step1"
+      assert hd(draft.steps).type_id == "input"
+      assert hd(draft.steps).name == "Input Step"
       assert length(draft.connections) == 0
       assert length(draft.triggers) == 1
     end
@@ -339,7 +340,7 @@ defmodule Imgd.WorkflowsTest do
     test "update_workflow_draft/3 updates existing draft", %{scope: scope, workflow: workflow} do
       # Create initial draft
       initial_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: []
       }
@@ -348,18 +349,18 @@ defmodule Imgd.WorkflowsTest do
 
       # Update draft
       update_attrs = %{
-        nodes: [
-          %{id: "node1", type_id: "input", name: "Input Node", config: %{}},
-          %{id: "node2", type_id: "output", name: "Output Node", config: %{}}
+        steps: [
+          %{id: "step1", type_id: "input", name: "Input Step", config: %{}},
+          %{id: "step2", type_id: "output", name: "Output Step", config: %{}}
         ]
       }
 
       {:ok, updated_draft} = Workflows.update_workflow_draft(scope, workflow, update_attrs)
 
       assert updated_draft.workflow_id == draft.workflow_id
-      assert length(updated_draft.nodes) == 2
-      node_ids = Enum.map(updated_draft.nodes, & &1.id) |> Enum.sort()
-      assert node_ids == ["node1", "node2"]
+      assert length(updated_draft.steps) == 2
+      step_ids = Enum.map(updated_draft.steps, & &1.id) |> Enum.sort()
+      assert step_ids == ["step1", "step2"]
     end
 
     test "update_workflow_draft/3 fails when user lacks edit permission", %{workflow: workflow} do
@@ -368,7 +369,7 @@ defmodule Imgd.WorkflowsTest do
 
       other_scope = Scope.for_user(other_user)
 
-      draft_attrs = %{nodes: %{}, connections: [], triggers: []}
+      draft_attrs = %{steps: %{}, connections: [], triggers: []}
 
       assert {:error, :access_denied} =
                Workflows.update_workflow_draft(other_scope, workflow, draft_attrs)
@@ -383,7 +384,7 @@ defmodule Imgd.WorkflowsTest do
 
       # Create and publish a version
       draft_attrs = %{
-        nodes: [%{id: "node1", type_id: "input", name: "Input Node", config: %{}}],
+        steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
         triggers: [%{type: :manual, config: %{}}]
       }

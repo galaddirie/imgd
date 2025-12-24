@@ -15,8 +15,8 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
 
     # Create a draft for the workflow
     draft_attrs = %{
-      nodes: [
-        %{id: "node_1", type_id: "debug", name: "Debug Node", position: %{x: 100, y: 100}}
+      steps: [
+        %{id: "step_1", type_id: "debug", name: "Debug Step", position: %{x: 100, y: 100}}
       ]
     }
 
@@ -112,8 +112,8 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
 
       # Create draft for workflow2
       draft_attrs = %{
-        nodes: [
-          %{id: "node_1", type_id: "debug", name: "Debug Node", position: %{x: 100, y: 100}}
+        steps: [
+          %{id: "step_1", type_id: "debug", name: "Debug Step", position: %{x: 100, y: 100}}
         ]
       }
 
@@ -163,8 +163,8 @@ defmodule Imgd.Collaboration.EditSession.SupervisorTest do
 
           # Create draft for each workflow
           draft_attrs = %{
-            nodes: [
-              %{id: "node_1", type_id: "debug", name: "Debug Node", position: %{x: 100, y: 100}}
+            steps: [
+              %{id: "step_1", type_id: "debug", name: "Debug Step", position: %{x: 100, y: 100}}
             ]
           }
 

@@ -5,7 +5,7 @@ defmodule Imgd.Runtime.Execution.SupervisorTest do
   alias Imgd.Runtime.Execution.Supervisor, as: ExecutionSupervisor
   alias Imgd.Executions.Execution
   alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.Node
+  alias Imgd.Workflows.Embeds.Step
 
   setup do
     ensure_execution_registry_started()
@@ -19,7 +19,7 @@ defmodule Imgd.Runtime.Execution.SupervisorTest do
 
   test "start_execution/1 registers a paused execution process" do
     workflow = insert(:workflow)
-    insert_draft(workflow, [%Node{id: "node_1", type_id: "debug", name: "Debug", config: %{}}])
+    insert_draft(workflow, [%Step{id: "step_1", type_id: "debug", name: "Debug", config: %{}}])
 
     execution =
       insert_execution(workflow,
@@ -35,10 +35,10 @@ defmodule Imgd.Runtime.Execution.SupervisorTest do
     GenServer.stop(pid)
   end
 
-  defp insert_draft(workflow, nodes) do
+  defp insert_draft(workflow, steps) do
     %WorkflowDraft{
       workflow_id: workflow.id,
-      nodes: nodes,
+      steps: steps,
       connections: [],
       triggers: []
     }

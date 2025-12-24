@@ -161,7 +161,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <div class="flex items-center gap-2 text-xs text-base-content/70">
             <.icon name="hero-light-bulb" class="size-4" />
             <span>
-              Double-click any node to configure its inputs. Right-click for more options.
+              Double-click any step to configure its inputs. Right-click for more options.
             </span>
           </div>
           <div class="flex items-center gap-2">
@@ -180,7 +180,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               <span>{if @running?, do: "Running...", else: "Run workflow"}</span>
             </button>
             <span :if={not @can_run?} class="text-xs text-warning">
-              Add nodes to the workflow to enable runs.
+              Add steps to the workflow to enable runs.
             </span>
           </div>
         </div>
@@ -193,17 +193,17 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   # Component: DAG Panel
   # ============================================================================
 
-  attr :nodes, :list, required: true
+  attr :steps, :list, required: true
   attr :layout, :map, required: true
   attr :edges, :list, required: true
   attr :meta, :map, required: true
-  attr :node_map, :map, required: true
-  attr :node_states, :map, required: true
-  attr :selected_node_id, :string, default: nil
+  attr :step_map, :map, required: true
+  attr :step_states, :map, required: true
+  attr :selected_step_id, :string, default: nil
   attr :pins_with_status, :map, default: %{}
 
   def dag_panel(assigns) do
-    edge_states = compute_edge_states(assigns.edges, assigns.node_states)
+    edge_states = compute_edge_states(assigns.edges, assigns.step_states)
     assigns = assign(assigns, :edge_states, edge_states)
 
     ~H"""
@@ -214,20 +214,20 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         </h2>
         <div class="flex items-center gap-3">
           <.execution_progress_indicator
-            node_states={@node_states}
-            node_count={length(@nodes)}
+            step_states={@step_states}
+            step_count={length(@steps)}
           />
           <span class="text-xs text-base-content/60">
-            {length(@nodes)} nodes
+            {length(@steps)} steps
           </span>
         </div>
       </div>
 
       <div class="p-4 overflow-auto bg-base-200/30" style="max-height: 600px;">
-        <%= if @nodes == [] or is_nil(@nodes) do %>
+        <%= if @steps == [] or is_nil(@steps) do %>
           <div class="flex flex-col items-center justify-center py-16 text-base-content/60">
             <.icon name="hero-cube-transparent" class="size-12 mb-3 opacity-50" />
-            <p class="text-sm">No nodes in this workflow</p>
+            <p class="text-sm">No steps in this workflow</p>
           </div>
         <% else %>
           <svg
@@ -304,16 +304,16 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               <% end %>
             </g>
 
-            <g class="nodes">
-              <%= for node <- @nodes do %>
-                <% pos = Map.get(@layout, node.id, %{x: 0, y: 0}) %>
-                <% state = Map.get(@node_states, node.id, %{}) %>
-                <% pin_info = Map.get(@pins_with_status, node.id) %>
-                <.dag_node
-                  node={node}
+            <g class="steps">
+              <%= for step <- @steps do %>
+                <% pos = Map.get(@layout, step.id, %{x: 0, y: 0}) %>
+                <% state = Map.get(@step_states, step.id, %{}) %>
+                <% pin_info = Map.get(@pins_with_status, step.id) %>
+                <.dag_step
+                  step={step}
                   position={pos}
                   state={state}
-                  selected={@selected_node_id == node.id}
+                  selected={@selected_step_id == step.id}
                   pinned={pin_info != nil}
                   pin_stale={pin_info && pin_info["stale"]}
                 />
@@ -364,9 +364,9 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   defp edge_stroke_class(:failed), do: "stroke-error"
   defp edge_stroke_class(_), do: "stroke-base-300"
 
-  defp compute_edge_states(edges, node_states) do
+  defp compute_edge_states(edges, step_states) do
     Map.new(edges, fn edge ->
-      source_status = get_in(node_states, [edge.source_node_id, :status])
+      source_status = get_in(step_states, [edge.source_step_id, :status])
       edge_status = source_status || :default
       {edge.id, edge_status}
     end)
@@ -376,13 +376,13 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   # Component: Execution Progress Indicator
   # ============================================================================
 
-  attr :node_states, :map, required: true
-  attr :node_count, :integer, required: true
+  attr :step_states, :map, required: true
+  attr :step_count, :integer, required: true
 
   defp execution_progress_indicator(assigns) do
-    completed = assigns.node_states |> Enum.count(fn {_, s} -> s[:status] == :completed end)
-    running = assigns.node_states |> Enum.count(fn {_, s} -> s[:status] == :running end)
-    failed = assigns.node_states |> Enum.count(fn {_, s} -> s[:status] == :failed end)
+    completed = assigns.step_states |> Enum.count(fn {_, s} -> s[:status] == :completed end)
+    running = assigns.step_states |> Enum.count(fn {_, s} -> s[:status] == :running end)
+    failed = assigns.step_states |> Enum.count(fn {_, s} -> s[:status] == :failed end)
 
     assigns = assign(assigns, completed: completed, running: running, failed: failed)
 
@@ -402,28 +402,28 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           {@failed}
         </span>
       </div>
-      <span class="text-xs text-base-content/40">/ {@node_count}</span>
+      <span class="text-xs text-base-content/40">/ {@step_count}</span>
     </div>
     """
   end
 
   # ============================================================================
-  # Component: DAG Node (with double-click support)
+  # Component: DAG Step (with double-click support)
   # ============================================================================
 
-  attr :node, :map, required: true
+  attr :step, :map, required: true
   attr :position, :map, required: true
   attr :state, :map, required: true
   attr :selected, :boolean, default: false
   attr :pinned, :boolean, default: false
   attr :pin_stale, :boolean, default: false
 
-  def dag_node(assigns) do
+  def dag_step(assigns) do
     ~H"""
     <g
       transform={"translate(#{@position.x}, #{@position.y})"}
-      phx-click="select_node"
-      phx-value-node-id={@node.id}
+      phx-click="select_step"
+      phx-value-step-id={@step.id}
       class="cursor-pointer group"
     >
       <%!-- Invisible larger hit area for context menu --%>
@@ -433,9 +433,9 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         x="-10"
         y="-10"
         fill="transparent"
-        phx-hook=".NodeContextMenu"
-        id={"node-hitarea-#{@node.id}"}
-        data-node-id={@node.id}
+        phx-hook=".StepContextMenu"
+        id={"step-hitarea-#{@step.id}"}
+        data-step-id={@step.id}
       />
 
       <%!-- Glow effect --%>
@@ -469,14 +469,14 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         />
       <% end %>
 
-      <%!-- Node background --%>
+      <%!-- Step background --%>
       <rect
         width="200"
         height="80"
         rx="12"
         class={[
           "transition-all duration-200",
-          node_bg_class(@state[:status], @selected)
+          step_bg_class(@state[:status], @selected)
         ]}
         stroke-width={if @selected, do: "3", else: "2"}
       />
@@ -508,19 +508,19 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         <div class="w-full flex items-center justify-end gap-1.5">
           <button
             type="button"
-            phx-click="open_node_config"
-            phx-value-node-id={@node.id}
+            phx-click="open_step_config"
+            phx-value-step-id={@step.id}
             class="px-2 py-1 rounded-full text-xs font-medium shadow-sm bg-base-100 border border-base-300 hover:bg-base-200 transition flex items-center gap-1"
-            title="Configure node"
+            title="Configure step"
           >
             <.icon name="hero-cog-6-tooth" class="size-3" /> Configure
           </button>
           <button
             type="button"
-            phx-click="execute_to_node"
-            phx-value-node-id={@node.id}
+            phx-click="execute_to_step"
+            phx-value-step-id={@step.id}
             class="px-2 py-1 rounded-full text-xs font-semibold shadow-sm bg-primary text-primary-content hover:bg-primary/90 transition"
-            title="Run to this node"
+            title="Run to this step"
           >
             Run to Here
           </button>
@@ -542,19 +542,19 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <%= if @pinned and is_nil(@state[:status]) do %>
             <circle cx="0" cy="0" r="6" class={[(@pin_stale && "fill-warning") || "fill-primary/60"]} />
           <% else %>
-            <circle cx="0" cy="0" r="6" class={node_status_indicator_class(@state[:status])} />
+            <circle cx="0" cy="0" r="6" class={step_status_indicator_class(@state[:status])} />
           <% end %>
         <% end %>
       </g>
 
-      <%!-- Node name --%>
+      <%!-- Step name --%>
       <text x="32" y="20" class="text-sm font-medium fill-current" dominant-baseline="middle">
-        {truncate_text(@node.name, 18)}
+        {truncate_text(@step.name, 18)}
       </text>
 
-      <%!-- Node type + pin label --%>
+      <%!-- Step type + pin label --%>
       <text x="16" y="44" class="text-xs fill-current opacity-60">
-        {node_type_label(@node.type_id)}
+        {step_type_label(@step.type_id)}
         <%= if @pinned do %>
           <tspan class="fill-primary">(pinned)</tspan>
         <% end %>
@@ -617,22 +617,22 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
     </g>
 
     <%!-- Colocated hook for context menu --%>
-    <script :type={Phoenix.LiveView.ColocatedHook} name=".NodeContextMenu">
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".StepContextMenu">
       export default {
         mounted() {
           this.el.addEventListener("dblclick", (e) => {
             e.stopPropagation();
-            const nodeId = this.el.dataset.nodeId;
-            this.pushEvent("open_node_config", { "node-id": nodeId });
+            const stepId = this.el.dataset.stepId;
+            this.pushEvent("open_step_config", { "step-id": stepId });
           });
 
           this.el.addEventListener("contextmenu", (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const nodeId = this.el.dataset.nodeId;
+            const stepId = this.el.dataset.stepId;
             const rect = this.el.getBoundingClientRect();
             this.pushEvent("open_context_menu", {
-              "node-id": nodeId,
+              "step-id": stepId,
               x: e.clientX,
               y: e.clientY
             });
@@ -644,26 +644,26 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   end
 
   # ============================================================================
-  # Component: Node Context Menu
+  # Component: Step Context Menu
   # ============================================================================
 
-  attr :node_id, :string, required: true
-  attr :node_name, :string, required: true
+  attr :step_id, :string, required: true
+  attr :step_name, :string, required: true
   attr :pinned, :boolean, default: false
   attr :pin_stale, :boolean, default: false
   attr :has_output, :boolean, default: false
   attr :position, :map, required: true
 
-  def node_context_menu(assigns) do
+  def step_context_menu(assigns) do
     ~H"""
     <div
-      id={"context-menu-#{@node_id}"}
+      id={"context-menu-#{@step_id}"}
       class="fixed z-50 bg-base-100 border border-base-300 rounded-xl shadow-xl py-2 min-w-[220px]"
       style={"left: #{@position.x}px; top: #{@position.y}px;"}
       phx-click-away="close_context_menu"
     >
       <div class="px-3 py-1.5 border-b border-base-200 mb-1">
-        <p class="text-sm font-medium text-base-content truncate">{@node_name}</p>
+        <p class="text-sm font-medium text-base-content truncate">{@step_name}</p>
       </div>
 
       <%!-- Primary Actions --%>
@@ -671,19 +671,19 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         <button
           type="button"
           class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
-          phx-click="open_node_config"
-          phx-value-node-id={@node_id}
+          phx-click="open_step_config"
+          phx-value-step-id={@step_id}
         >
           <.icon name="hero-cog-6-tooth" class="size-4 text-base-content/70" />
-          <span>Configure Node</span>
+          <span>Configure Step</span>
           <span class="ml-auto text-xs text-base-content/50">Double-click</span>
         </button>
 
         <button
           type="button"
           class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
-          phx-click="execute_to_node"
-          phx-value-node-id={@node_id}
+          phx-click="execute_to_step"
+          phx-value-step-id={@step_id}
         >
           <.icon name="hero-play" class="size-4 text-success" />
           <span>Execute to Here</span>
@@ -699,8 +699,8 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <button
             type="button"
             class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
-            phx-click="open_node_config"
-            phx-value-node-id={@node_id}
+            phx-click="open_step_config"
+            phx-value-step-id={@step_id}
           >
             <.icon name="hero-eye" class="size-4 text-base-content/70" />
             <span>View Pinned Data</span>
@@ -712,7 +712,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
             type="button"
             class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-error/10 text-error rounded-lg transition-colors"
             phx-click="clear_pin"
-            phx-value-node-id={@node_id}
+            phx-value-step-id={@step_id}
           >
             <.icon name="hero-x-mark" class="size-4" />
             <span>Remove Pin</span>
@@ -721,8 +721,8 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
           <button
             type="button"
             class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200 rounded-lg transition-colors"
-            phx-click="open_node_config"
-            phx-value-node-id={@node_id}
+            phx-click="open_step_config"
+            phx-value-step-id={@step_id}
           >
             <.icon name="hero-bookmark" class="size-4 text-primary" />
             <span>Pin Output...</span>
@@ -744,7 +744,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   def pins_summary_panel(assigns) do
     pin_count = map_size(assigns.pins_with_status)
     stale_count = Enum.count(assigns.pins_with_status, fn {_, p} -> p["stale"] end)
-    orphan_count = Enum.count(assigns.pins_with_status, fn {_, p} -> not p["node_exists"] end)
+    orphan_count = Enum.count(assigns.pins_with_status, fn {_, p} -> not p["step_exists"] end)
 
     assigns =
       assigns
@@ -777,18 +777,18 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         </div>
       </div>
       <div class="p-3 space-y-2 max-h-48 overflow-y-auto">
-        <%= for {node_id, pin} <- @pins_with_status do %>
+        <%= for {step_id, pin} <- @pins_with_status do %>
           <div class={[
             "flex items-center justify-between p-2 rounded-lg",
             pin["stale"] && "bg-warning/10",
-            not pin["node_exists"] && "bg-error/10",
-            pin["node_exists"] && not pin["stale"] && "bg-base-200/50"
+            not pin["step_exists"] && "bg-error/10",
+            pin["step_exists"] && not pin["stale"] && "bg-base-200/50"
           ]}>
             <div class="flex items-center gap-2 min-w-0">
               <.icon
                 name={
                   cond do
-                    not pin["node_exists"] -> "hero-exclamation-triangle"
+                    not pin["step_exists"] -> "hero-exclamation-triangle"
                     pin["stale"] -> "hero-exclamation-circle"
                     true -> "hero-bookmark-solid"
                   end
@@ -796,16 +796,16 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
                 class={
                   [
                     "size-4 flex-shrink-0",
-                    not pin["node_exists"] && "text-error",
-                    pin["stale"] && pin["node_exists"] && "text-warning",
-                    pin["node_exists"] && not pin["stale"] && "text-primary"
+                    not pin["step_exists"] && "text-error",
+                    pin["stale"] && pin["step_exists"] && "text-warning",
+                    pin["step_exists"] && not pin["stale"] && "text-primary"
                   ]
                   |> Enum.filter(& &1)
                   |> Enum.join(" ")
                 }
               />
               <div class="min-w-0">
-                <p class="text-sm font-medium truncate">{pin["label"] || node_id}</p>
+                <p class="text-sm font-medium truncate">{pin["label"] || step_id}</p>
                 <p class="text-xs text-base-content/60">
                   {format_relative_time(pin["pinned_at"])}
                 </p>
@@ -815,8 +815,8 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               <button
                 type="button"
                 class="btn btn-ghost btn-xs"
-                phx-click="open_node_config"
-                phx-value-node-id={node_id}
+                phx-click="open_step_config"
+                phx-value-step-id={step_id}
                 title="View pinned data"
               >
                 <.icon name="hero-eye" class="size-3" />
@@ -825,7 +825,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
                 type="button"
                 class="btn btn-ghost btn-xs text-error"
                 phx-click="clear_pin"
-                phx-value-node-id={node_id}
+                phx-value-step-id={step_id}
                 title="Remove pin"
               >
                 <.icon name="hero-x-mark" class="size-3" />
@@ -839,21 +839,21 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   end
 
   # ============================================================================
-  # Component: Node Details Panel
+  # Component: Step Details Panel
   # ============================================================================
 
-  attr :node_map, :map, required: true
-  attr :node_states, :map, required: true
-  attr :selected_node_id, :string, default: nil
+  attr :step_map, :map, required: true
+  attr :step_states, :map, required: true
+  attr :selected_step_id, :string, default: nil
 
-  def node_details_panel(assigns) do
+  def step_details_panel(assigns) do
     ~H"""
     <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100">
       <div class="border-b border-base-200 px-4 py-3 flex items-center justify-between">
         <h2 class="text-sm font-semibold text-base-content flex items-center gap-2">
-          <.icon name="hero-cube" class="size-4 opacity-70" /> Node Details
+          <.icon name="hero-cube" class="size-4 opacity-70" /> Step Details
         </h2>
-        <%= if @selected_node_id do %>
+        <%= if @selected_step_id do %>
           <button
             type="button"
             phx-click="clear_selection"
@@ -865,38 +865,38 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
       </div>
 
       <div class="p-4 overflow-auto" style="max-height: 600px;">
-        <%= if @selected_node_id do %>
-          <% node = Map.get(@node_map, @selected_node_id) %>
-          <% state = Map.get(@node_states, @selected_node_id, %{}) %>
+        <%= if @selected_step_id do %>
+          <% step = Map.get(@step_map, @selected_step_id) %>
+          <% state = Map.get(@step_states, @selected_step_id, %{}) %>
 
           <div class="space-y-4">
             <div>
               <div class="flex items-start justify-between">
                 <div>
-                  <h3 class="font-medium text-base-content">{node.name}</h3>
+                  <h3 class="font-medium text-base-content">{step.name}</h3>
                   <p class="text-xs text-base-content/60 mt-1">
-                    Type: {node_type_label(node.type_id)}
+                    Type: {step_type_label(step.type_id)}
                   </p>
                 </div>
                 <div class="flex items-center gap-2">
                   <%= if state[:status] do %>
-                    <span class={["badge badge-sm", node_status_badge_class(state[:status])]}>
+                    <span class={["badge badge-sm", step_status_badge_class(state[:status])]}>
                       {state[:status]}
                     </span>
                   <% end %>
                   <button
                     type="button"
                     class="btn btn-ghost btn-xs"
-                    phx-click="open_node_config"
-                    phx-value-node-id={@selected_node_id}
-                    title="Configure node"
+                    phx-click="open_step_config"
+                    phx-value-step-id={@selected_step_id}
+                    title="Configure step"
                   >
                     <.icon name="hero-cog-6-tooth" class="size-4" />
                   </button>
                 </div>
               </div>
               <p class="text-xs font-mono text-base-content/40 mt-2">
-                ID: {node.id}
+                ID: {step.id}
               </p>
             </div>
 
@@ -945,7 +945,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
               </summary>
               <div class="collapse-content px-3 pb-3">
                 <pre class="text-xs bg-base-200/60 p-2 rounded-lg overflow-auto max-h-40"><%=
-                  format_json_preview(node.config)
+                  format_json_preview(step.config)
                 %></pre>
               </div>
             </details>
@@ -953,7 +953,7 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
         <% else %>
           <div class="text-center py-8 text-base-content/60">
             <.icon name="hero-cursor-arrow-rays" class="size-8 mx-auto mb-2 opacity-50" />
-            <p class="text-sm">Click a node to view details</p>
+            <p class="text-sm">Click a step to view details</p>
             <p class="text-xs mt-1 opacity-70">Double-click to configure</p>
           </div>
         <% end %>
@@ -1155,36 +1155,36 @@ defmodule ImgdWeb.WorkflowLive.RunnerComponents do
   # Helper Functions
   # ============================================================================
 
-  defp node_bg_class(nil, false), do: "fill-base-100 stroke-base-300"
-  defp node_bg_class(nil, true), do: "fill-base-100 stroke-primary"
-  defp node_bg_class(:pending, false), do: "fill-warning/5 stroke-warning/50"
-  defp node_bg_class(:pending, true), do: "fill-warning/10 stroke-primary"
-  defp node_bg_class(:queued, false), do: "fill-warning/5 stroke-warning/50"
-  defp node_bg_class(:queued, true), do: "fill-warning/10 stroke-primary"
-  defp node_bg_class(:running, _), do: "fill-info/10 stroke-info"
-  defp node_bg_class(:completed, false), do: "fill-success/10 stroke-success"
-  defp node_bg_class(:completed, true), do: "fill-success/15 stroke-primary"
-  defp node_bg_class(:failed, false), do: "fill-error/10 stroke-error"
-  defp node_bg_class(:failed, true), do: "fill-error/15 stroke-primary"
-  defp node_bg_class(_, false), do: "fill-base-100 stroke-base-300"
-  defp node_bg_class(_, true), do: "fill-base-100 stroke-primary"
+  defp step_bg_class(nil, false), do: "fill-base-100 stroke-base-300"
+  defp step_bg_class(nil, true), do: "fill-base-100 stroke-primary"
+  defp step_bg_class(:pending, false), do: "fill-warning/5 stroke-warning/50"
+  defp step_bg_class(:pending, true), do: "fill-warning/10 stroke-primary"
+  defp step_bg_class(:queued, false), do: "fill-warning/5 stroke-warning/50"
+  defp step_bg_class(:queued, true), do: "fill-warning/10 stroke-primary"
+  defp step_bg_class(:running, _), do: "fill-info/10 stroke-info"
+  defp step_bg_class(:completed, false), do: "fill-success/10 stroke-success"
+  defp step_bg_class(:completed, true), do: "fill-success/15 stroke-primary"
+  defp step_bg_class(:failed, false), do: "fill-error/10 stroke-error"
+  defp step_bg_class(:failed, true), do: "fill-error/15 stroke-primary"
+  defp step_bg_class(_, false), do: "fill-base-100 stroke-base-300"
+  defp step_bg_class(_, true), do: "fill-base-100 stroke-primary"
 
-  defp node_status_indicator_class(nil), do: "fill-base-300"
-  defp node_status_indicator_class(:pending), do: "fill-warning"
-  defp node_status_indicator_class(:queued), do: "fill-warning"
-  defp node_status_indicator_class(:running), do: "fill-info"
-  defp node_status_indicator_class(:completed), do: "fill-success"
-  defp node_status_indicator_class(:failed), do: "fill-error"
-  defp node_status_indicator_class(_), do: "fill-base-300"
+  defp step_status_indicator_class(nil), do: "fill-base-300"
+  defp step_status_indicator_class(:pending), do: "fill-warning"
+  defp step_status_indicator_class(:queued), do: "fill-warning"
+  defp step_status_indicator_class(:running), do: "fill-info"
+  defp step_status_indicator_class(:completed), do: "fill-success"
+  defp step_status_indicator_class(:failed), do: "fill-error"
+  defp step_status_indicator_class(_), do: "fill-base-300"
 
-  defp node_status_badge_class(:pending), do: "badge-warning"
-  defp node_status_badge_class(:queued), do: "badge-warning"
-  defp node_status_badge_class(:running), do: "badge-info"
-  defp node_status_badge_class(:completed), do: "badge-success"
-  defp node_status_badge_class(:failed), do: "badge-error"
-  defp node_status_badge_class(_), do: "badge-ghost"
+  defp step_status_badge_class(:pending), do: "badge-warning"
+  defp step_status_badge_class(:queued), do: "badge-warning"
+  defp step_status_badge_class(:running), do: "badge-info"
+  defp step_status_badge_class(:completed), do: "badge-success"
+  defp step_status_badge_class(:failed), do: "badge-error"
+  defp step_status_badge_class(_), do: "badge-ghost"
 
-  defp node_type_label(type_id) do
+  defp step_type_label(type_id) do
     type_id
     |> String.replace("_", " ")
     |> String.split()

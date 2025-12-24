@@ -3,18 +3,18 @@ defmodule Imgd.Runtime.RunicAdapterTest do
 
   alias Runic.Workflow
   alias Imgd.Runtime.RunicAdapter
-  alias Imgd.Workflows.Embeds.{Connection, Node}
+  alias Imgd.Workflows.Embeds.{Connection, Step}
 
   describe "to_runic_workflow/2" do
-    test "respects dependency order even when nodes are unordered" do
+    test "respects dependency order even when steps are unordered" do
       source = %{
         id: "unordered_wf",
-        nodes: [
-          %Node{id: "node_2", type_id: "debug", name: "Second", config: %{}},
-          %Node{id: "node_1", type_id: "debug", name: "First", config: %{}}
+        steps: [
+          %Step{id: "step_2", type_id: "debug", name: "Second", config: %{}},
+          %Step{id: "step_1", type_id: "debug", name: "First", config: %{}}
         ],
         connections: [
-          %Connection{id: "conn_1", source_node_id: "node_1", target_node_id: "node_2"}
+          %Connection{id: "conn_1", source_step_id: "step_1", target_step_id: "step_2"}
         ]
       }
 
@@ -29,12 +29,12 @@ defmodule Imgd.Runtime.RunicAdapterTest do
     end
   end
 
-  describe "condition nodes" do
+  describe "condition steps" do
     test "passes input through when the condition is true" do
       source = %{
         id: "condition_true",
-        nodes: [
-          %Node{
+        steps: [
+          %Step{
             id: "cond_1",
             type_id: "condition",
             name: "Condition",
@@ -60,8 +60,8 @@ defmodule Imgd.Runtime.RunicAdapterTest do
     test "produces no output when the condition is false" do
       source = %{
         id: "condition_false",
-        nodes: [
-          %Node{
+        steps: [
+          %Step{
             id: "cond_1",
             type_id: "condition",
             name: "Condition",

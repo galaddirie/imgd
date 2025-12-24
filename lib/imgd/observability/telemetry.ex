@@ -7,7 +7,7 @@ defmodule Imgd.Observability.Telemetry do
   All engine events follow the pattern `[:imgd, :engine, <domain>, <action>]`:
 
   - `[:imgd, :engine, :execution, :start | :stop | :exception]`
-  - `[:imgd, :engine, :node, :start | :stop | :exception | :retry]`
+  - `[:imgd, :engine, :step, :start | :stop | :exception | :retry]`
   - `[:imgd, :engine, :expression, :evaluate]`
   - `[:imgd, :engine, :stats, :poll]`
 
@@ -57,40 +57,40 @@ defmodule Imgd.Observability.Telemetry do
        }},
 
       # ========================================================================
-      # Node Events
+      # Step Events
       # ========================================================================
-      {[:imgd, :engine, :node, :start], %{system_time: :integer, queue_time_ms: :integer},
+      {[:imgd, :engine, :step, :start], %{system_time: :integer, queue_time_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
-         node_id: :string,
-         node_type_id: :string,
+         step_id: :string,
+         step_type_id: :string,
          attempt: :integer
        }},
-      {[:imgd, :engine, :node, :stop], %{duration_ms: :integer},
+      {[:imgd, :engine, :step, :stop], %{duration_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
-         node_id: :string,
-         node_type_id: :string,
+         step_id: :string,
+         step_type_id: :string,
          attempt: :integer,
          status: :atom
        }},
-      {[:imgd, :engine, :node, :exception], %{duration_ms: :integer},
+      {[:imgd, :engine, :step, :exception], %{duration_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
-         node_id: :string,
-         node_type_id: :string,
+         step_id: :string,
+         step_type_id: :string,
          attempt: :integer,
          exception: :exception
        }},
-      {[:imgd, :engine, :node, :retry], %{backoff_ms: :integer},
+      {[:imgd, :engine, :step, :retry], %{backoff_ms: :integer},
        %{
          execution_id: :string,
          workflow_id: :string,
-         node_id: :string,
-         node_type_id: :string,
+         step_id: :string,
+         step_type_id: :string,
          attempt: :integer
        }},
 
@@ -111,7 +111,7 @@ defmodule Imgd.Observability.Telemetry do
        %{
          active_executions: :integer,
          pending_executions: :integer,
-         running_nodes: :integer
+         running_steps: :integer
        }, %{}}
     ]
   end
@@ -148,10 +148,10 @@ defmodule Imgd.Observability.Telemetry do
       [:imgd, :engine, :execution, :start],
       [:imgd, :engine, :execution, :stop],
       [:imgd, :engine, :execution, :exception],
-      [:imgd, :engine, :node, :start],
-      [:imgd, :engine, :node, :stop],
-      [:imgd, :engine, :node, :exception],
-      [:imgd, :engine, :node, :retry]
+      [:imgd, :engine, :step, :start],
+      [:imgd, :engine, :step, :stop],
+      [:imgd, :engine, :step, :exception],
+      [:imgd, :engine, :step, :retry]
     ]
 
     :telemetry.attach_many(

@@ -25,11 +25,11 @@ defmodule Imgd.Runtime.Hooks.Observability do
   @type hook_opts :: [execution_id: String.t(), workflow_id: String.t()]
 
   @doc """
-  Counts the number of items produced by a node.
+  Counts the number of items produced by a step.
 
-  For splitter nodes: returns the length of the output list (multiple items)
-  For aggregator nodes: returns 1 (single aggregated result)
-  For other nodes: returns 1 (single output)
+  For splitter steps: returns the length of the output list (multiple items)
+  For aggregator steps: returns 1 (single aggregated result)
+  For other steps: returns 1 (single output)
   For nil/skipped: returns 0
 
   ## Examples
@@ -129,7 +129,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
     workflow = put_step_start_time(workflow, step_name, start_time)
 
     :telemetry.execute(
-      [:imgd, :node, :start],
+      [:imgd, :step, :start],
       %{system_time: System.system_time()},
       %{
         step_name: step_name,
@@ -164,11 +164,11 @@ defmodule Imgd.Runtime.Hooks.Observability do
     duration_us = if start_time, do: System.monotonic_time() - start_time, else: 0
     duration_us = System.convert_time_unit(duration_us, :native, :microsecond)
 
-    # Count output items - splitter nodes can produce multiple items
+    # Count output items - splitter steps can produce multiple items
     output_item_count = do_count_output_items(result_fact.value)
 
     :telemetry.execute(
-      [:imgd, :node, :stop],
+      [:imgd, :step, :stop],
       %{
         duration_us: duration_us,
         system_time: System.system_time(),
@@ -184,7 +184,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
     # Broadcast event for real-time updates using the standardized PubSub
     payload = %{
-      node_id: step_name,
+      step_id: step_name,
       status: :completed,
       output_data: sanitize_for_broadcast(result_fact.value),
       output_item_count: output_item_count,
@@ -192,8 +192,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
       completed_at: DateTime.utc_now()
     }
 
-    Logger.debug("Broadcasting node_completed", payload: payload)
-    Imgd.Executions.PubSub.broadcast_node(:node_completed, execution_id, nil, payload)
+    Logger.debug("Broadcasting step_completed", payload: payload)
+    Imgd.Executions.PubSub.broadcast_step(:step_completed, execution_id, nil, payload)
 
     workflow
   end

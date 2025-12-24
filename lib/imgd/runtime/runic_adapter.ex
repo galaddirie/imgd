@@ -1,6 +1,6 @@
 defmodule Imgd.Runtime.RunicAdapter do
   @moduledoc """
-  Bridges Imgd workflow definitions (Nodes/Connections) with the Runic execution engine.
+  Bridges Imgd workflow definitions (Steps/Connections) with the Runic execution engine.
 
   This adapter handles the conversion of a design-time workflow into a
   run-time Runic `%Workflow{}` struct, which acts as the single source
@@ -9,13 +9,13 @@ defmodule Imgd.Runtime.RunicAdapter do
   ## Design Philosophy
 
   Runic is NOT just a wrapper - it's the execution substrate. This adapter:
-  - Converts Imgd nodes to appropriate Runic components (Steps, Rules, Map, Reduce)
+  - Converts Imgd steps to appropriate Runic components (Steps, Rules, Map, Reduce)
   - Uses Runic's native graph-building API (`Workflow.add/3`)
   - Respects Runic's dataflow semantics (joins, fan-out)
 
-  ## Node Type Mapping
+  ## Step Type Mapping
 
-  | Imgd Node Kind    | Runic Component        |
+  | Imgd Step Kind    | Runic Component        |
   |-------------------|------------------------|
   | :action, :trigger | `Runic.step`           |
   | :transform        | `Runic.step`           |
@@ -26,7 +26,7 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   require Runic
   alias Runic.Workflow
-  alias Imgd.Runtime.Nodes.NodeStep
+  alias Imgd.Runtime.Steps.StepRunner
 
   @type source :: Imgd.Workflows.WorkflowDraft.t() | map()
   @type build_opts :: [
@@ -52,57 +52,53 @@ defmodule Imgd.Runtime.RunicAdapter do
   """
   @spec to_runic_workflow(source(), build_opts()) :: Workflow.t()
   def to_runic_workflow(source, opts \\ []) do
-    nodes = source.nodes
-    connections = source.connections
-    source_id = extract_source_id(source)
-
-    # Build options for NodeStep creation
+    # Build options for StepRunner creation
     step_opts = [
       execution_id: Keyword.get(opts, :execution_id),
-      workflow_id: source_id,
+      workflow_id: extract_source_id(source),
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
       default_compute: Keyword.get(opts, :default_compute)
     ]
 
     # Initialize Runic workflow
-    wrk = Workflow.new(name: "execution_#{source_id}")
+    wrk = Workflow.new(name: "execution_#{extract_source_id(source)}")
 
     # Build lookup for parent relationships
-    parent_lookup = build_parent_lookup(connections)
+    parent_lookup = build_parent_lookup(source.connections)
 
-    # Sort nodes topologically to ensure parents are added before children
-    sorted_nodes = topological_sort_nodes(nodes, connections)
+    # Sort steps topologically to ensure parents are added before children
+    sorted_steps = topological_sort_steps(source.steps, source.connections)
 
-    # Add each node as a Runic component
-    Enum.reduce(sorted_nodes, wrk, fn node, acc ->
-      add_node_to_workflow(node, acc, parent_lookup, step_opts)
+    # Add each step as a Runic component
+    Enum.reduce(sorted_steps, wrk, fn step, acc ->
+      add_step_to_workflow(step, acc, parent_lookup, step_opts)
     end)
   end
 
   @doc """
-  Creates a Runic component from an Imgd node.
+  Creates a Runic component from an Imgd step.
 
-  Dispatches to the appropriate Runic primitive based on node type.
+  Dispatches to the appropriate Runic primitive based on step type.
   """
-  @spec create_component(Imgd.Workflows.Embeds.Node.t(), build_opts()) :: term()
-  def create_component(node, opts \\ []) do
-    case node.type_id do
+  @spec create_component(Imgd.Workflows.Embeds.Step.t(), build_opts()) :: term()
+  def create_component(step, opts \\ []) do
+    case step.type_id do
       "splitter" ->
-        create_splitter(node, opts)
+        create_splitter(step, opts)
 
       "aggregator" ->
-        create_aggregator(node, opts)
+        create_aggregator(step, opts)
 
       "condition" ->
-        create_condition(node, opts)
+        create_condition(step, opts)
 
       "switch" ->
-        create_switch(node, opts)
+        create_switch(step, opts)
 
       _ ->
-        # Default: create a Runic step via NodeStep
-        NodeStep.create(node, opts)
+        # Default: create a Runic step via StepRunner
+        StepRunner.create(step, opts)
     end
   end
 
@@ -110,12 +106,12 @@ defmodule Imgd.Runtime.RunicAdapter do
   # Private: Workflow Building
   # ===========================================================================
 
-  defp add_node_to_workflow(node, workflow, parent_lookup, step_opts) do
-    component = create_component(node, step_opts)
-    parent_ids = Map.get(parent_lookup, node.id, [])
+  defp add_step_to_workflow(step, workflow, parent_lookup, step_opts) do
+    component = create_component(step, step_opts)
+    parent_ids = Map.get(parent_lookup, step.id, [])
 
     if parent_ids == [] do
-      # Root node - add to workflow root
+      # Root step - add to workflow root
       Workflow.add(workflow, component)
     else
       # Connect to first parent
@@ -128,34 +124,35 @@ defmodule Imgd.Runtime.RunicAdapter do
   end
 
   defp extract_source_id(source) do
+    # todo: why?
     Map.get(source, :id) || Map.get(source, :workflow_id) || "unknown"
   end
 
   defp build_parent_lookup(connections) do
-    # Group connections by target_node_id to find parents
-    Enum.group_by(connections, & &1.target_node_id, & &1.source_node_id)
+    # Group connections by target_step_id to find parents
+    Enum.group_by(connections, & &1.target_step_id, & &1.source_step_id)
   end
 
-  defp topological_sort_nodes(nodes, connections) do
+  defp topological_sort_steps(steps, connections) do
     # Build a simple dependency graph and sort
-    node_map = Map.new(nodes, &{&1.id, &1})
-    node_ids = Enum.map(nodes, & &1.id)
+    step_map = Map.new(steps, &{&1.id, &1})
+    step_ids = Enum.map(steps, & &1.id)
 
     # Build adjacency list (parent -> children)
     adjacency =
       Enum.reduce(connections, %{}, fn conn, acc ->
-        Map.update(acc, conn.source_node_id, [conn.target_node_id], &[conn.target_node_id | &1])
+        Map.update(acc, conn.source_step_id, [conn.target_step_id], &[conn.target_step_id | &1])
       end)
 
-    # Find roots (nodes with no incoming edges)
-    children_set = connections |> Enum.map(& &1.target_node_id) |> MapSet.new()
-    roots = Enum.filter(node_ids, &(not MapSet.member?(children_set, &1)))
+    # Find roots (steps with no incoming edges)
+    children_set = connections |> Enum.map(& &1.target_step_id) |> MapSet.new()
+    roots = Enum.filter(step_ids, &(not MapSet.member?(children_set, &1)))
 
     # Simple BFS topological sort
     sorted_ids = topo_sort_bfs(roots, adjacency, MapSet.new(), [])
 
-    # Map back to nodes, preserving order
-    Enum.map(sorted_ids, &Map.get(node_map, &1))
+    # Map back to steps, preserving order
+    Enum.map(sorted_ids, &Map.get(step_map, &1))
   end
 
   defp topo_sort_bfs([], _adjacency, _visited, result), do: Enum.reverse(result)
@@ -175,20 +172,20 @@ defmodule Imgd.Runtime.RunicAdapter do
   # Private: Component Creation
   # ===========================================================================
 
-  defp create_splitter(node, _opts) do
+  defp create_splitter(step, _opts) do
     # Splitter creates a Runic.map that iterates over the input collection
     # The inner step passes each item through unchanged (for downstream processing)
     Runic.map(
       fn item -> item end,
-      name: node.id
+      name: step.id
     )
   end
 
-  defp create_aggregator(node, _opts) do
+  defp create_aggregator(step, _opts) do
     # Aggregator creates a Runic.reduce
     # Note: Runic.reduce is a macro that requires inline anonymous functions
-    operation = Map.get(node.config, "operation", "collect")
-    name = node.id
+    operation = Map.get(step.config, "operation", "collect")
+    name = step.id
 
     case operation do
       "sum" ->
@@ -239,21 +236,21 @@ defmodule Imgd.Runtime.RunicAdapter do
     end
   end
 
-  defp create_condition(node, opts) do
+  defp create_condition(step, opts) do
     # Condition creates a Runic.rule
-    condition_expr = Map.get(node.config, "condition", "true")
+    condition_expr = Map.get(step.config, "condition", "true")
 
     Runic.rule(
-      name: node.id,
+      name: step.id,
       if: fn input -> evaluate_condition(condition_expr, input, opts) end,
       do: fn input -> input end
     )
   end
 
-  defp create_switch(node, opts) do
+  defp create_switch(step, opts) do
     # Switch creates multiple rules, but for now we create a step that
     # outputs a tagged tuple for routing
-    NodeStep.create(node, opts)
+    StepRunner.create(step, opts)
   end
 
   # Condition evaluation helper
