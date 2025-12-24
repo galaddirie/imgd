@@ -91,7 +91,11 @@ defmodule Imgd.MixProject do
 
       # Structured Logging
       {:logger_json, "~> 7.0"},
-      {:logger_file_backend, "~> 0.0.14"}
+      {:logger_file_backend, "~> 0.0.14"},
+
+      # Cluster
+      {:libcluster, "~> 3.5"},
+      {:horde, "~> 0.10.0"}
     ]
   end
 

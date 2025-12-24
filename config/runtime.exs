@@ -48,13 +48,7 @@ if env == :prod do
 end
 
 if env == :prod do
-  config :flame, :backend, FLAME.FlyBackend
-
-  config :flame, FLAME.FlyBackend,
-    token: System.fetch_env!("FLY_API_TOKEN"),
-    cpu_kind: System.get_env("FLY_CPU_KIND", "shared-cpu-1x"),
-    cpus: String.to_integer(System.get_env("FLY_CPUS", "1")),
-    memory_mb: String.to_integer(System.get_env("FLY_MEMORY_MB", "256"))
+  config :flame, :backend, FLAME.LocalBackend
 
   config :imgd, Imgd.Sandbox.Pool,
     min: 1,
@@ -76,6 +70,23 @@ end
 # script that automatically sets the env var above.
 if System.get_env("PHX_SERVER") do
   config :imgd, ImgdWeb.Endpoint, server: true
+end
+
+if config_env() != :test do
+  # Use Gossip strategy for development/docker
+  config :libcluster,
+    topologies: [
+      default: [
+        strategy: Cluster.Strategy.Gossip,
+        config: [
+          port: 45892,
+          if_addr: "0.0.0.0",
+          multicast_addr: "230.1.1.251",
+          # Needed for Docker networks sometimes
+          broadcast_only: true
+        ]
+      ]
+    ]
 end
 
 config :imgd, ImgdWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]

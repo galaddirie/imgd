@@ -13,6 +13,8 @@ defmodule Imgd.Application do
 
     children =
       [
+        # Start the Cluster Supervisor
+        Imgd.ClusterSupervisor,
         ImgdWeb.Telemetry,
         Imgd.Observability.PromEx,
         Imgd.Repo,
