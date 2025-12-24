@@ -65,7 +65,7 @@ websocket trigger ( on websocket connection open), nodes to proccess websocket e
 
 stream trigger also
 
-we need to figure our how we modle this, is each event a workflow execution or only one execution for the entire stream, if so how do we model workflows? special workflow event "trigger" nodes, basically after the initial websocket connection open event, the workflow keeps proccessing events using the event declared nodes as the new trigger? maybe not, there should be an elegent solution to this
+we need to figure our how we model this, is each event a workflow execution or only one execution for the entire stream, if so how do we model workflows? special workflow event "trigger" nodes, basically after the initial websocket connection open event, the workflow keeps proccessing events using the event declared nodes as the new trigger? maybe not, there should be an elegent solution to this
 
 we may need an option to disable things that add overhead like telemetry, metrics, logging, etc. for these types of workflows
 
