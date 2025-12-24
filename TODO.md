@@ -52,3 +52,22 @@ Only 1 node with the same name can have this label so V1.HTTP AND V2.HTTP confli
 
 
 execution registry 
+
+fix edit oeprations client side uuid
+
+
+update execution worker docs 
+
+
+comlex triggers to solve 
+
+websocket trigger ( on websocket connection open), nodes to proccess websocket events  - ex a game server, the workflow keeps proccessing events until the websocket is closed
+
+stream trigger also
+
+we need to figure our how we modle this, is each event a workflow execution or only one execution for the entire stream, if so how do we model workflows? special workflow event "trigger" nodes, basically after the initial websocket connection open event, the workflow keeps proccessing events using the event declared nodes as the new trigger? maybe not, there should be an elegent solution to this
+
+we may need an option to disable things that add overhead like telemetry, metrics, logging, etc. for these types of workflows
+
+
+Optimization: compile the workflows so we dont need to evaluate templates at runtime - this will drop 3-4ms per expression evaluation. workflow versions will have the compiled templates stored in the database. drafts are compiled on evey run
