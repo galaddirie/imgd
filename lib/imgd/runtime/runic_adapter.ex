@@ -42,7 +42,9 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   - `:execution_id` - The execution ID for context
   - `:variables` - Workflow-level variables for expressions
+  - `:variables` - Workflow-level variables for experiments
   - `:metadata` - Execution metadata
+  - `:default_compute` - Default compute target for all steps
 
   ## Returns
 
@@ -59,7 +61,8 @@ defmodule Imgd.Runtime.RunicAdapter do
       execution_id: Keyword.get(opts, :execution_id),
       workflow_id: source_id,
       variables: Keyword.get(opts, :variables, %{}),
-      metadata: Keyword.get(opts, :metadata, %{})
+      metadata: Keyword.get(opts, :metadata, %{}),
+      default_compute: Keyword.get(opts, :default_compute)
     ]
 
     # Initialize Runic workflow

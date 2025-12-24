@@ -50,9 +50,29 @@ defmodule Imgd.Runtime.Nodes.NodeStep do
   def create(node, opts \\ []) do
     # Capture node and opts in the closure
     # Runic will call this function with the input from parent steps
+
+    # Determine execution target
+    # Priority: Node Config > Workflow Default (via opts) > Local
+    target = determine_compute_target(node, opts)
+
     step =
       Runic.step(
-        fn input -> execute_with_context(node, input, opts) end,
+        fn input ->
+          # Dispatch execution to the target
+          # We pass the MFA: {NodeStep, :execute_with_context, [node, input, opts]}
+          case Imgd.Compute.run(target, __MODULE__, :execute_with_context, [node, input, opts]) do
+            {:ok, result} ->
+              result
+
+            {:error, {:throw, reason}} ->
+              # Propagate thrown errors (e.g. from ClusterNode catch)
+              throw(reason)
+
+            {:error, reason} ->
+              # Wrap other errors (e.g. RPC failure)
+              throw({:node_error, node.id, {:compute_error, reason}})
+          end
+        end,
         name: node.id
       )
 
@@ -60,6 +80,18 @@ defmodule Imgd.Runtime.Nodes.NodeStep do
     # We use phash2 on the combination of the original hash and the node id
     unique_hash = :erlang.phash2({step.hash, node.id}, 4_294_967_296)
     %{step | hash: unique_hash}
+  end
+
+  defp determine_compute_target(node, opts) do
+    # check node config first
+    node_config_target = Map.get(node.config, "compute")
+
+    if node_config_target do
+      Imgd.Compute.Target.parse(node_config_target)
+    else
+      # check workflow default
+      Keyword.get(opts, :default_compute, Imgd.Compute.Target.local())
+    end
   end
 
   @doc """
