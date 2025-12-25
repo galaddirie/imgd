@@ -4,14 +4,14 @@
 - [ ] Credentials system
 - [ ] API keys management
 - [ ] Sub-workflows
-
+- [ ] Add request metadata to expression context ( user id, request id, headers, body, etc)
 ### Editor UX
 - [ ] Add **Save** button
 - [ ] Add **Publish** button
 - [ ] Unsaved changes indicator + autosave
 - [ ] Undo/redo (unsaved changes remain in session local storage)
 - [ ] Add error highlighting to Expression UI
-- [ ] Fix edit operations (client-side UUID)
+- [ ] Fix edit operations (remove client-side UUID)
 
 ### Data-flow rules
 - [ ] fix:Only allow expressions to access **direct upstream node** data
