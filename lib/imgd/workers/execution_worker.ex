@@ -1,6 +1,6 @@
 defmodule Imgd.Workers.ExecutionWorker do
   @moduledoc """
-  Oban worker for executing workflows.
+  Oban worker for executing workflows through the Runtime Execution Supervisor.
 
   ## Role in Architecture
 
@@ -8,37 +8,36 @@ defmodule Imgd.Workers.ExecutionWorker do
 
   - Receives Oban jobs from the queue
   - Extracts and restores OpenTelemetry trace context for distributed tracing
-  - Loads the Execution record with preloaded associations
-  - Guards against re-running terminal executions (completed/failed/cancelled/timeout)
-  - Delegates actual workflow execution to `WorkflowRunner.run/1`
-  - Returns Oban-compatible results (:ok, {:error, ...}, {:cancel, ...})
+  - Starts or attaches to execution processes via `Imgd.Runtime.Execution.Supervisor`
+  - Monitors execution processes and waits for completion
+  - Returns Oban-compatible results (:ok, {:error, ...})
 
-  ## Separation of Concerns
+  ## Execution Flow
 
-  Unlike `WorkflowRunner` which is the core execution engine, this worker focuses on:
+  1. **Job Reception**: Receives job with `execution_id` from Oban queue
+  2. **Trace Context**: Restores distributed tracing context for observability
+  3. **Process Management**: Attempts to start execution via supervisor, or attaches to existing process
+  4. **Monitoring**: Monitors the execution process and waits for completion
+  5. **Result Translation**: Translates process exit reasons to Oban job results
 
-  | Concern | ExecutionWorker | WorkflowRunner |
-  |---------|-----------------|----------------|
-  | Job queuing/retries | ✓ | |
-  | Trace context propagation | ✓ | |
-  | Loading records from DB | ✓ | |
-  | Execution state machine | | ✓ |
-  | Timeout handling | | ✓ |
-  | PubSub broadcasts | | ✓ |
-  | Runic integration | | ✓ |
+  ## Process Lifecycle Handling
 
-  This separation allows `WorkflowRunner.run/1` to be called directly for synchronous execution
-  (like in tests or preview mode) while this worker provides the production async execution path.
+  The worker handles different execution process termination scenarios:
+
+  - `:normal` - Execution completed successfully
+  - `:shutdown` - Execution was gracefully stopped
+  - Other reasons - Execution failed or crashed (logged as error)
+
 
   ## Job Arguments
 
   - `execution_id` - The UUID of the execution to run
-  - `trace_context` - Serialized OpenTelemetry context for distributed tracing
+  - `trace_context` - Serialized OpenTelemetry context for distributed tracing (optional)
 
   ## Configuration
 
   - Queue: `:executions`
-  - Max attempts: 1 (manual retry only per design decision)
+  - Max attempts: 1 (failures are terminal, no automatic retries)
   - Unique: prevents duplicate jobs for same execution within 60 seconds
   """
 
