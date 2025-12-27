@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import ThemeSelector from '../ThemeSelector.vue'
+import ThemeSelector from '../../ThemeSelector.vue'
 import Avatar from '../ui/Avatar.vue'
 import type { UserPresence } from '@/types/workflow'
 import {

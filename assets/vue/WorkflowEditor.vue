@@ -6,17 +6,18 @@ import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 
-import NodeLibrary from './flow/NodeLibrary.vue'
-import StepConfigModal from './flow/StepConfigModal.vue'
-import EditorToolbar from './flow/EditorToolbar.vue'
-import ExecutionTracePanel from './flow/ExecutionTracePanel.vue'
-import WorkflowStepNode from './flow/Node.vue'
-import CustomEdge from './flow/Edge.vue'
-import ContextMenu from './ui/ContextMenu.vue'
+import NodeLibrary from './components/flow/NodeLibrary.vue'
+import StepConfigModal from './components/flow/StepConfigModal.vue'
+import EditorToolbar from './components/flow/EditorToolbar.vue'
+import ExecutionTracePanel from './components/flow/ExecutionTracePanel.vue'
+import WorkflowStepNode from './components/flow/Node.vue'
+import CustomEdge from './components/flow/Edge.vue'
+import ContextMenu from './components/ui/ContextMenu.vue'
 import type { MenuItem } from './ui/ContextMenu.vue'
 
-import { oklchToHex } from '../lib/color'
-import { useLayout } from '../lib/useLayout'
+import { useClientStore } from './store/clientStore'
+import { oklchToHex } from './lib/color'
+import { useLayout } from './lib/useLayout'
 
 import {
   TrashIcon,
@@ -31,7 +32,7 @@ import {
   ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
 import type {
-  WorkflowDocument,
+  Workflow,
   Step,
   Connection,
   StepType,
@@ -41,7 +42,7 @@ import type {
   StepExecution,
   EditorState,
   UserPresence,
-} from '@/types/workflow'
+} from './types/workflow'
 
 // =============================================================================
 // Props - Data from LiveView via LiveVue
@@ -49,7 +50,7 @@ import type {
 
 interface Props {
   // Workflow document
-  workflow?: WorkflowDocument
+  workflow: Workflow
 
   // Step type registry
   stepTypes?: StepType[]
@@ -64,51 +65,12 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  workflow: undefined,
   stepTypes: () => [],
   execution: null,
   stepExecutions: () => [],
   editorState: undefined,
   presences: () => [],
 })
-
-// =============================================================================
-// Mock User Presence Data (for demonstration)
-// =============================================================================
-
-// Mock user presences for demonstration
-const mockPresences = ref<UserPresence[]>([
-  {
-    user: {
-      id: 'user-1',
-      email: 'alice@example.com',
-      name: 'Alice Johnson'
-    },
-    selected_steps: [],
-    joined_at: new Date().toISOString()
-  },
-  {
-    user: {
-      id: 'user-2',
-      email: 'bob@example.com',
-      name: 'Bob Smith'
-    },
-    selected_steps: [],
-    joined_at: new Date(Date.now() - 5 * 60 * 1000).toISOString() // 5 minutes ago
-  },
-  {
-    user: {
-      id: 'user-3',
-      email: 'carol@example.com',
-      name: 'Carol Williams'
-    },
-    selected_steps: [],
-    joined_at: new Date(Date.now() - 10 * 60 * 1000).toISOString() // 10 minutes ago
-  }
-])
-
-// Use props.presences if available, otherwise use mock data
-const userPresences = computed(() => props.presences.length > 0 ? props.presences : mockPresences.value)
 
 // =============================================================================
 // Emits - Events to LiveView via LiveVue
@@ -141,13 +103,14 @@ const emit = defineEmits<{
 }>()
 
 // =============================================================================
-// Vue Flow Setup
+// State Management (Pinia & Vue Flow)
 // =============================================================================
+
+const store = useClientStore()
 
 const {
   onPaneClick,
   onConnect,
-  addEdges,
   onNodeDragStop,
   project,
   vueFlowRef,
@@ -168,24 +131,8 @@ const edgeTypes = {
   custom: CustomEdge,
 }
 
-// =============================================================================
-// Local State
-// =============================================================================
-
-const isLibraryOpen = ref(true)
-const isTracePanelExpanded = ref(true)
-const selectedNode = ref<Node<StepNodeData> | null>(null)
-const isModalOpen = ref(false)
+// Local transient state
 const clickTimer = ref<ReturnType<typeof setTimeout> | null>(null)
-
-// Context Menu State
-const contextMenu = ref({
-  show: false,
-  x: 0,
-  y: 0,
-  targetNode: null as Node<StepNodeData> | null,
-  targetType: 'pane' as 'node' | 'pane'
-})
 
 // =============================================================================
 // Computed - Transform backend data to Vue Flow format
@@ -193,9 +140,9 @@ const contextMenu = ref({
 
 // Convert backend steps to Vue Flow nodes
 const nodes = computed<Node<StepNodeData>[]>(() => {
-  if (!props.workflow?.steps) return mockNodes.value
+  const steps = props.workflow.draft?.steps || []
 
-  return props.workflow.steps.map(step => {
+  return steps.map(step => {
     const stepType = props.stepTypes.find(st => st.id === step.type_id)
     const stepExecution = props.stepExecutions.find(se => se.step_id === step.id)
     const isPinned = props.editorState?.pinned_outputs?.[step.id] !== undefined
@@ -231,9 +178,9 @@ const nodes = computed<Node<StepNodeData>[]>(() => {
 
 // Convert backend connections to Vue Flow edges
 const edges = computed<Edge<EdgeData>[]>(() => {
-  if (!props.workflow?.connections) return mockEdges.value
+  const connections = props.workflow.draft?.connections || []
 
-  return props.workflow.connections.map(conn => {
+  return connections.map(conn => {
     const isAnimated = props.stepExecutions.some(
       se => se.step_id === conn.source_step_id && se.status === 'running'
     )
@@ -252,6 +199,12 @@ const edges = computed<Edge<EdgeData>[]>(() => {
   })
 })
 
+// Current selected node object
+const selectedNode = computed<Node<StepNodeData> | null>(() => {
+  if (!store.selectedNodeId) return null
+  return nodes.value.find(n => n.id === store.selectedNodeId) || null
+})
+
 // Get step type for selected node
 const selectedStepType = computed<StepType | null>(() => {
   if (!selectedNode.value) return null
@@ -264,10 +217,13 @@ const tidyLabel = computed(() => selectedCount.value > 1 ? 'Tidy Up Selection' :
 
 // Context menu items based on target
 const contextMenuItems = computed<MenuItem[]>(() => {
-  if (contextMenu.value.targetType === 'node' && contextMenu.value.targetNode) {
-    const node = contextMenu.value.targetNode
-    const isDisabled = node.data?.disabled
-    const isPinned = node.data?.pinned
+  const targetType = store.contextMenu.targetType
+  const targetNodeId = store.contextMenu.targetNodeId
+
+  if (targetType === 'node' && targetNodeId) {
+    const node = nodes.value.find(n => n.id === targetNodeId)
+    const isDisabled = node?.data?.disabled
+    const isPinned = node?.data?.pinned
 
     return [
       { id: 'edit', label: 'Edit Step', icon: Cog6ToothIcon, shortcut: 'Enter' },
@@ -305,121 +261,31 @@ const contextMenuItems = computed<MenuItem[]>(() => {
 })
 
 // =============================================================================
-// Mock Data (for development without backend)
+// Validation Helpers
 // =============================================================================
 
-const mockNodes = ref<Node<StepNodeData>[]>([
-  {
-    id: 'trigger_1',
-    type: 'step',
-    position: { x: 0, y: 0 },
-    data: {
-      id: 'trigger_1',
-      type_id: 'manual_input',
-      name: 'Manual Trigger',
-      icon: 'hero-cursor-arrow-rays',
-      step_kind: 'trigger',
-      category: 'Triggers',
-      status: 'completed',
-      hasInput: false,
-      hasOutput: true,
-      stats: { in: 1, out: 1, duration_us: 120, bytes: 42 }
-    },
-  },
-  {
-    id: 'step_http',
-    type: 'step',
-    position: { x: 0, y: 150 },
-    data: {
-      id: 'step_http',
-      type_id: 'http_request',
-      name: 'Fetch User Data',
-      icon: 'hero-globe-alt',
-      step_kind: 'action',
-      category: 'Integrations',
-      status: 'completed',
-      hasInput: true,
-      hasOutput: true,
-      config: { url: 'https://api.example.com/users' },
-      stats: { in: 1, out: 1, duration_us: 245000, bytes: 2048 }
-    },
-  },
-  {
-    id: 'step_condition',
-    type: 'step',
-    position: { x: 0, y: 300 },
-    data: {
-      id: 'step_condition',
-      type_id: 'condition',
-      name: 'Check Status',
-      icon: 'hero-arrows-right-left',
-      step_kind: 'control_flow',
-      category: 'Control Flow',
-      status: 'completed',
-      hasInput: true,
-      hasOutput: true,
-      config: { condition: '{{ json.status }} == "active"' },
-      stats: { in: 1, out: 1, duration_us: 85, bytes: 1 }
-    },
-  },
-  {
-    id: 'step_transform',
-    type: 'step',
-    position: { x: -150, y: 450 },
-    data: {
-      id: 'step_transform',
-      type_id: 'data_transform',
-      name: 'Format Response',
-      icon: 'hero-adjustments-horizontal',
-      step_kind: 'transform',
-      category: 'Transform',
-      status: 'running',
-      hasInput: true,
-      hasOutput: true,
-    },
-  },
-  {
-    id: 'step_debug',
-    type: 'step',
-    position: { x: 150, y: 450 },
-    data: {
-      id: 'step_debug',
-      type_id: 'debug',
-      name: 'Log Skipped',
-      icon: 'hero-bug-ant',
-      step_kind: 'action',
-      category: 'Utilities',
-      status: 'skipped',
-      hasInput: true,
-      hasOutput: true,
-    },
-  },
-  {
-    id: 'step_output',
-    type: 'step',
-    position: { x: -150, y: 600 },
-    data: {
-      id: 'step_output',
-      type_id: 'data_output',
-      name: 'Final Output',
-      icon: 'hero-arrow-down-tray',
-      step_kind: 'action',
-      category: 'Output',
-      status: 'pending',
-      hasInput: true,
-      hasOutput: false,
-      pinned: true,
-    },
-  },
-])
+const isValidConnection = (connection: VueFlowConnection) => {
+  // Source cannot be target
+  if (connection.source === connection.target) return false
 
-const mockEdges = ref<Edge<EdgeData>[]>([
-  { id: 'conn_1', source: 'trigger_1', target: 'step_http', sourceHandle: 'main', targetHandle: 'main', type: 'custom' },
-  { id: 'conn_2', source: 'step_http', target: 'step_condition', sourceHandle: 'main', targetHandle: 'main', type: 'custom' },
-  { id: 'conn_3', source: 'step_condition', target: 'step_transform', sourceHandle: 'main', targetHandle: 'main', type: 'custom', data: { animated: true } },
-  { id: 'conn_4', source: 'step_condition', target: 'step_debug', sourceHandle: 'main', targetHandle: 'main', type: 'custom' },
-  { id: 'conn_5', source: 'step_transform', target: 'step_output', sourceHandle: 'main', targetHandle: 'main', type: 'custom', data: { animated: true } },
-])
+  // Basic cycle detection (cannot connect back to an ancestor)
+  const currentEdges = getEdges.value
+
+  const hasPath = (current: string, target: string, visited: Set<string> = new Set()): boolean => {
+    if (current === target) return true
+    if (visited.has(current)) return false
+    visited.add(current)
+
+    const outgoing = currentEdges.filter(e => e.source === current)
+    for (const edge of outgoing) {
+      if (hasPath(edge.target, target, visited)) return true
+    }
+    return false
+  }
+
+  // If there is already a path from target to source, adding this edge creates a cycle
+  return !hasPath(connection.target, connection.source)
+}
 
 // =============================================================================
 // Event Handlers
@@ -468,36 +334,18 @@ const alignLayoutPositions = (originalNodes: LayoutNode[], layoutNodes: LayoutNo
 const applyLayoutPositions = (layoutNodes: LayoutNode[]) => {
   if (!layoutNodes.length) return
 
-  const layoutMap = new Map(layoutNodes.map(node => [node.id, node]))
-
   layoutNodes.forEach(node => {
     updateNode(node.id, {
       position: node.position,
       targetPosition: node.targetPosition,
       sourcePosition: node.sourcePosition,
     })
+
+    emit('move_step', {
+      step_id: node.id,
+      position: node.position,
+    })
   })
-
-  if (props.workflow) {
-    layoutNodes.forEach(node => {
-      emit('move_step', {
-        step_id: node.id,
-        position: node.position,
-      })
-    })
-  } else {
-    mockNodes.value = mockNodes.value.map(existing => {
-      const updated = layoutMap.get(existing.id)
-      if (!updated) return existing
-
-      return {
-        ...existing,
-        position: updated.position,
-        targetPosition: updated.targetPosition ?? existing.targetPosition,
-        sourcePosition: updated.sourcePosition ?? existing.sourcePosition,
-      }
-    })
-  }
 }
 
 const handleLayout = () => {
@@ -532,10 +380,10 @@ const handleNodeClick = (event: { node: Node<StepNodeData> }) => {
   }
 
   clickTimer.value = setTimeout(() => {
-    if (selectedNode.value?.id === node.id) {
-      isModalOpen.value = true
+    if (store.selectedNodeId === node.id) {
+      store.isConfigModalOpen = true
     } else {
-      selectedNode.value = node
+      store.selectNode(node.id)
     }
     clickTimer.value = null
   }, 250)
@@ -546,8 +394,7 @@ const handleNodeDoubleClick = (event: { node: Node<StepNodeData> }) => {
     clearTimeout(clickTimer.value)
     clickTimer.value = null
   }
-  selectedNode.value = event.node
-  isModalOpen.value = true
+  store.openConfigModal(event.node.id)
 }
 
 type SelectionContextMenuEvent = {
@@ -581,17 +428,11 @@ const findNodeUnderCursor = (event: MouseEvent, nodes: GraphNode<StepNodeData>[]
   }) ?? null
 }
 
-const handleNodeContextMenu = (event: any) => {
+const handleNodeContextMenu = (event: { event: MouseEvent; node: Node<StepNodeData> }) => {
   event.event.preventDefault()
   event.event.stopPropagation()
 
-  contextMenu.value = {
-    show: true,
-    x: event.event.clientX,
-    y: event.event.clientY,
-    targetNode: event.node,
-    targetType: 'node'
-  }
+  store.showContextMenu(event.event.clientX, event.event.clientY, 'node', event.node.id)
 }
 
 const handleSelectionContextMenu = ({ event, nodes }: SelectionContextMenuEvent) => {
@@ -600,112 +441,70 @@ const handleSelectionContextMenu = ({ event, nodes }: SelectionContextMenuEvent)
 
   const targetNode = findNodeUnderCursor(event, nodes) ?? nodes[0] ?? null
 
-  contextMenu.value = {
-    show: true,
-    x: event.clientX,
-    y: event.clientY,
-    targetNode,
-    targetType: nodes.length ? 'node' : 'pane'
-  }
+  store.showContextMenu(event.clientX, event.clientY, nodes.length ? 'node' : 'pane', targetNode?.id)
 }
 
 const handlePaneContextMenu = (event: MouseEvent) => {
   event.preventDefault()
-
-  contextMenu.value = {
-    show: true,
-    x: event.clientX,
-    y: event.clientY,
-    targetNode: null,
-    targetType: 'pane'
-  }
+  store.showContextMenu(event.clientX, event.clientY, 'pane')
 }
 
 const handleContextMenuSelect = (itemId: string) => {
-  const node = contextMenu.value.targetNode
+  const nodeId = store.contextMenu.targetNodeId
 
   switch (itemId) {
     case 'edit':
-      if (node) {
-        selectedNode.value = node
-        isModalOpen.value = true
+      if (nodeId) {
+        store.openConfigModal(nodeId)
       }
       break
 
     case 'delete':
-      if (node) {
-        handleDeleteStep(node.id)
+      if (nodeId) {
+        handleDeleteStep(nodeId)
       }
       break
 
     case 'duplicate':
-      if (node) {
-        const newId = `${node.data.type_id}_${Date.now()}`
-        const newNode: Node<StepNodeData> = {
-          id: newId,
-          type: 'step',
-          position: { x: node.position.x + 50, y: node.position.y + 50 },
-          data: {
-            ...node.data,
-            id: newId,
-            name: `${node.data.name} (Copy)`,
-            status: 'pending',
-          }
-        }
-        if (props.workflow) {
+      if (nodeId) {
+        const node = nodes.value.find(n => n.id === nodeId)
+        if (node) {
           emit('add_step', {
             type_id: node.data.type_id,
-            position: newNode.position,
+            position: { x: node.position.x + 50, y: node.position.y + 50 },
           })
-        } else {
-          // Optimistic update for dev mode
-          mockNodes.value = [...mockNodes.value, newNode]
         }
       }
       break
 
     case 'toggle-disable':
-      if (node) {
-        if (node.data.disabled) {
-          emit('enable_step', { step_id: node.id })
+      if (nodeId) {
+        const node = nodes.value.find(n => n.id === nodeId)
+        if (node?.data.disabled) {
+          emit('enable_step', { step_id: nodeId })
         } else {
-          emit('disable_step', { step_id: node.id, mode: 'skip' })
-        }
-
-        // Optimistic update for dev
-        if (!props.workflow) {
-          const idx = mockNodes.value.findIndex(n => n.id === node.id)
-          if (idx !== -1) {
-            mockNodes.value[idx].data.disabled = !mockNodes.value[idx].data.disabled
-          }
+          emit('disable_step', { step_id: nodeId, mode: 'skip' })
         }
       }
       break
 
     case 'toggle-pin':
-      if (node) {
-        if (node.data.pinned) {
-          emit('unpin_output', { step_id: node.id })
+      if (nodeId) {
+        const node = nodes.value.find(n => n.id === nodeId)
+        if (node?.data.pinned) {
+          emit('unpin_output', { step_id: nodeId })
         } else {
-          emit('pin_output', { step_id: node.id })
-        }
-
-        // Optimistic update for dev
-        if (!props.workflow) {
-          const idx = mockNodes.value.findIndex(n => n.id === node.id)
-          if (idx !== -1) {
-            mockNodes.value[idx].data.pinned = !mockNodes.value[idx].data.pinned
-          }
+          emit('pin_output', { step_id: nodeId })
         }
       }
       break
 
     case 'add-step':
-      isLibraryOpen.value = true
+      store.isLibraryOpen = true
       break
 
     case 'fit-view':
-      // Would call fitView from useVueFlow
+      // fitView()
       break
 
     case 'tidy-layout':
@@ -713,15 +512,15 @@ const handleContextMenuSelect = (itemId: string) => {
       break
 
     case 'run-from':
-      console.log('Run from:', node?.id)
+      console.log('Run from:', nodeId)
       break
   }
 
-  contextMenu.value.show = false
+  store.hideContextMenu()
 }
 
 const closeContextMenu = () => {
-  contextMenu.value.show = false
+  store.hideContextMenu()
 }
 
 const handleDragOver = (event: DragEvent) => {
@@ -748,11 +547,16 @@ const handleDrop = (event: DragEvent) => {
 }
 
 onPaneClick(() => {
-  closeContextMenu()
-  // Keep selection for modal context
+  store.hideContextMenu()
 })
 
 onConnect((params: VueFlowConnection) => {
+  // Validate connection
+  if (!isValidConnection(params)) {
+    console.warn('Invalid connection: cycles are not allowed.')
+    return
+  }
+
   // Emit to LiveView
   emit('add_connection', {
     source_step_id: params.source,
@@ -760,11 +564,6 @@ onConnect((params: VueFlowConnection) => {
     source_output: params.sourceHandle ?? 'main',
     target_input: params.targetHandle ?? 'main',
   })
-
-  // Optimistic update for dev mode
-  if (!props.workflow) {
-    addEdges([{ ...params, type: 'custom' }])
-  }
 })
 
 type EdgeUpdatePayload = {
@@ -775,6 +574,12 @@ type EdgeUpdatePayload = {
 const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
   if (!connection?.source || !connection?.target) return
 
+  // Validate connection
+  if (!isValidConnection(connection)) {
+    console.warn('Invalid connection: cycles are not allowed.')
+    return
+  }
+
   const normalizedConnection = {
     ...connection,
     sourceHandle: connection.sourceHandle ?? edge.sourceHandle ?? 'main',
@@ -783,14 +588,6 @@ const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
 
   updateEdge(edge, normalizedConnection, false)
 
-  const updatedEdge = {
-    ...edge,
-    source: normalizedConnection.source,
-    target: normalizedConnection.target,
-    sourceHandle: normalizedConnection.sourceHandle,
-    targetHandle: normalizedConnection.targetHandle,
-  }
-
   emit('remove_connection', { connection_id: edge.id })
   emit('add_connection', {
     source_step_id: normalizedConnection.source,
@@ -798,15 +595,9 @@ const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
     source_output: normalizedConnection.sourceHandle ?? null,
     target_input: normalizedConnection.targetHandle ?? null,
   })
-
-  if (!props.workflow) {
-    mockEdges.value = mockEdges.value.map(e =>
-      e.id === edge.id ? { ...updatedEdge, type: 'custom' } : e
-    )
-  }
 }
 
-onNodeDragStop((event) => {
+onNodeDragStop((event: { nodes: Node<StepNodeData>[] }) => {
   for (const node of event.nodes) {
     emit('move_step', {
       step_id: node.id,
@@ -833,28 +624,10 @@ const handleSaveConfig = (payload: {
       notes: payload.notes,
     },
   })
-
-  // Optimistic update for dev
-  if (!props.workflow) {
-    const node = mockNodes.value.find(n => n.id === payload.id)
-    if (node) {
-      node.data.name = payload.name
-      node.data.config = payload.config
-      node.data.notes = payload.notes
-    }
-  }
 }
 
 const handleDeleteStep = (stepId: string) => {
   emit('remove_step', { step_id: stepId })
-
-  // Optimistic update for dev
-  if (!props.workflow) {
-    mockNodes.value = mockNodes.value.filter(n => n.id !== stepId)
-    mockEdges.value = mockEdges.value.filter(
-      e => e.source !== stepId && e.target !== stepId
-    )
-  }
 }
 
 // =============================================================================
@@ -862,36 +635,27 @@ const handleDeleteStep = (stepId: string) => {
 // =============================================================================
 
 const handleSave = () => emit('save_workflow')
-
 const handleRunTest = () => emit('run_test')
-
 const handleCancelExecution = () => emit('cancel_execution')
 
-const toggleTracePanel = () => {
-  isTracePanelExpanded.value = !isTracePanelExpanded.value
-}
-
 const selectTraceStep = (stepId: string) => {
-  const node = nodes.value.find(n => n.id === stepId)
-  if (node) {
-    selectedNode.value = node
-  }
+  store.selectNode(stepId)
 }
 </script>
 
 <template>
   <div class="flex flex-col h-screen overflow-hidden bg-base-300 text-base-content font-sans">
     <!-- Top Toolbar -->
-    <EditorToolbar :workflow-name="workflow?.name ?? 'User Onboarding Flow'" :is-saving="false"
-      :presences="userPresences" @save="handleSave" @run-test="handleRunTest" />
+    <EditorToolbar :workflow-name="workflow?.name ?? 'Untitled Workflow'" :is-saving="false"
+      :presences="presences" @save="handleSave" @run-test="handleRunTest" />
 
     <div class="flex-1 flex overflow-hidden relative">
       <!-- Left Sidebar: Node Library -->
-      <NodeLibrary v-if="isLibraryOpen" :step-types="stepTypes" class="shrink-0" @collapse="isLibraryOpen = false" />
+      <NodeLibrary v-if="store.isLibraryOpen" :step-types="stepTypes" class="shrink-0" @collapse="store.isLibraryOpen = false" />
 
       <button v-else
         class="absolute left-0 top-1/2 -translate-y-1/2 btn btn-xs btn-circle bg-base-200 border-base-300 z-50 ml-1"
-        @click="isLibraryOpen = true">
+        @click="store.isLibraryOpen = true">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 rotate-90" fill="none" viewBox="0 0 24 24"
           stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -916,16 +680,16 @@ const selectTraceStep = (stepId: string) => {
 
         <!-- Bottom Panel: Execution Trace -->
         <ExecutionTracePanel :execution="execution" :step-executions="stepExecutions"
-          :is-expanded="isTracePanelExpanded" @toggle="toggleTracePanel" @close="isTracePanelExpanded = false"
+          :is-expanded="store.isTracePanelExpanded" @toggle="store.toggleTracePanel" @close="store.isTracePanelExpanded = false"
           @select-step="selectTraceStep" @run-test="handleRunTest" @cancel="handleCancelExecution" />
       </div>
 
       <!-- Step Configuration Modal -->
-      <StepConfigModal :is-open="isModalOpen" :node="selectedNode" :step-type="selectedStepType"
-        @close="isModalOpen = false" @save="handleSaveConfig" @delete="handleDeleteStep" />
+      <StepConfigModal :is-open="store.isConfigModalOpen" :node="selectedNode" :step-type="selectedStepType"
+        @close="store.closeConfigModal" @save="handleSaveConfig" @delete="handleDeleteStep" />
 
       <!-- Context Menu -->
-      <ContextMenu :show="contextMenu.show" :x="contextMenu.x" :y="contextMenu.y" :items="contextMenuItems"
+      <ContextMenu :show="store.contextMenu.show" :x="store.contextMenu.x" :y="store.contextMenu.y" :items="contextMenuItems"
         @select="handleContextMenuSelect" @close="closeContextMenu" />
     </div>
   </div>

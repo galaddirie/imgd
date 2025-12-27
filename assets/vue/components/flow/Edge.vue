@@ -11,7 +11,27 @@ interface EdgeData {
     animated?: boolean
 }
 
-interface Props extends EdgeProps<EdgeData> { }
+import { Position } from '@vue-flow/core'
+
+interface Props {
+    id: string
+    source: string
+    target: string
+    sourceX: number
+    sourceY: number
+    targetX: number
+    targetY: number
+    sourcePosition?: Position
+    targetPosition?: Position
+    data?: EdgeData
+    markerEnd?: string
+    style?: any
+    selected?: boolean
+    sourceHandleId?: string
+    targetHandleId?: string
+    animated?: boolean
+    label?: string
+}
 
 const props = defineProps<Props>()
 const { nodes } = useVueFlow()

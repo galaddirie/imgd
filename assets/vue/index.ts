@@ -8,6 +8,8 @@ declare module "vue" {
   }
 }
 
+import { createPinia } from 'pinia'
+
 export default createLiveVue({
   // name will be passed as-is in v-component of the .vue HEEX component
   resolve: name => {
@@ -27,9 +29,9 @@ export default createLiveVue({
   // it's a default implementation of creating and mounting vue app, you can easily extend it to add your own plugins, directives etc.
   setup: ({ createApp, component, props, slots, plugin, el }) => {
     const app = createApp({ render: () => h(component as Component, props, slots) })
+    const pinia = createPinia()
+    app.use(pinia)
     app.use(plugin)
-    // add your own plugins here
-    // app.use(pinia)
     app.mount(el)
     return app
   },

@@ -38,8 +38,23 @@ import {
     VariableIcon,
 } from '@heroicons/vue/24/outline'
 
-interface Props extends NodeProps<StepNodeData> {
+interface Props {
+    id: string
+    type: string
     data: StepNodeData
+    selected?: boolean
+    connectable?: boolean
+    position?: Position
+    events?: any
+    label?: string
+    isValidSourcePos?: (connection: any) => boolean
+    isValidTargetPos?: (connection: any) => boolean
+    parentNode?: string
+    dragging?: boolean
+    zIndex?: number
+    targetPosition?: Position
+    sourcePosition?: Position
+    dragHandle?: string
 }
 
 const props = defineProps<Props>()

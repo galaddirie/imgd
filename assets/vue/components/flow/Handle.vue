@@ -2,10 +2,17 @@
 import { Handle } from '@vue-flow/core'
 import type { HandleProps } from '@vue-flow/core'
 
-interface Props extends HandleProps {
-    // Allow additional props
+interface Props {
+    id?: string
+    type?: string
+    position?: Position
+    connectable?: boolean
+    connectableStart?: boolean
+    connectableEnd?: boolean
     [key: string]: any
 }
+
+import { Position } from '@vue-flow/core'
 
 const props = defineProps<Props>()
 </script>
