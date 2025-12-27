@@ -5,6 +5,8 @@
 - [ ] API keys management
 - [ ] Sub-workflows
 - [ ] Add request metadata to expression context ( user id, request id, headers, body, etc)
+- [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)
+    - [ ] Add variable trigger nodes (ex. variable changed)
 ### Editor UX
 - [ ] Add **Save** button
 - [ ] Add **Publish** button
@@ -13,15 +15,18 @@
 - [ ] Add error highlighting to Expression UI
 - [ ] Fix edit operations (remove client-side UUID)
 
+
+- [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
+
+- [ ] Execution registry (for visbility in what executions are running on what node for observability and lifecycle management - future durability features)
+
 ### Data-flow rules
 - [ ] fix:Only allow expressions to access **direct upstream node** data
 
 ### Interoperability
 - [ ] n8n import feature
 
-### Runtime / Execution
-- [ ] Execution registry
-- [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
+
 
 ### Node executor versioning
 - [ ] Versioned namespaces (e.g., `Nodes.V1.HttpRequest`)
