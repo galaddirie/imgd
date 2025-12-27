@@ -1,7 +1,3 @@
----
-alwaysApply: true
----
-
 This is a web application written using the Phoenix web framework.
 
 ## Project guidelines
@@ -521,5 +517,167 @@ And **never** do this:
 - You are FORBIDDEN from accessing the changeset in the template as it will cause errors
 - **Never** use `<.form let={f} ...>` in the template, instead **always use `<.form for={@form} ...>`**, then drive all form references from the form assign as in `@form[:field]`. The UI should **always** be driven by a `to_form/2` assigned in the LiveView module that is derived from a changeset
 <!-- phoenix:liveview-end -->
+
+<!-- phoenix:live_vue-start -->
+## LiveVue (live_vue) guidelines (MUST FOLLOW)
+
+LiveVue provides E2E reactivity between Phoenix LiveView and Vue components.
+
+### Rendering Vue components
+
+Use either:
+- `<.vue ... />` (recommended for most cases), or
+- `LiveVue.sigil_VUE/2` to inline a Vue SFC inside a LiveView (new recommended inline approach over the old `~V` sigil).
+
+#### Required attributes
+
+- `v-component` (string) — **required**. Name/path of the Vue component (e.g. `"MyComponent"`, `"directory/Example"`).
+  - The value is passed directly to the `resolve` function of your `createLiveVue` instance (typically in `assets/vue/index.js`).
+  - `resolve` must return the Vue component (or a promise resolving to it).
+
+#### Optional attributes
+
+- `id` (string) — explicit wrapper id. If omitted, a random one is generated. Use to keep IDs stable in dev (e.g. `"vue-1"`).
+- `class` (string) — CSS classes for the wrapper.
+- `v-ssr` (boolean) — enable/disable server-side rendering for this component. Defaults to app config (default `true`).
+- `v-socket` (LiveView.Socket) — provide when rendering inside LiveView.
+
+#### Events
+
+- `v-on:*` — attach Vue event handlers using the `v-on:` prefix (e.g. `v-on:click`, `v-on:input`).
+
+#### Props and slots
+
+- All non-reserved attributes are passed as **props** to the Vue component.
+- Phoenix slots are passed as Vue slots (use normal Phoenix slot syntax).
+
+#### Examples
+
+```elixir
+<.vue
+  v-component="MyComponent"
+  message="Hello"
+  v-on:click="handleClick"
+  class="my-component"
+/>
+
+<.vue
+  v-component="nested/Component"
+  v-ssr={false}
+  items={@items}
+>
+  <:default>Default slot content</:default>
+  <:named>Named slot content</:named>
+</.vue>
+````
+
+---
+
+### Encoding + security: `LiveVue.Encoder` (CRITICAL)
+
+LiveVue encodes values to JSON primitives and safely transforms structs into plain maps before calculating JSON patches.
+
+Rules:
+
+* **Never pass raw structs as props** unless they implement `LiveVue.Encoder` (or you convert them to safe maps yourself).
+* Prefer allowlisting with `only:` when sensitive data exists.
+* By default, deriving encodes all keys except `:__struct__` — be explicit if secrets could be present.
+
+#### Deriving
+
+```elixir
+defmodule User do
+  @derive LiveVue.Encoder
+  defstruct [:name, :email, :password]
+end
+
+defmodule User do
+  @derive {LiveVue.Encoder, only: [:name, :email]}
+  defstruct [:name, :email, :password]
+end
+
+defmodule User do
+  @derive {LiveVue.Encoder, except: [:password]}
+  defstruct [:name, :email, :password]
+end
+```
+
+If you don’t own the struct:
+
+```elixir
+Protocol.derive(LiveVue.Encoder, SomeExternalStruct, only: [...])
+```
+
+Custom encoder:
+
+```elixir
+defimpl LiveVue.Encoder, for: User do
+  def encode(struct, opts) do
+    struct
+    |> Map.take([:first, :second])
+    |> LiveVue.Encoder.encode(opts)
+  end
+end
+```
+
+---
+
+### SSR (server-side rendering)
+
+* Controlled per component via `v-ssr={true|false}` and globally via config (`config :live_vue, ssr_module: ...`).
+* SSR modules:
+
+  * `LiveVue.SSR.NodeJS` — renders via a NodeJS `server.js` render function.
+  * `LiveVue.SSR.ViteJS` — renders by POSTing to `http://{vite_host}/ssr_render` (requires Vite plugin).
+* SSR emits telemetry spans under `[:live_vue, :ssr]`.
+
+Vite plugin setup:
+
+```javascript
+import liveVuePlugin from "live_vue/vitePlugin"
+
+export default {
+  plugins: [vue(), liveVuePlugin()],
+}
+```
+
+---
+
+### Vite development assets
+
+* Use `LiveVue.Reload.vite_assets/1` to render Vite assets in dev and fall back to compiled assets in prod.
+* Do **not** add inline `<script>` tags in HEEx templates.
+
+---
+
+### Testing LiveVue
+
+LiveVue testing differs from standard LiveView testing:
+
+* Rendering returns an unrendered LiveVue root element (config), not final Vue HTML.
+* Use `LiveVue.Test.get_vue/2` to extract:
+
+  * `:component`, `:id`, `:props`, `:handlers`, `:slots`, `:ssr`, `:class`
+
+Examples:
+
+```elixir
+{:ok, view, _html} = live(conn, "/")
+vue = LiveVue.Test.get_vue(view)
+
+assert vue.component == "MyComponent"
+assert vue.props["title"] == "Hello"
+assert vue.ssr == true
+```
+
+When you need full props (not diffs) in tests:
+
+```elixir
+# config/test.exs
+config :live_vue, enable_props_diff: false
+```
+
+
+<!-- phoneix:live_vue-end>
 
 <!-- usage-rules-end -->

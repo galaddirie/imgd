@@ -518,512 +518,166 @@ And **never** do this:
 - **Never** use `<.form let={f} ...>` in the template, instead **always use `<.form for={@form} ...>`**, then drive all form references from the form assign as in `@form[:field]`. The UI should **always** be driven by a `to_form/2` assigned in the LiveView module that is derived from a changeset
 <!-- phoenix:liveview-end -->
 
+<!-- phoenix:live_vue-start -->
+## LiveVue (live_vue) guidelines (MUST FOLLOW)
 
+LiveVue provides E2E reactivity between Phoenix LiveView and Vue components.
 
-<!-- live_vue-start -->
-# LiveVue Usage Rules
+### Rendering Vue components
 
-This document outlines best practices, conventions, and usage patterns for the LiveVue library. Following these guidelines will help you build maintainable, performant applications that leverage Vue.js components within Phoenix LiveView.
+Use either:
+- `<.vue ... />` (recommended for most cases), or
+- `LiveVue.sigil_VUE/2` to inline a Vue SFC inside a LiveView (new recommended inline approach over the old `~V` sigil).
 
-**Key Principle**: The LiveView holds the source of truth. Vue components are reactive views of server state with their own client-side state.
+#### Required attributes
 
-## Component Organization
+- `v-component` (string) — **required**. Name/path of the Vue component (e.g. `"MyComponent"`, `"directory/Example"`).
+  - The value is passed directly to the `resolve` function of your `createLiveVue` instance (typically in `assets/vue/index.js`).
+  - `resolve` must return the Vue component (or a promise resolving to it).
 
-### File Structure
+#### Optional attributes
 
-**DO** keep Vue components in the `assets/vue` directory. Organize them in a sensible way:
+- `id` (string) — explicit wrapper id. If omitted, a random one is generated. Use to keep IDs stable in dev (e.g. `"vue-1"`).
+- `class` (string) — CSS classes for the wrapper.
+- `v-ssr` (boolean) — enable/disable server-side rendering for this component. Defaults to app config (default `true`).
+- `v-socket` (LiveView.Socket) — provide when rendering inside LiveView.
 
-```
-assets/
-  vue/
-    index.ts # this is the entry point for the Vue app
-    components/
-      ui/
-        Button.vue
-        Modal.vue
-      forms/
-        ContactForm.vue
-    pages/
-      Dashboard.vue
-    shared/
-      Layout.vue
-```
+#### Events
 
-### Component Naming
+- `v-on:*` — attach Vue event handlers using the `v-on:` prefix (e.g. `v-on:click`, `v-on:input`).
 
-**DO** use PascalCase for component file names, longer than a single word:
+#### Props and slots
 
-```
-✅ UserProfile.vue
-✅ ShoppingCart.vue
-✅ ContactForm.vue
-```
+- All non-reserved attributes are passed as **props** to the Vue component.
+- Phoenix slots are passed as Vue slots (use normal Phoenix slot syntax).
 
-**DO NOT** use kebab-case or snake_case for file names:
-
-```
-❌ user-profile.vue
-❌ shopping_cart.vue
-```
-
-**Use** the same name in the `v-component` attribute (match case exactly, without the extension). **Always** pass the socket to the component:
-
-```elixir
-<.vue v-component="UserProfile" user={@user} v-socket={@socket} />
-```
-
-## Props and Data Flow
-
-### Props Passing
-
-**DO** pass all necessary data as props from LiveView. Always pass the socket to the component:
+#### Examples
 
 ```elixir
 <.vue
-  v-component="ShoppingCart"
-  v-socket={@socket}
-  cartItems={@cart_items}
-  cartTotal={@cart_total}
-  currency={@currency}
+  v-component="MyComponent"
+  message="Hello"
+  v-on:click="handleClick"
+  class="my-component"
 />
-```
 
-**DO NOT** rely on Vue components to fetch their own data:
-
-```vue
-❌ <!-- WRONG: Fetching data in Vue component -->
-<script setup>
-import { onMounted, ref } from 'vue'
-
-const items = ref([])
-
-onMounted(async () => {
-  const response = await fetch('/api/cart')
-  items.value = await response.json()
-})
-</script>
-```
-
-### Custom Struct Encoding
-
-**DO** implement the `LiveVue.Encoder` protocol for custom structs:
-
-```elixir
-defmodule MyApp.User do
-  # You can derive the protocol if it doesn't need any customization
-  @derive {LiveVue.Encoder, only: [:id, :name, :email]}
-  defstruct [:id, :name, :email, :private_field]
-end
-
-defimpl LiveVue.Encoder, for: MyApp.User do
-  def encode(user) do
-    %{
-      id: user.id,
-      name: user.name,
-      email: user.email
-      # private_field intentionally omitted
-    }
-  end
-end
-```
-
-**DO NOT** pass structs without implementing the encoder protocol:
-
-```elixir
-❌ # This will raise Protocol.UndefinedError
-<.vue v-component="UserCard" user={%MyApp.User{}} />
-```
-
-## Event Handling
-
-### Phoenix handle_event
-
-**Use** Phoenix event handlers for most interactions:
-
-```elixir
-defmodule MyApp.Live.ContactForm do
-  use LiveVue, :live_view
-
-  def handle_event("like_post", %{"post_id" => post_id}, socket) do
-    # handle the event here
-    {:noreply, socket}
-  end
-end
-```
-
-### Client-side events
-
-**Use** `useLiveVue().pushEvent()` or in the template `$live.pushEvent()` API for dynamic events. `useLiveVue()` and `$live` are the same thing - Vue phoenix hook instance.
-
-```vue
-<script setup>
-import { useLiveVue } from 'live_vue'
-
-const live = useLiveVue()
-
-const handleCustomAction = (data) => {
-  live.pushEvent('custom_action', data)
-}
-</script>
-
-<template>
-  <!-- You can also use $live directly in templates -->
-  <button @click="$live.pushEvent('simple_action', { value: 'hello' })">
-    Click me
-  </button>
-</template>
-```
-
-**DO** use `useLiveEvent()` for server-to-client communication. It handles component lifecycle correctly.
-
-```vue
-<script setup>
-import { useLiveEvent } from 'live_vue'
-
-useLiveEvent('notification', (data) => {
-  // Handle server-sent notification
-  console.log('Received:', data)
-})
-</script>
-```
-
-## Server-Side Rendering (SSR)
-
-By default, live_vue uses SSR.**DO** disable SSR for components with client-only dependencies:
-
-```elixir
 <.vue
-  v-component="ClientOnlyMap"
-  v-socket={@socket}
+  v-component="nested/Component"
   v-ssr={false}
-/>
-```
+  items={@items}
+>
+  <:default>Default slot content</:default>
+  <:named>Named slot content</:named>
+</.vue>
+````
 
-## Navigation and Routing
+---
 
-### Template links supporting LiveView navigation
+### Encoding + security: `LiveVue.Encoder` (CRITICAL)
 
-```vue
-<script setup>
-import { Link } from 'live_vue'
-</script>
+LiveVue encodes values to JSON primitives and safely transforms structs into plain maps before calculating JSON patches.
 
-<template>
-  <!-- Normal link -->
-  <Link href="/">Home</Link>
-  <!-- Navigate to a different route -->
-  <Link navigate="/users">Users</Link>
-  <!-- Patch the current route with different params -->
-  <Link patch="/users/3">User 3</Link>
-  <!-- Patch the current route with query params and replace the history -->
-  <Link patch="/users/3?details=true" replace>User 3 with details</Link>
-</template>
-```
+Rules:
 
-### Navigation Hook
+* **Never pass raw structs as props** unless they implement `LiveVue.Encoder` (or you convert them to safe maps yourself).
+* Prefer allowlisting with `only:` when sensitive data exists.
+* By default, deriving encodes all keys except `:__struct__` — be explicit if secrets could be present.
 
-**Use** `useLiveNavigation()` for programmatic navigation:
-
-```vue
-<script setup>
-import { useLiveNavigation } from 'live_vue'
-
-const { patch, navigate } = useLiveNavigation()
-
-// Same route, different params
-const updateUser = (user) => patch(`/users/${user.id}`)
-
-// Same route, different query params with replace history
-const goToTab = (tab) => patch({ tab: tab }, { replace: true })
-
-// Different route
-const goToPage = (path) => navigate(path)
-</script>
-```
-
-**Prefer** `<Link>` components in templates, unless not possible.
-
-## File Uploads
-
-### Upload Hook
-
-**Use** `useLiveUpload()` for file upload functionality. Server-side upload is supported by LiveView in the exact same way as when using HEEX templates.
-
-```vue
-<script setup>
-import { useLiveUpload } from 'live_vue'
-
-const {
-  entries,
-  progress,
-  showFilePicker,
-  addFiles,
-  submit,
-  cancel,
-  clear,
-  valid
-} = useLiveUpload(
-  () => props.uploadConfig,
-  {
-    changeEvent: 'validate_upload',
-    submitEvent: 'save_upload'
-  }
-)
-</script>
-```
-
-**Use** `addFiles()` for drag-and-drop:
-
-```vue
-<template>
-  <div
-    @drop.prevent="addFiles($event.dataTransfer)"
-    @dragover.prevent
-    class="upload-zone"
-  >
-    <p v-if="entries.length === 0">Drop files here or</p>
-    <button @click="showFilePicker">Choose Files</button>
-
-    <!-- Show upload progress -->
-    <div v-if="entries.length > 0" class="upload-progress">
-      <div v-for="entry in entries" :key="entry.ref">
-        {{ entry.client_name }} - {{ entry.progress }}%
-        <button @click="cancel(entry.ref)">Cancel</button>
-      </div>
-      <p>Overall progress: {{ progress }}%</p>
-      <p v-if="!valid" class="error">Upload has errors</p>
-    </div>
-  </div>
-</template>
-```
-
-## Testing
-
-### Component Testing
-
-**Test** Vue components through LiveView integration:
+#### Deriving
 
 ```elixir
-test "renders user profile component", %{conn: conn} do
-  {:ok, view, _html} = live(conn, "/users/1")
+defmodule User do
+  @derive LiveVue.Encoder
+  defstruct [:name, :email, :password]
+end
 
-  # Get Vue component by name or id. Optional if there is only one component on the page.
-  vue_config = LiveVue.Test.get_vue(view, name: "UserProfile")
-  # or by ID: vue_config = LiveVue.Test.get_vue(view, id: "user-profile-1")
-  # or without any arguments: vue_config = LiveVue.Test.get_vue(view)
+defmodule User do
+  @derive {LiveVue.Encoder, only: [:name, :email]}
+  defstruct [:name, :email, :password]
+end
 
-  assert vue_config.props["name"] == "John Doe"
-  assert vue_config.props["email"] == "john@example.com"
-  assert vue_config.component == "UserProfile"
-
-  render_hook(view, "toggle_details", %{"details" => true})
-
-  # Details should now be true.
-  %{props: props} = LiveVue.Test.get_vue(view)
-  assert props["details"] == true
+defmodule User do
+  @derive {LiveVue.Encoder, except: [:password]}
+  defstruct [:name, :email, :password]
 end
 ```
 
-
-## Troubleshooting
-
-Problem: Component is not found on the client side
-Solution:
-1. Make sure you use the correct name in the `v-component` attribute (should match file name exactly, without the extension).
-2. Restart the server to pick up newly created components.
-3. Ensure resolve function can find that component in `assets/vue/index.ts`.
-
-
-## Forms and Validation
-
-### Using useLiveForm Hook
-
-**Use** `useLiveForm()` for complex forms with validation, arrays, and nested objects:
-
-```vue
-<script setup>
-import { Form, useLiveForm } from 'live_vue'
-
-type UserForm = {
-  name: string
-  email: string
-  tags: string[]
-  profile: {
-    bio: string
-    skills: Array<{ name: string; level: string }>
-  }
-}
-
-const props = defineProps<{ form: Form<UserForm> }>()
-
-const form = useLiveForm(() => props.form, {
-  changeEvent: 'validate',     // Event sent on field changes (null to disable)
-  submitEvent: 'submit',       // Event sent on form submission
-  debounceInMiliseconds: 300,  // Debounce validation requests
-  prepareData: (data) => data  // Transform data before sending
-})
-
-// Basic field access
-const nameField = form.field('name')
-const emailField = form.field('email')
-
-// Nested object fields
-const bioField = form.field('profile.bio')
-
-// Array fields
-const tagsArray = form.fieldArray('tags')
-const skillsArray = form.fieldArray('profile.skills')
-
-// Nested array fields are also supported
-const firstSkillNameField = form.field('profile.skills[0].name')
-
-// Field operations
-const addTag = () => tagsArray.add('')
-const removeTag = (index) => tagsArray.remove(index)
-</script>
-
-<template>
-  <!-- Basic field with validation -->
-  <input
-    v-bind="nameField.inputAttrs.value"
-    :class="{ 'error': nameField.isTouched.value && nameField.errorMessage.value }"
-  />
-  <div v-if="nameField.errorMessage.value">
-    {{ nameField.errorMessage.value }}
-  </div>
-
-  <!-- Array iteration -->
-  <div v-for="(tagField, index) in tagsArray.fields.value" :key="index">
-    <input v-bind="tagField.inputAttrs.value" />
-    <button @click="removeTag(index)">Remove</button>
-  </div>
-
-  <!-- Form actions -->
-  <button @click="form.submit()" :disabled="!form.isValid.value">
-    Submit
-  </button>
-  <button @click="form.reset()">Reset</button>
-</template>
-```
-
-### Form Field Properties
-
-Each field provides reactive state and helpers:
-
-```typescript
-interface FormField<T> {
-  // Reactive state
-  value: Ref<T>                    // Current field value
-  errors: Ref<string[]>            // Validation errors from server
-  errorMessage: Ref<string>        // First error message
-  isValid: Ref<boolean>            // No validation errors
-  isDirty: Ref<boolean>            // Value changed from initial
-  isTouched: Ref<boolean>          // Field has been interacted with
-
-  // Input binding helper (includes value, events, accessibility)
-  inputAttrs: Ref<{
-    value: T
-    onInput: (event: Event) => void
-    onFocus: () => void
-    onBlur: () => void
-    name: string
-    id: string
-    'aria-invalid': boolean
-    'aria-describedby'?: string
-  }>
-
-  // Navigation methods for nested structures
-  field(key): FormField           // Access nested object field
-  fieldArray(key): FormFieldArray // Access nested array field
-}
-
-interface FormFieldArray<T> extends FormField<T[]> {
-  // Array-specific methods
-  add: (item?: Partial<T>) => void
-  remove: (index: number) => void
-  move: (from: number, to: number) => void
-
-  // Reactive array of field instances for iteration
-  fields: Readonly<Ref<FormField<T>[]>>
-}
-
-interface UseLiveFormReturn<T extends object> {
-  // Form-level state
-  isValid: Ref<boolean>
-  isDirty: Ref<boolean>
-  isTouched: Ref<boolean>
-  submitCount: Readonly<Ref<number>>
-  initialValues: Readonly<Ref<T>>
-
-  // Type-safe field factory functions
-  field(key): FormField
-  fieldArray(key): FormFieldArray
-
-  // Form actions
-  submit: () => Promise<void>
-  reset: () => void
-}
-```
-
-### Server-Side Form Setup
-
-**Set up** server-side forms in the standard way:
+If you don’t own the struct:
 
 ```elixir
-defmodule MyApp.Live.FormTest do
-  use LiveVue, :live_view
+Protocol.derive(LiveVue.Encoder, SomeExternalStruct, only: [...])
+```
 
-  def render(assigns) do
-    ~H"""
-    <.vue form={@form} v-component="UserForm" v-socket={@socket} />
-    """
-  end
+Custom encoder:
 
-  def mount(params, socket) do
-    changeset = MyApp.User.changeset(%MyApp.User{}, %{})
-    socket = assign(socket, form: to_form(changeset, as: :user))
-    {:ok, socket}
-  end
-
-  def handle_event("validate", params, socket) do
-    changeset = MyApp.User.changeset(%MyApp.User{}, params)
-    {:noreply, assign(socket, form: to_form(changeset, as: :user))}
-  end
-
-  def handle_event("submit", params, socket) do
-    changeset = MyApp.User.changeset(%MyApp.User{}, params)
-    case Repo.insert(changeset) do
-      {:ok, _user} ->
-        {:noreply, socket}
-      {:error, changeset} ->
-        {:noreply, assign(socket, form: to_form(changeset, as: :user))}
-    end
+```elixir
+defimpl LiveVue.Encoder, for: User do
+  def encode(struct, opts) do
+    struct
+    |> Map.take([:first, :second])
+    |> LiveVue.Encoder.encode(opts)
   end
 end
 ```
 
-## Common Anti-Patterns
+---
 
-### State Management
+### SSR (server-side rendering)
 
-**DO NOT** use Vue state stores (Pinia, Vuex) for application state:
+* Controlled per component via `v-ssr={true|false}` and globally via config (`config :live_vue, ssr_module: ...`).
+* SSR modules:
 
-```vue
-❌ <!-- WRONG: Using Pinia for app state -->
-<script setup>
-import { useUserStore } from '@/stores/user'
-const userStore = useUserStore()
-</script>
+  * `LiveVue.SSR.NodeJS` — renders via a NodeJS `server.js` render function.
+  * `LiveVue.SSR.ViteJS` — renders by POSTing to `http://{vite_host}/ssr_render` (requires Vite plugin).
+* SSR emits telemetry spans under `[:live_vue, :ssr]`.
+
+Vite plugin setup:
+
+```javascript
+import liveVuePlugin from "live_vue/vitePlugin"
+
+export default {
+  plugins: [vue(), liveVuePlugin()],
+}
 ```
 
-**DO** use LiveView state with reactive props:
+---
+
+### Vite development assets
+
+* Use `LiveVue.Reload.vite_assets/1` to render Vite assets in dev and fall back to compiled assets in prod.
+* Do **not** add inline `<script>` tags in HEEx templates.
+
+---
+
+### Testing LiveVue
+
+LiveVue testing differs from standard LiveView testing:
+
+* Rendering returns an unrendered LiveVue root element (config), not final Vue HTML.
+* Use `LiveVue.Test.get_vue/2` to extract:
+
+  * `:component`, `:id`, `:props`, `:handlers`, `:slots`, `:ssr`, `:class`
+
+Examples:
 
 ```elixir
-✅ <!-- CORRECT: Server-side state -->
-def handle_event("update_user", params, socket) do
-  # Update state on server
-  {:noreply, assign(socket, user: updated_user)}
-end
+{:ok, view, _html} = live(conn, "/")
+vue = LiveVue.Test.get_vue(view)
+
+assert vue.component == "MyComponent"
+assert vue.props["title"] == "Hello"
+assert vue.ssr == true
 ```
-<!-- live_vue-end -->
+
+When you need full props (not diffs) in tests:
+
+```elixir
+# config/test.exs
+config :live_vue, enable_props_diff: false
+```
+
+
+<!-- phoneix:live_vue-end>
+
 <!-- usage-rules-end -->
