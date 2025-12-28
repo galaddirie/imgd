@@ -47,6 +47,7 @@ defmodule Imgd.Workflows do
   Lists workflows accessible to the given scope.
 
   Returns workflows the user owns or has been shared with, including public workflows.
+  Preloads user (owner) and shares associations for display purposes.
   """
   @spec list_workflows(Scope.t() | nil) :: [Workflow.t()]
   def list_workflows(nil), do: list_public_workflows()
@@ -63,7 +64,7 @@ defmodule Imgd.Workflows do
         distinct: true,
         order_by: [desc: w.updated_at]
 
-    Repo.all(query)
+    Repo.all(query) |> Repo.preload([:user, :shares])
   end
 
   @doc """
@@ -75,6 +76,37 @@ defmodule Imgd.Workflows do
   def list_public_workflows do
     Repo.all(from w in Workflow, where: w.public == true, order_by: [desc: w.updated_at])
   end
+
+  @doc """
+  Determines the access level/state for a workflow relative to a scope.
+
+  Returns:
+  - `:owner` - if the user owns the workflow
+  - `:viewer`, `:editor`, `:owner` - if the user has a share with that role
+  - `:public` - if the workflow is public and user doesn't own or have a share
+  - `nil` - if no access
+  """
+  @spec workflow_access_state(Scope.t() | nil, Workflow.t()) :: :owner | :viewer | :editor | :public | nil
+  def workflow_access_state(%Scope{} = scope, %Workflow{} = workflow) do
+    user_id = scope.user.id
+
+    cond do
+      workflow.user_id == user_id ->
+        :owner
+
+      share = Enum.find(workflow.shares || [], &(&1.user_id == user_id)) ->
+        share.role
+
+      workflow.public ->
+        :public
+
+      true ->
+        nil
+    end
+  end
+
+  def workflow_access_state(nil, %Workflow{public: true}), do: :public
+  def workflow_access_state(_scope, _workflow), do: nil
 
   @doc """
   Lists workflows owned by the user in the scope.

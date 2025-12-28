@@ -138,14 +138,14 @@ defmodule ImgdWeb.WorkflowLive.Index do
                 </div>
               </:col>
 
-              <:col :let={workflow} label="Trigger" width="16%">
+              <:col :let={workflow} label="Trigger" width="12%">
                 <div class="flex items-center gap-2 text-xs font-medium text-base-content/80">
                   <.icon name="hero-bolt" class="size-4 opacity-70" />
                   <span>{trigger_label(workflow)}</span>
                 </div>
               </:col>
 
-              <:col :let={workflow} label="Status" width="14%" align="center">
+              <:col :let={workflow} label="Status" width="10%" align="center">
                 <span
                   class={["badge badge-sm", status_badge_class(workflow.status)]}
                   data-role="status"
@@ -155,20 +155,33 @@ defmodule ImgdWeb.WorkflowLive.Index do
                 </span>
               </:col>
 
-              <:col :let={workflow} label="Updated" width="18%">
+              <:col :let={workflow} label="Owner" width="14%">
+                <div class="flex items-center gap-2 text-xs text-base-content/80">
+                  <.icon name="hero-user" class="size-4 opacity-70" />
+                  <span>{owner_name(workflow)}</span>
+                </div>
+              </:col>
+
+              <:col :let={workflow} label="Access" width="10%" align="center">
+                <span class={["badge badge-xs", elem(access_state_badge(workflow, @current_scope), 1)]}>
+                  {elem(access_state_badge(workflow, @current_scope), 0)}
+                </span>
+              </:col>
+
+              <:col :let={workflow} label="Updated" width="14%">
                 <div class="flex items-center gap-2 text-xs text-base-content/70">
                   <.icon name="hero-clock" class="size-4 opacity-70" />
                   <span>{formatted_timestamp(workflow.updated_at)}</span>
                 </div>
               </:col>
 
-              <:col :let={workflow} label="Created" width="18%">
+              <:col :let={workflow} label="Created" width="14%">
                 <div class="text-xs text-base-content/60">
                   {formatted_timestamp(workflow.inserted_at)}
                 </div>
               </:col>
 
-              <:col :let={workflow} label="Actions" width="12%" align="center">
+              <:col :let={workflow} label="Actions" width="10%" align="center">
                 <div class="relative">
                   <button
                     type="button"
@@ -253,4 +266,36 @@ defmodule ImgdWeb.WorkflowLive.Index do
 
   defp navigate_to_workflow({_, workflow}), do: JS.navigate(~p"/workflows/#{workflow.id}")
   defp navigate_to_workflow(workflow), do: JS.navigate(~p"/workflows/#{workflow.id}")
+
+  # ============================================================================
+  # Display Helpers
+  # ============================================================================
+
+  defp owner_name(workflow) do
+    case workflow.user do
+      nil -> "Unknown"
+      user -> user.email || "User #{String.slice(user.id, 0, 8)}"
+    end
+  end
+
+  defp access_state_badge(workflow, scope) do
+    state = Workflows.workflow_access_state(scope, workflow)
+
+    case state do
+      :owner ->
+        {"Owner", "badge-primary"}
+
+      :editor ->
+        {"Editor", "badge-secondary"}
+
+      :viewer ->
+        {"Viewer", "badge-ghost"}
+
+      :public ->
+        {"Public", "badge-outline"}
+
+      nil ->
+        {"No Access", "badge-error"}
+    end
+  end
 end
