@@ -18,6 +18,16 @@ defmodule Imgd.Workflows.WorkflowDraft do
           updated_at: DateTime.t()
         }
 
+  @derive {LiveVue.Encoder,
+           only: [
+             :workflow_id,
+             :steps,
+             :connections,
+             :triggers,
+             :settings,
+             :inserted_at,
+             :updated_at
+           ]}
   @primary_key {:workflow_id, :binary_id, autogenerate: false}
   schema "workflow_drafts" do
     belongs_to :workflow, Workflow, define_field: false

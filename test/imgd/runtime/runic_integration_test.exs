@@ -173,13 +173,6 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
 
   describe "Splitter executor" do
     test "splits list input" do
-      step = %Step{
-        id: "split_1",
-        type_id: "splitter",
-        name: "Splitter",
-        config: %{}
-      }
-
       # Test executor directly
       {:ok, result} = Imgd.Steps.Executors.Splitter.execute(%{}, [1, 2, 3], nil)
       assert result == [1, 2, 3]

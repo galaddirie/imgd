@@ -43,6 +43,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     <div class="h-screen w-screen overflow-hidden bg-base-200">
       <.vue
         v-component="WorkflowEditor"
+        v-ssr={false}
         workflow={@workflow}
         stepTypes={@step_types}
         editorState={@editor_state}

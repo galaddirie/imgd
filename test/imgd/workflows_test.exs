@@ -2,8 +2,6 @@ defmodule Imgd.WorkflowsTest do
   use Imgd.DataCase, async: true
 
   alias Imgd.Workflows
-  alias Imgd.Workflows.Workflow
-  alias Imgd.Workflows.WorkflowShare
   alias Imgd.Executions.Execution
   alias Imgd.Accounts
   alias Imgd.Accounts.Scope

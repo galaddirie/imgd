@@ -55,6 +55,20 @@ defmodule Imgd.Workflows.Workflow do
              :inserted_at,
              :updated_at
            ]}
+  @derive {LiveVue.Encoder,
+           only: [
+             :id,
+             :name,
+             :description,
+             :status,
+             :public,
+             :current_version_tag,
+             :published_version_id,
+             :user_id,
+             :inserted_at,
+             :updated_at,
+             :draft
+           ]}
   schema "workflows" do
     field :name, :string
     field :description, :string

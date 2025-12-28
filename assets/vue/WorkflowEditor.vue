@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, markRaw } from 'vue'
 import type { Node, Edge, Connection as VueFlowConnection, Position, GraphNode } from '@vue-flow/core'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -124,11 +124,11 @@ const {
 const { layout, previousDirection } = useLayout()
 
 const nodeTypes = {
-  step: WorkflowStepNode,
+  step: markRaw(WorkflowStepNode),
 }
 
 const edgeTypes = {
-  custom: CustomEdge,
+  custom: markRaw(CustomEdge),
 }
 
 // Local transient state

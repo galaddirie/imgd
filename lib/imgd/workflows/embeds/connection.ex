@@ -4,6 +4,14 @@ defmodule Imgd.Workflows.Embeds.Connection do
   Shared between Workflow (mutable) and WorkflowVersion (immutable).
   """
   @derive Jason.Encoder
+  @derive {LiveVue.Encoder,
+           only: [
+             :id,
+             :source_step_id,
+             :source_output,
+             :target_step_id,
+             :target_input
+           ]}
 
   use Ecto.Schema
   import Ecto.Changeset

@@ -40,7 +40,6 @@ const themeStore = useThemeStore()
 const path = computed<string[]>(() => getBezierPath(props) as string[])
 
 const sourceNode = computed(() => nodes.value.find((n) => n.id === props.source))
-const nodeStatus = computed<NodeStatus>(() => sourceNode.value?.data?.status || 'idle')
 const isSelected = computed(() => props.selected || sourceNode.value?.selected)
 
 const statusConfig = computed(() => ({
@@ -53,12 +52,13 @@ const statusConfig = computed(() => ({
     pinned: { color: oklchToHex(colorMap.pinned) },
 }))
 
-const currentStatus = computed(() => {
-    if (sourceNode.value?.data?.pinned) {
-        return statusConfig.value.pinned
-    }
-    return statusConfig.value[nodeStatus.value]
+const effectiveStatus = computed<NodeStatus>(() => {
+    if (sourceNode.value?.data?.pinned) return 'pinned'
+    if (sourceNode.value?.data?.disabled) return 'skipped'
+    return sourceNode.value?.data?.status ?? 'pending'
 })
+
+const currentStatus = computed(() => statusConfig.value[effectiveStatus.value])
 
 const handleColor = computed(() => {
     if (isSelected.value) {

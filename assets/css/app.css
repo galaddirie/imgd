@@ -161,4 +161,21 @@ dark svg .tick line {
   stroke: var(--color-base-200, #e5e7eb);
 }
 
-/* This file is for your main application CSS */
+@import '@vue-flow/core/dist/style.css';
+@import '@vue-flow/core/dist/theme-default.css';
+
+
+.vue-flow__minimap {
+  transform: scale(75%);
+  transform-origin: bottom right;
+}
+
+.vue-flow__node {
+  overflow: visible;
+}
+
+/* Animated edge styles */
+.vue-flow__edge-animated path {
+  stroke-dasharray: 5, 5;
+  animation: vue-flow__edge-animation 1s linear infinite;
+}

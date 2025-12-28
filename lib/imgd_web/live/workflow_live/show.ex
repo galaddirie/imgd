@@ -15,7 +15,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
 
     case Workflows.get_workflow(id, scope) do
       {:ok, workflow} ->
-        executions = Executions.list_workflow_executions(workflow, scope, limit: 10)
+        executions = Executions.list_workflow_executions(scope, workflow, limit: 10)
 
         socket =
           socket

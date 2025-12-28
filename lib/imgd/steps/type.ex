@@ -40,6 +40,19 @@ defmodule Imgd.Steps.Type do
           updated_at: DateTime.t() | nil
         }
 
+  @derive {LiveVue.Encoder,
+           only: [
+             :id,
+             :name,
+             :category,
+             :description,
+             :icon,
+             :step_kind,
+             :executor,
+             :config_schema,
+             :input_schema,
+             :output_schema
+           ]}
   @enforce_keys [:id, :name, :category, :description, :icon, :executor, :step_kind]
   defstruct [
     :id,

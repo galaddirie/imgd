@@ -67,7 +67,7 @@ defmodule Imgd.Runtime.Expression do
   @default_opts [
     strict_variables: false,
     strict_filters: true,
-    timeout_ms: 1_000,
+    timeout_ms: 5_000,
     state_store: Imgd.Runtime.ExecutionState
   ]
 

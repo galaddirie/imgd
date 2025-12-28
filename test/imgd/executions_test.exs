@@ -4,7 +4,6 @@ defmodule Imgd.ExecutionsTest do
   alias Imgd.Executions
   alias Imgd.Executions.Execution
   alias Imgd.Workflows
-  alias Imgd.Workflows.Workflow
   alias Imgd.Accounts
   alias Imgd.Accounts.Scope
   alias Imgd.Repo
