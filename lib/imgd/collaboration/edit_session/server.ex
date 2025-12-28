@@ -244,10 +244,15 @@ defmodule Imgd.Collaboration.EditSession.Server do
         }
 
         # Broadcast the operation to all subscribers
+        Logger.debug(
+          "Broadcasting operation #{op_record.operation_id} (type: #{op_record.type}) to topic #{PubSub.session_topic(state.workflow_id)}"
+        )
+
         PubSub.broadcast_operation(state.workflow_id, op_record)
 
         # If editor state changed, broadcast that too
         if editor_state_changed do
+          Logger.debug("Broadcasting editor_state_updated for workflow #{state.workflow_id}")
           broadcast_editor_state_update(state.workflow_id, new_editor_state)
         end
 

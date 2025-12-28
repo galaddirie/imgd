@@ -26,7 +26,7 @@ export default createLiveVue({
     // `path/to/Component.vue` can be found as `path/to/Component` or simply `Component`
     return findComponent(components as ComponentMap, name)
   },
-  // it's a default implementation of creating and mounting vue app, you can easily extend it to add your own plugins, directives etc.
+  // Standard LiveVue setup - props are already reactive from the VueHook
   setup: ({ createApp, component, props, slots, plugin, el }) => {
     const app = createApp({ render: () => h(component as Component, props, slots) })
     const pinia = createPinia()

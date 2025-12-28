@@ -98,6 +98,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       <.vue
         v-component="WorkflowEditor"
         v-ssr={false}
+        v-socket={@socket}
         workflow={@workflow}
         stepTypes={@step_types}
         editorState={@editor_state}
@@ -361,22 +362,58 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   defp format_presences(presence_list) do
-    presence_list
-    |> Enum.map(fn {user_id, %{metas: metas}} ->
-      # Take the most recent meta (first one)
-      meta = List.first(metas) || %{}
+    real_presences =
+      presence_list
+      |> Enum.map(fn {user_id, %{metas: metas}} ->
+        # Take the most recent meta (first one)
+        meta = List.first(metas) || %{}
 
-      %{
-        user: %{
-          id: user_id,
-          name: get_in(meta, [:user, :name]),
-          email: get_in(meta, [:user, :email])
-        },
-        cursor: meta[:cursor],
-        selected_steps: meta[:selected_steps] || [],
-        focused_step: meta[:focused_step]
-      }
-    end)
+        %{
+          user: %{
+            id: user_id,
+            name: get_in(meta, [:user, :name]),
+            email: get_in(meta, [:user, :email])
+          },
+          cursor: meta[:cursor],
+          selected_steps: meta[:selected_steps] || [],
+          focused_step: meta[:focused_step]
+        }
+      end)
+
+    # Add mock cursors for testing (always add them to see the appearance)
+    mock_presences =
+      if Mix.env() == :dev do
+        [
+          %{
+            user: %{id: "mock-1", name: "Alice", email: "alice@example.com"},
+            cursor: %{x: 200, y: 100},
+            selected_steps: [],
+            focused_step: nil
+          },
+          %{
+            user: %{id: "mock-2", name: "Bob", email: "bob@example.com"},
+            cursor: %{x: 350, y: 250},
+            selected_steps: [],
+            focused_step: nil
+          },
+          %{
+            user: %{id: "mock-3", name: "Charlie", email: "charlie@example.com"},
+            cursor: %{x: 500, y: 180},
+            selected_steps: [],
+            focused_step: nil
+          },
+          %{
+            user: %{id: "mock-4", name: "Diana", email: "diana@example.com"},
+            cursor: %{x: 650, y: 300},
+            selected_steps: [],
+            focused_step: nil
+          }
+        ]
+      else
+        []
+      end
+
+    real_presences ++ mock_presences
   end
 
   defp deserialize_editor_state(nil, workflow_id) do

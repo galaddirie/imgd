@@ -1,16 +1,40 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import type { UserPresence } from '../../types/workflow'
 import { generateColor } from '../../lib/color'
+import { useLiveVue } from 'live_vue'
 
 const props = defineProps<{
     presences: UserPresence[]
     currentUserId?: string
 }>()
 
+// Use local state for presences to allow fast updates via events
+// independent of the slower prop update cycle
+// Initialize with props data
+const localPresences = ref<UserPresence[]>(props.presences)
+
+// Sync with props when they change (initial load or full updates)
+// This ensures consistency if the server pushes a full update via assigns
+watch(() => props.presences, (newVal) => {
+    localPresences.value = newVal
+})
+
+const live = useLiveVue()
+
+onMounted(() => {
+    // Listen for fast cursor updates bypassing the DOM prop cycle
+    live.handleEvent("presence_update", (payload: any) => {
+        // payload is { presences: [...] }
+        if (payload && payload.presences) {
+            localPresences.value = payload.presences
+        }
+    })
+})
+
 // Filter out current user and users without valid cursor positions
 const visibleCursors = computed(() => {
-    return props.presences.filter(p => {
+    return localPresences.value.filter(p => {
         // Skip current user
         if (p.user.id === props.currentUserId) return false
 
@@ -36,7 +60,8 @@ const getCursorStyle = (presence: UserPresence) => {
     if (!presence.cursor) return { display: 'none' }
 
     return {
-        transform: `translate(${presence.cursor.x}px, ${presence.cursor.y}px)`,
+        // Center the cursor circle at the cursor position
+        transform: `translate(${presence.cursor.x - 8}px, ${presence.cursor.y - 8}px)`,
         // Smooth cursor movement with short transition
         transition: 'transform 100ms ease-out',
     }
@@ -54,21 +79,20 @@ const getUserDisplayName = (user: UserPresence['user']) => {
 </script>
 
 <template>
-    <div class="collaborative-cursors pointer-events-none absolute inset-0 overflow-visible">
+    <div class="collaborative-cursors pointer-events-none absolute top-0 left-0 w-0 h-0 overflow-visible">
+        <div class="fixed top-0 left-0 bg-red-500 text-white z-[9999] pointer-events-auto p-2">
+            DEBUG: Cursors ({{ visibleCursors.length }})
+        </div>
         <TransitionGroup name="cursor">
             <div v-for="presence in visibleCursors" :key="presence.user.id"
-                class="cursor-container absolute left-0 top-0 will-change-transform" :style="getCursorStyle(presence)">
-                <!-- Cursor pointer SVG -->
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
-                    class="cursor-icon drop-shadow-md" :style="{ color: getCursorColor(presence.user) }">
-                    <!-- Cursor shape with white outline for visibility -->
-                    <path
-                        d="M5.65376 12.3673H5.46026L5.31717 12.4976L0.500002 16.8829L0.500002 1.19841L11.7841 12.3673H5.65376Z"
-                        fill="currentColor" stroke="white" stroke-width="1.5" />
-                </svg>
+                class="cursor-container absolute left-0 top-0 will-change-transform flex flex-col items-center" :style="getCursorStyle(presence)">
+                <!-- Cursor circle -->
+                <div class="cursor-circle w-4 h-4 rounded-full border-2 border-white shadow-lg"
+                    :style="{ backgroundColor: getCursorColor(presence.user) }">
+                </div>
 
-                <!-- User name label -->
-                <div class="cursor-label ml-4 mt-1 px-2 py-0.5 rounded-md text-[11px] font-semibold text-white whitespace-nowrap shadow-md"
+                <!-- User name label underneath -->
+                <div class="cursor-label -mt-1 px-2 py-0.5 rounded-md text-[11px] font-semibold text-white whitespace-nowrap shadow-md"
                     :style="{ backgroundColor: getCursorColor(presence.user) }">
                     {{ getUserDisplayName(presence.user) }}
                 </div>
@@ -86,7 +110,7 @@ const getUserDisplayName = (user: UserPresence['user']) => {
     z-index: 1000;
 }
 
-.cursor-icon {
+.cursor-circle {
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 

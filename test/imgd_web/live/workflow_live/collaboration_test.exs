@@ -48,7 +48,10 @@ defmodule ImgdWeb.WorkflowLive.CollaborationTest do
 
       # We need to ensure view2 processed the message.
       # The easiest way is to push a sync event or just sleep briefly since it's an async test.
-      Process.sleep(100)
+      Process.sleep(200)
+
+      # Force a render to ensure the view has processed all messages
+      render(view2)
 
       # Check Session 2
       vue2 = LiveVue.Test.get_vue(view2)

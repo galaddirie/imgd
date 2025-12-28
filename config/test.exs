@@ -2,6 +2,8 @@ import Config
 
 config :imgd, :env, :test
 
+config :live_vue, enable_props_diff: false
+
 # Only in tests, remove the complexity from the password hashing algorithm
 config :pbkdf2_elixir, :rounds, 1
 
