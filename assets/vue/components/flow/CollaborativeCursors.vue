@@ -80,9 +80,6 @@ const getUserDisplayName = (user: UserPresence['user']) => {
 
 <template>
     <div class="collaborative-cursors pointer-events-none absolute top-0 left-0 w-0 h-0 overflow-visible">
-        <div class="fixed top-0 left-0 bg-red-500 text-white z-[9999] pointer-events-auto p-2">
-            DEBUG: Cursors ({{ visibleCursors.length }})
-        </div>
         <TransitionGroup name="cursor">
             <div v-for="presence in visibleCursors" :key="presence.user.id"
                 class="cursor-container absolute left-0 top-0 will-change-transform flex flex-col items-center" :style="getCursorStyle(presence)">

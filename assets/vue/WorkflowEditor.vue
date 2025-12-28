@@ -594,11 +594,12 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
             <Controls position="bottom-right" />
             <MiniMap position="bottom-left" />
 
-            <!-- Collaborative Cursors - rendered inside VueFlow viewport -->
-            <template #viewport-top>
-              <CollaborativeCursors :presences="otherUserPresences" :current-user-id="currentUserId" />
-            </template>
           </VueFlow>
+          <!-- Collaborative Cursors - rendered in overlay with viewport transform -->
+          <div class="absolute inset-0 pointer-events-none overflow-hidden" 
+               :style="{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`, transformOrigin: '0 0' }">
+            <CollaborativeCursors :presences="otherUserPresences" :current-user-id="currentUserId" />
+          </div>
         </div>
 
         <ExecutionTracePanel :execution="execution" :step-executions="stepExecutions"
