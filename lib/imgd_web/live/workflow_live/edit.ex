@@ -355,10 +355,15 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   defp handle_presence_diff(socket, _diff) do
-    # Refresh the full presence list on any change
-    # This is simpler and more reliable than tracking diffs
+    # Fetch latest full presence list
     presences = format_presences(Presence.list_users(socket.assigns.workflow.id))
-    {:noreply, assign(socket, :presences, presences)}
+    # todo: should we assign and push_event?
+    socket =
+      socket
+      |> assign(:presences, presences)
+      |> push_event("presence_update", %{presences: presences})
+
+    {:noreply, socket}
   end
 
   defp format_presences(presence_list) do

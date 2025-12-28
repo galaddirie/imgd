@@ -64,6 +64,7 @@ const getCursorStyle = (presence: UserPresence) => {
         transform: `translate(${presence.cursor.x - 8}px, ${presence.cursor.y - 8}px)`,
         // Smooth cursor movement with short transition
         transition: 'transform 100ms ease-out',
+        willChange: 'transform',
     }
 }
 
