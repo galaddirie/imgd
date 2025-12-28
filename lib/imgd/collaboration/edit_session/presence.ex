@@ -3,65 +3,155 @@ defmodule Imgd.Collaboration.EditSession.Presence do
   Tracks user presence in edit sessions using Phoenix.Presence.
 
   Manages:
-
   - Who is currently in the session
   - Cursor positions
   - Step selections
   - Step focus (config panel open)
 
-  Note: Subscription to presence updates should go through
-  `Imgd.Collaboration.EditSession.PubSub.subscribe_presence/2` which
-  enforces scope-based authorization.
+  ## Important Implementation Notes
+
+  Phoenix.Presence broadcasts `presence_diff` events automatically when:
+  - A process is tracked via `track/4`
+  - A process updates its metadata via `update/4`
+  - A tracked process terminates
+
+  Subscribers to the presence topic will receive:
+  ```
+  %Phoenix.Socket.Broadcast{
+    topic: "edit_presence:workflow_id",
+    event: "presence_diff",
+    payload: %{joins: %{...}, leaves: %{...}}
+  }
+  ```
   """
   use Phoenix.Presence,
     otp_app: :imgd,
     pubsub_server: Imgd.PubSub
 
-  alias Imgd.Collaboration.EditSession.PubSub, as: EditPubSub
+  require Logger
+
+  @type cursor :: %{x: number(), y: number()}
 
   @type presence_meta :: %{
-          user: map(),
-          cursor: %{x: number(), y: number()} | nil,
+          user: %{id: String.t(), email: String.t(), name: String.t() | nil},
+          cursor: cursor() | nil,
           selected_steps: [String.t()],
           focused_step: String.t() | nil,
           joined_at: DateTime.t()
         }
 
   @doc "Topic for a workflow's edit session presence."
-  def topic(workflow_id), do: EditPubSub.presence_topic(workflow_id)
+  def topic(workflow_id), do: "edit_presence:#{workflow_id}"
 
-  @doc "Track a user joining an edit session."
+  @doc """
+  Track a user joining an edit session.
+
+  This will broadcast a presence_diff to all subscribers with the new user
+  in the `joins` payload.
+  """
   def track_user(workflow_id, user, %Phoenix.LiveView.Socket{}) do
-    track(self(), topic(workflow_id), user.id, build_meta(user))
+    do_track(workflow_id, user, self())
   end
 
   def track_user(workflow_id, user, %Phoenix.Socket{} = socket) do
-    track(socket, topic(workflow_id), user.id, build_meta(user))
+    do_track_with_socket(workflow_id, user, socket)
   end
 
   def track_user(workflow_id, user, pid) when is_pid(pid) do
-    track(pid, topic(workflow_id), user.id, build_meta(user))
+    do_track(workflow_id, user, pid)
   end
 
-  @doc "Update user's cursor position."
-  def update_cursor(workflow_id, user_id, position) do
-    update(self(), topic(workflow_id), user_id, fn meta ->
-      Map.put(meta, :cursor, position)
-    end)
+  defp do_track(workflow_id, user, pid) do
+    meta = build_meta(user)
+    topic = topic(workflow_id)
+
+    Logger.debug("Tracking user #{user.id} on topic #{topic} with pid #{inspect(pid)}")
+
+    case track(pid, topic, user.id, meta) do
+      {:ok, _ref} = result ->
+        Logger.debug("Successfully tracked user #{user.id}")
+        result
+
+      {:error, reason} = error ->
+        Logger.error("Failed to track user #{user.id}: #{inspect(reason)}")
+        error
+    end
   end
 
-  @doc "Update user's step selection."
-  def update_selection(workflow_id, user_id, step_ids) do
-    update(self(), topic(workflow_id), user_id, fn meta ->
-      Map.put(meta, :selected_steps, step_ids)
-    end)
+  defp do_track_with_socket(workflow_id, user, socket) do
+    meta = build_meta(user)
+    topic = topic(workflow_id)
+
+    case track(socket, topic, user.id, meta) do
+      {:ok, _ref} = result ->
+        result
+
+      {:error, reason} = error ->
+        Logger.error("Failed to track user #{user.id}: #{inspect(reason)}")
+        error
+    end
   end
 
-  @doc "Update user's focused step (config panel open)."
+  @doc """
+  Update user's cursor position.
+
+  This broadcasts a presence_diff with the updated metadata.
+  """
+  def update_cursor(workflow_id, user_id, %{x: _, y: _} = position) do
+    topic = topic(workflow_id)
+
+    case update(self(), topic, user_id, fn meta ->
+           Map.put(meta, :cursor, position)
+         end) do
+      {:ok, _ref} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to update cursor for user #{user_id}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  def update_cursor(_workflow_id, _user_id, nil), do: :ok
+
+  @doc """
+  Update user's step selection.
+
+  This broadcasts a presence_diff with the updated selection.
+  """
+  def update_selection(workflow_id, user_id, step_ids) when is_list(step_ids) do
+    topic = topic(workflow_id)
+
+    case update(self(), topic, user_id, fn meta ->
+           Map.put(meta, :selected_steps, step_ids)
+         end) do
+      {:ok, _ref} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to update selection for user #{user_id}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Update user's focused step (config panel open).
+
+  This broadcasts a presence_diff with the updated focus.
+  """
   def update_focus(workflow_id, user_id, step_id) do
-    update(self(), topic(workflow_id), user_id, fn meta ->
-      Map.put(meta, :focused_step, step_id)
-    end)
+    topic = topic(workflow_id)
+
+    case update(self(), topic, user_id, fn meta ->
+           Map.put(meta, :focused_step, step_id)
+         end) do
+      {:ok, _ref} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to update focus for user #{user_id}: #{inspect(reason)}")
+        {:error, reason}
+    end
   end
 
   @doc "Clear user's focus."
@@ -69,7 +159,17 @@ defmodule Imgd.Collaboration.EditSession.Presence do
     update_focus(workflow_id, user_id, nil)
   end
 
-  @doc "Get all users in a session."
+  @doc """
+  Untrack a user from the session.
+
+  This broadcasts a presence_diff with the user in the `leaves` payload.
+  Note: This happens automatically when the tracked process dies.
+  """
+  def untrack_user(workflow_id, user_id) do
+    untrack(self(), topic(workflow_id), user_id)
+  end
+
+  @doc "Get all users in a session as a map of user_id => presence data."
   def list_users(workflow_id) do
     list(topic(workflow_id))
   end
@@ -89,8 +189,21 @@ defmodule Imgd.Collaboration.EditSession.Presence do
     |> Map.get(user_id)
   end
 
+  @doc """
+  Check if a user is present in a session.
+  """
+  def user_present?(workflow_id, user_id) do
+    workflow_id
+    |> list_users()
+    |> Map.has_key?(user_id)
+  end
+
+  # =============================================================================
+  # Private Helpers
+  # =============================================================================
+
   defp build_meta(user) do
-    name = Map.get(user, :name) || user.email
+    name = Map.get(user, :name) || Map.get(user, "name") || user.email
 
     %{
       user: %{

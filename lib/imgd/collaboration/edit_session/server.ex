@@ -25,28 +25,20 @@ defmodule Imgd.Collaboration.EditSession.Server do
     @moduledoc false
     defstruct [
       :workflow_id,
-      # Current WorkflowDraft
       :draft,
-      # EditorState struct
       :editor_state,
-      # Current sequence number
       :seq,
-      # Recent operations for sync
       :op_buffer,
-      # Set of applied operation IDs (dedup)
       :applied_ops,
-      # Has unpersisted changes
       :dirty,
-      # Timer ref for periodic persistence
       :persist_timer,
-      # Timer ref for idle shutdown
       :idle_timer
     ]
   end
 
-  # ============================================================================
+  # =============================================================================
   # Client API
-  # ============================================================================
+  # =============================================================================
 
   def start_link(opts) do
     workflow_id = Keyword.fetch!(opts, :workflow_id)
@@ -87,18 +79,17 @@ defmodule Imgd.Collaboration.EditSession.Server do
     GenServer.cast(via_tuple(workflow_id), :persist)
   end
 
-  # ============================================================================
+  # =============================================================================
   # Server Callbacks
-  # ============================================================================
+  # =============================================================================
 
   @impl true
   def init(workflow_id) do
     Logger.metadata(workflow_id: workflow_id, component: :edit_session)
-    Logger.info("Starting edit session")
+    Logger.info("Starting edit session for workflow #{workflow_id}")
 
     case load_initial_state(workflow_id) do
       {:ok, state} ->
-        # Schedule periodic persistence
         persist_timer = Process.send_after(self(), :persist, @persist_interval)
         idle_timer = Process.send_after(self(), :idle_timeout, @idle_timeout)
 
@@ -106,6 +97,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
         {:ok, state}
 
       {:error, reason} ->
+        Logger.error("Failed to load initial state: #{inspect(reason)}")
         {:stop, reason}
     end
   end
@@ -114,7 +106,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
   def handle_call({:apply_operation, operation}, _from, state) do
     case process_operation(state, operation) do
       {:ok, new_state, result} ->
-        # Reset idle timer
         new_state = reset_idle_timer(new_state)
         {:reply, {:ok, result}, new_state}
 
@@ -144,10 +135,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
     {:reply, {:ok, state.editor_state}, state}
   end
 
-  def handle_call({:update_editor_state, new_editor_state}, _from, state) do
-    {:reply, :ok, %{state | editor_state: new_editor_state}}
-  end
-
   @impl true
   def handle_cast({:release_lock, step_id, user_id}, state) do
     new_editor_state = EditorState.release_lock(state.editor_state, step_id, user_id)
@@ -156,24 +143,14 @@ defmodule Imgd.Collaboration.EditSession.Server do
     {:noreply, new_state}
   end
 
+  def handle_cast(:persist, state) do
+    new_state = do_persist(state)
+    {:noreply, new_state}
+  end
+
   @impl true
   def handle_info(:persist, state) do
-    new_state =
-      if state.dirty do
-        case Persistence.persist(state) do
-          :ok ->
-            Logger.debug("Persisted edit session state")
-            %{state | dirty: false}
-
-          {:error, reason} ->
-            Logger.error("Failed to persist: #{inspect(reason)}")
-            state
-        end
-      else
-        state
-      end
-
-    # Reschedule
+    new_state = do_persist(state)
     persist_timer = Process.send_after(self(), :persist, @persist_interval)
     {:noreply, %{new_state | persist_timer: persist_timer}}
   end
@@ -181,11 +158,9 @@ defmodule Imgd.Collaboration.EditSession.Server do
   def handle_info(:idle_timeout, state) do
     if Presence.count(state.workflow_id) == 0 do
       Logger.info("Edit session idle with no users, shutting down")
-      # Persist before shutdown
       Persistence.persist(state)
       {:stop, :normal, state}
     else
-      # Users present, reset timer
       idle_timer = Process.send_after(self(), :idle_timeout, @idle_timeout)
       {:noreply, %{state | idle_timer: idle_timer}}
     end
@@ -205,14 +180,13 @@ defmodule Imgd.Collaboration.EditSession.Server do
     :ok
   end
 
-  # ============================================================================
+  # =============================================================================
   # Private Functions
-  # ============================================================================
+  # =============================================================================
 
   defp load_initial_state(workflow_id) do
     with {:ok, draft} <- Workflows.get_draft(workflow_id),
          {:ok, last_seq, ops} <- Persistence.load_pending_ops(workflow_id) do
-      # Replay any pending operations
       {draft, seq} = replay_operations(draft, ops, last_seq)
 
       state = %State{
@@ -239,22 +213,16 @@ defmodule Imgd.Collaboration.EditSession.Server do
   end
 
   defp process_operation(state, operation) do
-    # 1. Check for duplicate
     if MapSet.member?(state.applied_ops, operation.id) do
-      # Already applied - return success with existing seq
       existing_op = Enum.find(state.op_buffer, &(&1.operation_id == operation.id))
       {:ok, state, %{seq: existing_op.seq, status: :duplicate}}
     else
-      # 2. Validate operation
       with :ok <- Operations.validate(state.draft, operation) do
-        # 3. Assign sequence number
         new_seq = state.seq + 1
 
-        # 4. Apply to draft (or editor state for editor-only ops)
-        {new_draft, new_editor_state} =
+        {new_draft, new_editor_state, editor_state_changed} =
           apply_to_state(state.draft, state.editor_state, operation)
 
-        # 5. Build persisted operation record
         op_record = %EditOperation{
           operation_id: operation.id,
           seq: new_seq,
@@ -265,7 +233,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
           workflow_id: state.workflow_id
         }
 
-        # 6. Update state
         new_state = %{
           state
           | draft: new_draft,
@@ -276,8 +243,13 @@ defmodule Imgd.Collaboration.EditSession.Server do
             dirty: true
         }
 
-        # 7. Broadcast to all clients via secure PubSub
+        # Broadcast the operation to all subscribers
         PubSub.broadcast_operation(state.workflow_id, op_record)
+
+        # If editor state changed, broadcast that too
+        if editor_state_changed do
+          broadcast_editor_state_update(state.workflow_id, new_editor_state)
+        end
 
         {:ok, new_state, %{seq: new_seq, status: :applied}}
       end
@@ -311,7 +283,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
             editor_state
           end
 
-        {new_draft, new_editor_state}
+        {new_draft, new_editor_state, type == :remove_step}
 
       # Editor-only operations - modify editor state only
       :pin_step_output ->
@@ -319,10 +291,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
           EditorState.pin_output(
             editor_state,
             operation.payload.step_id,
-            operation.payload.output_data
+            operation.payload[:output_data] || %{}
           )
 
-        {draft, new_editor_state}
+        {draft, new_editor_state, true}
 
       :unpin_step_output ->
         new_editor_state =
@@ -331,7 +303,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
             operation.payload.step_id
           )
 
-        {draft, new_editor_state}
+        {draft, new_editor_state, true}
 
       :disable_step ->
         new_editor_state =
@@ -341,7 +313,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
             operation.payload[:mode] || :skip
           )
 
-        {draft, new_editor_state}
+        {draft, new_editor_state, true}
 
       :enable_step ->
         new_editor_state =
@@ -350,8 +322,19 @@ defmodule Imgd.Collaboration.EditSession.Server do
             operation.payload.step_id
           )
 
-        {draft, new_editor_state}
+        {draft, new_editor_state, true}
+
+      _ ->
+        {draft, editor_state, false}
     end
+  end
+
+  defp broadcast_editor_state_update(workflow_id, editor_state) do
+    Phoenix.PubSub.broadcast(
+      Imgd.PubSub,
+      PubSub.session_topic(workflow_id),
+      {:editor_state_updated, editor_state}
+    )
   end
 
   defp append_to_buffer(buffer, op) do
@@ -360,7 +343,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
   end
 
   defp build_sync_response(state, nil) do
-    # Full state for new join
     %{
       type: :full_sync,
       draft: state.draft,
@@ -377,7 +359,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
         %{type: :up_to_date, seq: state.seq}
 
       gap > 0 and gap <= length(state.op_buffer) ->
-        # Can send incremental ops
         ops =
           state.op_buffer
           |> Enum.filter(&(&1.seq > client_seq))
@@ -386,7 +367,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
         %{type: :incremental, ops: ops, seq: state.seq}
 
       true ->
-        # Too far behind - full sync
         %{
           type: :full_sync,
           draft: state.draft,
@@ -409,5 +389,21 @@ defmodule Imgd.Collaboration.EditSession.Server do
     if state.idle_timer, do: Process.cancel_timer(state.idle_timer)
     idle_timer = Process.send_after(self(), :idle_timeout, @idle_timeout)
     %{state | idle_timer: idle_timer}
+  end
+
+  defp do_persist(state) do
+    if state.dirty do
+      case Persistence.persist(state) do
+        :ok ->
+          Logger.debug("Persisted edit session state")
+          %{state | dirty: false}
+
+        {:error, reason} ->
+          Logger.error("Failed to persist: #{inspect(reason)}")
+          state
+      end
+    else
+      state
+    end
   end
 end

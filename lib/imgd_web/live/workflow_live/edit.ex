@@ -1,6 +1,6 @@
 defmodule ImgdWeb.WorkflowLive.Edit do
   @moduledoc """
-  LiveView for designing and editing workflows.
+  LiveView for designing and editing workflows with real-time collaboration.
   """
   use ImgdWeb, :live_view
 
@@ -15,51 +15,28 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     scope = socket.assigns.current_scope
     user = scope.user
 
-    # Ensure collaboration server is running
-    {:ok, _pid} = Imgd.Collaboration.EditSession.Supervisor.ensure_session(id)
-
     case Workflows.get_workflow_with_draft(id, scope) do
       {:ok, workflow} ->
-        # Check edit permissions (but don't subscribe yet - that happens when connected)
         case PubSub.authorize_edit(scope, workflow.id) do
           :ok ->
             step_types = StepRegistry.all()
-
-            # Subscribe to PubSub and track presence ONLY when WebSocket is connected
-            # This is critical: the initial HTTP mount creates a temporary process,
-            # but the WebSocket mount creates the persistent process that needs to receive updates
-            {editor_state, presences} =
-              if connected?(socket) do
-                # Subscribe to collaboration events
-                :ok = Phoenix.PubSub.subscribe(Imgd.PubSub, PubSub.session_topic(workflow.id))
-                :ok = Phoenix.PubSub.subscribe(Imgd.PubSub, PubSub.presence_topic(workflow.id))
-
-                # Track current user
-                {:ok, _} = Presence.track_user(workflow.id, user, socket)
-
-                # Get initial editor state from session server
-                es =
-                  case Server.get_editor_state(workflow.id) do
-                    {:ok, state} -> state
-                    _ -> %EditorState{workflow_id: workflow.id}
-                  end
-
-                # Get initial presences
-                p = format_presences(Presence.list_users(workflow.id))
-
-                {es, p}
-              else
-                # Not connected yet - use defaults
-                {%EditorState{workflow_id: workflow.id}, []}
-              end
 
             socket =
               socket
               |> assign(:page_title, "Editing #{workflow.name}")
               |> assign(:workflow, workflow)
               |> assign(:step_types, step_types)
-              |> assign(:editor_state, editor_state)
-              |> assign(:presences, presences)
+              |> assign(:editor_state, %EditorState{workflow_id: workflow.id})
+              |> assign(:presences, [])
+              |> assign(:current_user_id, user.id)
+
+            # Only set up collaboration when WebSocket is connected
+            socket =
+              if connected?(socket) do
+                setup_collaboration(socket, workflow.id, user)
+              else
+                socket
+              end
 
             {:ok, socket, layout: false}
 
@@ -82,6 +59,38 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
+  # =============================================================================
+  # Collaboration Setup
+  # =============================================================================
+
+  defp setup_collaboration(socket, workflow_id, user) do
+    # Ensure edit session server is running
+    {:ok, _pid} = Imgd.Collaboration.EditSession.Supervisor.ensure_session(workflow_id)
+
+    # Subscribe to operation broadcasts
+    :ok = Phoenix.PubSub.subscribe(Imgd.PubSub, PubSub.session_topic(workflow_id))
+
+    # Subscribe to presence topic for diffs
+    :ok = Phoenix.PubSub.subscribe(Imgd.PubSub, Presence.topic(workflow_id))
+
+    # Track this user's presence
+    {:ok, _} = Presence.track_user(workflow_id, user, socket)
+
+    # Get initial editor state
+    editor_state =
+      case Server.get_editor_state(workflow_id) do
+        {:ok, state} -> state
+        _ -> %EditorState{workflow_id: workflow_id}
+      end
+
+    # Get initial presence list
+    presences = format_presences(Presence.list_users(workflow_id))
+
+    socket
+    |> assign(:editor_state, editor_state)
+    |> assign(:presences, presences)
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -93,32 +102,29 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         stepTypes={@step_types}
         editorState={@editor_state}
         presences={@presences}
-        currentUserId={@current_scope.user.id}
-        v-on:add_step={handle_add_step()}
-        v-on:move_step={handle_move_step()}
-        v-on:update_step={handle_update_step()}
-        v-on:remove_step={handle_remove_step()}
-        v-on:add_connection={handle_add_connection()}
-        v-on:remove_connection={handle_remove_connection()}
-        v-on:save_workflow={handle_save_workflow()}
+        currentUserId={@current_user_id}
+        v-on:add_step={JS.push("add_step")}
+        v-on:move_step={JS.push("move_step")}
+        v-on:update_step={JS.push("update_step")}
+        v-on:remove_step={JS.push("remove_step")}
+        v-on:add_connection={JS.push("add_connection")}
+        v-on:remove_connection={JS.push("remove_connection")}
+        v-on:save_workflow={JS.push("save_workflow")}
         v-on:mouse_move={JS.push("mouse_move")}
         v-on:selection_changed={JS.push("selection_changed")}
+        v-on:pin_output={JS.push("pin_output")}
+        v-on:unpin_output={JS.push("unpin_output")}
+        v-on:disable_step={JS.push("disable_step")}
+        v-on:enable_step={JS.push("enable_step")}
+        v-on:run_test={JS.push("run_test")}
       />
     </div>
     """
   end
 
-  # ============================================================================
-  # Event Handlers
-  # ============================================================================
-
-  defp handle_add_step, do: JS.push("add_step")
-  defp handle_move_step, do: JS.push("move_step")
-  defp handle_update_step, do: JS.push("update_step")
-  defp handle_remove_step, do: JS.push("remove_step")
-  defp handle_add_connection, do: JS.push("add_connection")
-  defp handle_remove_connection, do: JS.push("remove_connection")
-  defp handle_save_workflow, do: JS.push("save_workflow")
+  # =============================================================================
+  # Step Operations
+  # =============================================================================
 
   @impl true
   def handle_event("add_step", %{"type_id" => type_id, "position" => pos}, socket) do
@@ -137,94 +143,77 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       notes: nil
     }
 
-    operation = %{
-      id: UUID.generate(),
-      type: :add_step,
-      payload: %{step: step},
-      user_id: socket.assigns.current_scope.user.id,
-      client_seq: nil
-    }
-
-    Server.apply_operation(socket.assigns.workflow.id, operation)
-    {:noreply, socket}
+    apply_operation(socket, :add_step, %{step: step})
   end
 
   @impl true
   def handle_event("move_step", %{"step_id" => step_id, "position" => pos}, socket) do
-    operation = %{
-      id: UUID.generate(),
-      type: :update_step_position,
-      payload: %{step_id: step_id, position: pos},
-      user_id: socket.assigns.current_scope.user.id,
-      client_seq: nil
-    }
-
-    Server.apply_operation(socket.assigns.workflow.id, operation)
-    {:noreply, socket}
+    apply_operation(socket, :update_step_position, %{step_id: step_id, position: pos})
   end
 
   @impl true
   def handle_event("update_step", %{"step_id" => step_id, "changes" => changes}, socket) do
-    operation = %{
-      id: UUID.generate(),
-      type: :update_step_config,
-      payload: %{step_id: step_id, changes: changes},
-      user_id: socket.assigns.current_scope.user.id,
-      client_seq: nil
-    }
-
-    Server.apply_operation(socket.assigns.workflow.id, operation)
-    {:noreply, socket}
+    apply_operation(socket, :update_step_metadata, %{step_id: step_id, changes: changes})
   end
 
   @impl true
   def handle_event("remove_step", %{"step_id" => step_id}, socket) do
-    operation = %{
-      id: UUID.generate(),
-      type: :remove_step,
-      payload: %{step_id: step_id},
-      user_id: socket.assigns.current_scope.user.id,
-      client_seq: nil
-    }
-
-    Server.apply_operation(socket.assigns.workflow.id, operation)
-    {:noreply, socket}
+    apply_operation(socket, :remove_step, %{step_id: step_id})
   end
 
   @impl true
   def handle_event("add_connection", params, socket) do
-    operation = %{
+    connection = %{
       id: UUID.generate(),
-      type: :add_connection,
-      payload: params,
-      user_id: socket.assigns.current_scope.user.id,
-      client_seq: nil
+      source_step_id: params["source_step_id"],
+      target_step_id: params["target_step_id"],
+      source_output: params["source_output"] || "main",
+      target_input: params["target_input"] || "main"
     }
 
-    Server.apply_operation(socket.assigns.workflow.id, operation)
-    {:noreply, socket}
+    apply_operation(socket, :add_connection, %{connection: connection})
   end
 
   @impl true
   def handle_event("remove_connection", %{"connection_id" => id}, socket) do
-    operation = %{
-      id: UUID.generate(),
-      type: :remove_connection,
-      payload: %{connection_id: id},
-      user_id: socket.assigns.current_scope.user.id,
-      client_seq: nil
-    }
+    apply_operation(socket, :remove_connection, %{connection_id: id})
+  end
 
-    Server.apply_operation(socket.assigns.workflow.id, operation)
-    {:noreply, socket}
+  # =============================================================================
+  # Editor State Operations
+  # =============================================================================
+
+  @impl true
+  def handle_event("pin_output", %{"step_id" => step_id}, socket) do
+    apply_operation(socket, :pin_step_output, %{step_id: step_id, output_data: %{}})
   end
 
   @impl true
-  def handle_event("mouse_move", pos, socket) do
+  def handle_event("unpin_output", %{"step_id" => step_id}, socket) do
+    apply_operation(socket, :unpin_step_output, %{step_id: step_id})
+  end
+
+  @impl true
+  def handle_event("disable_step", %{"step_id" => step_id, "mode" => mode}, socket) do
+    mode_atom = if mode == "exclude", do: :exclude, else: :skip
+    apply_operation(socket, :disable_step, %{step_id: step_id, mode: mode_atom})
+  end
+
+  @impl true
+  def handle_event("enable_step", %{"step_id" => step_id}, socket) do
+    apply_operation(socket, :enable_step, %{step_id: step_id})
+  end
+
+  # =============================================================================
+  # Presence/Collaboration Events
+  # =============================================================================
+
+  @impl true
+  def handle_event("mouse_move", %{"x" => x, "y" => y}, socket) do
     Presence.update_cursor(
       socket.assigns.workflow.id,
-      socket.assigns.current_scope.user.id,
-      pos
+      socket.assigns.current_user_id,
+      %{x: x, y: y}
     )
 
     {:noreply, socket}
@@ -234,12 +223,16 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_event("selection_changed", %{"step_ids" => step_ids}, socket) do
     Presence.update_selection(
       socket.assigns.workflow.id,
-      socket.assigns.current_scope.user.id,
+      socket.assigns.current_user_id,
       step_ids
     )
 
     {:noreply, socket}
   end
+
+  # =============================================================================
+  # Workflow Operations
+  # =============================================================================
 
   @impl true
   def handle_event("save_workflow", _params, socket) do
@@ -247,36 +240,59 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     {:noreply, put_flash(socket, :info, "Workflow draft saved")}
   end
 
-  # ============================================================================
-  # Info Handlers (PubSub)
-  # ============================================================================
+  @impl true
+  def handle_event("run_test", _params, socket) do
+    # TODO: Implement test execution
+    {:noreply, put_flash(socket, :info, "Test execution started")}
+  end
 
+  # =============================================================================
+  # PubSub Message Handlers
+  # =============================================================================
+
+  # Handle operation broadcasts from the edit session server
   @impl true
   def handle_info({:operation_applied, operation}, socket) do
-    # Apply operation locally to avoid race condition with async persistence
     case Operations.apply(socket.assigns.workflow.draft, operation) do
       {:ok, new_draft} ->
         updated_workflow = %{socket.assigns.workflow | draft: new_draft}
         {:noreply, assign(socket, :workflow, updated_workflow)}
 
       {:error, _reason} ->
-        # If local application fails, fall back to DB fetch (though it might be stale)
-        {:ok, workflow} =
-          Workflows.get_workflow_with_draft(
-            socket.assigns.workflow.id,
-            socket.assigns.current_scope
-          )
+        # Fallback: reload from database
+        case Workflows.get_workflow_with_draft(
+               socket.assigns.workflow.id,
+               socket.assigns.current_scope
+             ) do
+          {:ok, workflow} ->
+            {:noreply, assign(socket, :workflow, workflow)}
 
-        {:noreply, assign(socket, :workflow, workflow)}
+          {:error, _} ->
+            {:noreply, socket}
+        end
     end
   end
 
+  # Handle editor state updates (pins, disabled steps, locks)
   @impl true
-  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff", payload: _payload}, socket) do
-    presences = format_presences(Presence.list_users(socket.assigns.workflow.id))
-    {:noreply, assign(socket, :presences, presences)}
+  def handle_info({:editor_state_updated, new_editor_state}, socket) do
+    {:noreply, assign(socket, :editor_state, new_editor_state)}
   end
 
+  # Handle Phoenix.Presence diff broadcasts
+  # This is the standard format from Phoenix.Presence
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff", payload: diff}, socket) do
+    handle_presence_diff(socket, diff)
+  end
+
+  # Alternative format - plain presence_diff tuple (just in case)
+  @impl true
+  def handle_info({:presence_diff, diff}, socket) do
+    handle_presence_diff(socket, diff)
+  end
+
+  # Handle lock events
   @impl true
   def handle_info({:lock_acquired, step_id, user_id}, socket) do
     editor_state =
@@ -291,25 +307,89 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     {:noreply, assign(socket, :editor_state, editor_state)}
   end
 
-  # ============================================================================
-  # Helpers
-  # ============================================================================
+  # Handle sync state (for reconnection)
+  @impl true
+  def handle_info({:sync_state, state}, socket) do
+    socket =
+      socket
+      |> assign(:workflow, %{socket.assigns.workflow | draft: state.draft})
+      |> assign(
+        :editor_state,
+        deserialize_editor_state(state.editor_state, socket.assigns.workflow.id)
+      )
+
+    {:noreply, socket}
+  end
+
+  # Catch-all for unhandled messages (useful for debugging)
+  @impl true
+  def handle_info(msg, socket) do
+    require Logger
+    Logger.debug("Unhandled message in WorkflowLive.Edit: #{inspect(msg)}")
+    {:noreply, socket}
+  end
+
+  # =============================================================================
+  # Private Helpers
+  # =============================================================================
+
+  defp apply_operation(socket, type, payload) do
+    operation = %{
+      id: UUID.generate(),
+      type: type,
+      payload: payload,
+      user_id: socket.assigns.current_user_id,
+      client_seq: nil
+    }
+
+    case Server.apply_operation(socket.assigns.workflow.id, operation) do
+      {:ok, _result} ->
+        {:noreply, socket}
+
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Operation failed: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Operation failed")}
+    end
+  end
+
+  defp handle_presence_diff(socket, _diff) do
+    # Refresh the full presence list on any change
+    # This is simpler and more reliable than tracking diffs
+    presences = format_presences(Presence.list_users(socket.assigns.workflow.id))
+    {:noreply, assign(socket, :presences, presences)}
+  end
 
   defp format_presences(presence_list) do
     presence_list
     |> Enum.map(fn {user_id, %{metas: metas}} ->
-      meta = List.first(metas)
+      # Take the most recent meta (first one)
+      meta = List.first(metas) || %{}
 
       %{
         user: %{
           id: user_id,
-          name: meta.user.name,
-          email: meta.user.email
+          name: get_in(meta, [:user, :name]),
+          email: get_in(meta, [:user, :email])
         },
         cursor: meta[:cursor],
         selected_steps: meta[:selected_steps] || [],
-        focused_step_id: meta[:focused_step]
+        focused_step: meta[:focused_step]
       }
     end)
+  end
+
+  defp deserialize_editor_state(nil, workflow_id) do
+    %EditorState{workflow_id: workflow_id}
+  end
+
+  defp deserialize_editor_state(state, workflow_id) when is_map(state) do
+    %EditorState{
+      workflow_id: workflow_id,
+      pinned_outputs: state[:pinned_outputs] || state["pinned_outputs"] || %{},
+      disabled_steps: MapSet.new(state[:disabled_steps] || state["disabled_steps"] || []),
+      disabled_mode: state[:disabled_mode] || state["disabled_mode"] || %{},
+      step_locks: state[:step_locks] || state["step_locks"] || %{}
+    }
   end
 end
