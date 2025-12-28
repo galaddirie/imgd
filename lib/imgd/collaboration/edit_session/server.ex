@@ -82,6 +82,11 @@ defmodule Imgd.Collaboration.EditSession.Server do
     GenServer.call(via_tuple(workflow_id), :get_editor_state)
   end
 
+  @doc "Force a persistence of current state."
+  def persist(workflow_id) do
+    GenServer.cast(via_tuple(workflow_id), :persist)
+  end
+
   # ============================================================================
   # Server Callbacks
   # ============================================================================

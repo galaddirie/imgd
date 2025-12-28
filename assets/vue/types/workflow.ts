@@ -203,6 +203,7 @@ export interface StepNodeData {
     disabled?: boolean
     pinned?: boolean
     locked_by?: string
+    selected_by?: { id: string; name: string; color: string }[]
 }
 
 /** Runtime statistics for a step */

@@ -5,7 +5,7 @@ import type { NodeProps } from '@vue-flow/core'
 import Handle from './Handle.vue'
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '../../lib/color'
 import { useThemeStore } from '../../stores/theme'
-import type { StepNodeData, StepKind } from '@/types/workflow'
+import type { StepNodeData, StepKind } from '../../types/workflow'
 import {
     GlobeAltIcon,
     ServerIcon,
@@ -160,6 +160,7 @@ const nodeClasses = computed(() => [
     props.dragging ? 'cursor-grabbing shadow-xl' : 'cursor-grab hover:shadow-lg',
     props.data.disabled ? 'opacity-60' : '',
     props.data.locked_by ? 'ring-2 ring-warning/50' : '',
+    props.data.selected_by?.length ? 'ring-2 ring-offset-2' : '',
 ])
 
 // Node style with selection ring
@@ -177,6 +178,8 @@ const nodeStyle = computed(() => {
     return {
         borderColor: props.selected ? oklchToHex(colorMap[props.data.status ?? 'pending']) : currentStatusStyle.value.border,
         boxShadow: shadow,
+        // If selected by others, use the first selector's color for the ring
+        ...(props.data.selected_by?.length ? { '--tw-ring-color': props.data.selected_by[0].color } : {})
     }
 })
 
@@ -249,6 +252,18 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false)
                             aria-label="Step actions">
                             <EllipsisVerticalIcon class="size-5 text-base-content/60" />
                         </button>
+                    </div>
+                </div>
+
+                <!-- Remote Selection Labels -->
+                <div v-if="data.selected_by?.length" class="flex flex-wrap gap-1 mb-2">
+                    <div
+                        v-for="user in data.selected_by"
+                        :key="user.id"
+                        class="px-1.5 py-0.5 rounded text-[9px] font-bold text-white shadow-sm"
+                        :style="{ backgroundColor: user.color }"
+                    >
+                        {{ user.name }}
                     </div>
                 </div>
 

@@ -16,8 +16,10 @@ import ContextMenu from './components/ui/ContextMenu.vue'
 import type { MenuItem } from './ui/ContextMenu.vue'
 
 import { useClientStore } from './store/clientStore'
-import { oklchToHex } from './lib/color'
+import { oklchToHex, generateColor } from './lib/color'
 import { useLayout } from './lib/useLayout'
+import { useThrottleFn } from '@vueuse/core'
+import CollaborativeCursors from './components/flow/CollaborativeCursors.vue'
 
 import {
   TrashIcon,
@@ -62,6 +64,7 @@ interface Props {
   // Collaboration state
   editorState?: EditorState
   presences?: UserPresence[]
+  currentUserId?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -70,6 +73,7 @@ const props = withDefaults(defineProps<Props>(), {
   stepExecutions: () => [],
   editorState: undefined,
   presences: () => [],
+  currentUserId: undefined,
 })
 
 // =============================================================================
@@ -149,6 +153,14 @@ const nodes = computed<Node<StepNodeData>[]>(() => {
     const isDisabled = props.editorState?.disabled_steps?.includes(step.id)
     const lockedBy = props.editorState?.step_locks?.[step.id]
 
+    const selectedBy = props.presences
+      .filter(p => p.user.id !== props.currentUserId && p.selected_steps?.includes(step.id))
+      .map(p => ({
+        id: p.user.id,
+        name: p.user.name || p.user.email,
+        color: generateColor(p.user.name || p.user.email, 0)
+      }))
+
     return {
       id: step.id,
       type: 'step',
@@ -171,6 +183,7 @@ const nodes = computed<Node<StepNodeData>[]>(() => {
         disabled: isDisabled,
         pinned: isPinned,
         locked_by: lockedBy,
+        selected_by: selectedBy,
       } satisfies StepNodeData,
     }
   })
