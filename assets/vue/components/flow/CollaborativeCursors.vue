@@ -7,6 +7,7 @@ import { useLiveVue } from 'live_vue'
 const props = defineProps<{
     presences: UserPresence[]
     currentUserId?: string
+    zoom?: number
 }>()
 
 // Use local state for presences to allow fast updates via events
@@ -59,12 +60,17 @@ const getCursorColor = (user: UserPresence['user']) => {
 const getCursorStyle = (presence: UserPresence) => {
     if (!presence.cursor) return { display: 'none' }
 
+    const zoom = props.zoom || 1
+    const inverseZoom = 1 / zoom
+
     return {
-        // Center the cursor circle at the cursor position
-        transform: `translate(${presence.cursor.x - 8}px, ${presence.cursor.y - 8}px)`,
+        // Position the tip of the arrow at the cursor position
+        transform: `translate(${presence.cursor.x}px, ${presence.cursor.y}px) scale(${inverseZoom})`,
         // Smooth cursor movement with short transition
+        // We include the scale in transition to keep it smooth if zoom changes
         transition: 'transform 100ms ease-out',
         willChange: 'transform',
+        transformOrigin: '0 0'
     }
 }
 
@@ -83,14 +89,21 @@ const getUserDisplayName = (user: UserPresence['user']) => {
     <div class="collaborative-cursors pointer-events-none absolute top-0 left-0 w-0 h-0 overflow-visible">
         <TransitionGroup name="cursor">
             <div v-for="presence in visibleCursors" :key="presence.user.id"
-                class="cursor-container absolute left-0 top-0 will-change-transform flex flex-col items-center" :style="getCursorStyle(presence)">
-                <!-- Cursor circle -->
-                <div class="cursor-circle w-4 h-4 rounded-full border-2 border-white shadow-lg"
-                    :style="{ backgroundColor: getCursorColor(presence.user) }">
-                </div>
+                class="cursor-container absolute left-0 top-0 will-change-transform flex flex-col items-start" 
+                :style="getCursorStyle(presence)">
+                
+                <!-- Figma-like Cursor Arrow -->
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" class="drop-shadow-[0_2px_2px_rgba(0,0,0,0.4)]">
+                    <path d="M0 0L16 11L9 11L0 16V0Z" 
+                        fill="white" 
+                        stroke="black" 
+                        stroke-width="1" />
+                    <path d="M0 0L16 11L9 11L0 16V0Z" 
+                        :fill="getCursorColor(presence.user)" />
+                </svg>
 
-                <!-- User name label underneath -->
-                <div class="cursor-label -mt-1 px-2 py-0.5 rounded-md text-[11px] font-semibold text-white whitespace-nowrap shadow-md"
+                <!-- User name label underneath/offset -->
+                <div class="cursor-label px-1.5 py-0.5 rounded-sm rounded-tl-none text-[10px] uppercase tracking-wider font-extrabold text-white whitespace-nowrap shadow-md translate-x-4 -translate-y-1.5"
                     :style="{ backgroundColor: getCursorColor(presence.user) }">
                     {{ getUserDisplayName(presence.user) }}
                 </div>
@@ -106,10 +119,6 @@ const getUserDisplayName = (user: UserPresence['user']) => {
 
 .cursor-container {
     z-index: 1000;
-}
-
-.cursor-circle {
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
 .cursor-label {

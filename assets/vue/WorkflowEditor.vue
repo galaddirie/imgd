@@ -606,7 +606,7 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
           <div v-if="isMounted" 
                class="absolute inset-0 pointer-events-none z-[1000]" 
                :style="{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`, transformOrigin: '0 0' }">
-            <CollaborativeCursors :presences="otherUserPresences" :current-user-id="currentUserId" />
+            <CollaborativeCursors :presences="otherUserPresences" :current-user-id="currentUserId" :zoom="viewport.zoom" />
           </div>
         </div>
 
