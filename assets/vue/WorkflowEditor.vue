@@ -104,7 +104,6 @@ const {
   onConnect,
   onNodeDragStop,
   project,
-  vueFlowRef,
   getNodes,
   getEdges,
   getSelectedNodes,
@@ -112,6 +111,13 @@ const {
   updateEdge,
   viewport,
 } = useVueFlow()
+
+const vueFlowRef = ref<any>(null)
+
+const isMounted = ref(false)
+onMounted(() => {
+  isMounted.value = true
+})
 
 const { layout, previousDirection } = useLayout()
 
@@ -136,9 +142,9 @@ const emitCursorPosition = useThrottleFn((x: number, y: number) => {
 }, 50)
 
 const handlePaneMouseMove = (event: MouseEvent) => {
-  if (!vueFlowRef.value) return
+  if (!canvasRef.value) return
 
-  const { left, top } = vueFlowRef.value.getBoundingClientRect()
+  const { left, top } = canvasRef.value.getBoundingClientRect()
 
   // Convert screen coordinates to flow coordinates
   const flowPosition = project({
@@ -491,7 +497,7 @@ const handleDrop = (event: DragEvent) => {
   const typeId = event.dataTransfer?.getData('application/vueflow')
   if (!typeId) return
 
-  const { left, top } = vueFlowRef.value!.getBoundingClientRect()
+  const { left, top } = canvasRef.value!.getBoundingClientRect()
   const position = project({ x: event.clientX - left, y: event.clientY - top })
   emit('add_step', { type_id: typeId, position })
 }
@@ -583,7 +589,7 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
 
       <div class="flex-1 flex flex-col min-w-0 relative">
         <div ref="canvasRef" class="flex-1 overflow-hidden relative" @mousemove="handlePaneMouseMove">
-          <VueFlow :nodes="nodes" :edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes"
+          <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes"
             :nodes-connectable="true" :nodes-draggable="true" :edges-updatable="true"
             :default-viewport="{ zoom: 1.2, x: 100, y: 50 }" fit-view-on-init @node-click="handleNodeClick"
             @node-double-click="handleNodeDoubleClick" @node-context-menu="handleNodeContextMenu"
@@ -593,10 +599,12 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
             <Background :pattern-color="oklchToHex('oklch(50% 0.05 260)')" :gap="24" />
             <Controls position="bottom-right" />
             <MiniMap position="bottom-left" />
-
           </VueFlow>
+
           <!-- Collaborative Cursors - rendered in overlay with viewport transform -->
-          <div class="absolute inset-0 pointer-events-none overflow-hidden" 
+          <!-- We move it back to manual sync because direct nesting in VueFlow slots can break in LiveVue SSR -->
+          <div v-if="isMounted" 
+               class="absolute inset-0 pointer-events-none z-[1000]" 
                :style="{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`, transformOrigin: '0 0' }">
             <CollaborativeCursors :presences="otherUserPresences" :current-user-id="currentUserId" />
           </div>
