@@ -20,37 +20,44 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
     case Workflows.get_workflow_with_draft(id, scope) do
       {:ok, workflow} ->
-        step_types = StepRegistry.all()
+        # Ensure user has edit permissions for this session
+        case PubSub.subscribe_all(scope, workflow.id) do
+          :ok ->
+            step_types = StepRegistry.all()
 
-        if connected?(socket) do
-          # Subscribe to session updates (operations, locks)
-          :ok = PubSub.subscribe_session(scope, workflow.id)
-          # Subscribe to presence updates (cursors, selections)
-          :ok = PubSub.subscribe_presence(scope, workflow.id)
+            if connected?(socket) do
+              # Track current user
+              {:ok, _} = Presence.track_user(workflow.id, user, socket)
+            end
 
-          # Track current user
-          {:ok, _} = Presence.track_user(workflow.id, user, socket)
+            # Get initial editor state from session server
+            editor_state =
+              case Server.get_editor_state(workflow.id) do
+                {:ok, state} -> state
+                _ -> %EditorState{workflow_id: workflow.id}
+              end
+
+            # Get initial presences
+            presences = format_presences(Presence.list_users(workflow.id))
+
+            socket =
+              socket
+              |> assign(:page_title, "Editing #{workflow.name}")
+              |> assign(:workflow, workflow)
+              |> assign(:step_types, step_types)
+              |> assign(:editor_state, editor_state)
+              |> assign(:presences, presences)
+
+            {:ok, socket, layout: false}
+
+          {:error, :unauthorized} ->
+            socket =
+              socket
+              |> put_flash(:error, "You do not have permission to edit this workflow")
+              |> redirect(to: ~p"/workflows/#{workflow.id}")
+
+            {:ok, socket}
         end
-
-        # Get initial editor state from session server
-        editor_state =
-          case Server.get_editor_state(workflow.id) do
-            {:ok, state} -> state
-            _ -> %EditorState{workflow_id: workflow.id}
-          end
-
-        # Get initial presences
-        presences = format_presences(Presence.list_users(workflow.id))
-
-        socket =
-          socket
-          |> assign(:page_title, "Editing #{workflow.name}")
-          |> assign(:workflow, workflow)
-          |> assign(:step_types, step_types)
-          |> assign(:editor_state, editor_state)
-          |> assign(:presences, presences)
-
-        {:ok, socket, layout: false}
 
       {:error, :not_found} ->
         socket =
@@ -222,7 +229,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   @impl true
-  def handle_info({:presence_diff, _diff}, socket) do
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff", payload: _payload}, socket) do
     presences = format_presences(Presence.list_users(socket.assigns.workflow.id))
     {:noreply, assign(socket, :presences, presences)}
   end

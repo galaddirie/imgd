@@ -73,18 +73,22 @@ defmodule Imgd.Collaboration.EditorState do
   def release_lock(state, step_id, user_id) do
     case Map.get(state.step_locks, step_id) do
       ^user_id ->
-        %{
-          state
-          | step_locks: Map.delete(state.step_locks, step_id),
-            lock_timestamps: Map.delete(state.lock_timestamps, step_id)
-        }
+        release_lock(state, step_id)
 
       _ ->
         state
     end
   end
 
-  defp put_lock(state, step_id, user_id, timestamp) do
+  def release_lock(state, step_id) do
+    %{
+      state
+      | step_locks: Map.delete(state.step_locks, step_id),
+        lock_timestamps: Map.delete(state.lock_timestamps, step_id)
+    }
+  end
+
+  def put_lock(state, step_id, user_id, timestamp) do
     %{
       state
       | step_locks: Map.put(state.step_locks, step_id, user_id),
