@@ -86,7 +86,8 @@ defmodule Imgd.Workflows do
   - `:public` - if the workflow is public and user doesn't own or have a share
   - `nil` - if no access
   """
-  @spec workflow_access_state(Scope.t() | nil, Workflow.t()) :: :owner | :viewer | :editor | :public | nil
+  @spec workflow_access_state(Scope.t() | nil, Workflow.t()) ::
+          :owner | :viewer | :editor | :public | nil
   def workflow_access_state(%Scope{} = scope, %Workflow{} = workflow) do
     user_id = scope.user.id
 

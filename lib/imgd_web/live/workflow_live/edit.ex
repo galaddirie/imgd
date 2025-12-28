@@ -7,7 +7,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   alias Imgd.Workflows
   alias Imgd.Steps.Registry, as: StepRegistry
   alias Imgd.Collaboration.EditorState
-  alias Imgd.Collaboration.EditSession.{Server, Presence, PubSub}
+  alias Imgd.Collaboration.EditSession.{Server, Presence, PubSub, Operations}
   alias Ecto.UUID
 
   @impl true
@@ -20,25 +20,38 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
     case Workflows.get_workflow_with_draft(id, scope) do
       {:ok, workflow} ->
-        # Ensure user has edit permissions for this session
-        case PubSub.subscribe_all(scope, workflow.id) do
+        # Check edit permissions (but don't subscribe yet - that happens when connected)
+        case PubSub.authorize_edit(scope, workflow.id) do
           :ok ->
             step_types = StepRegistry.all()
 
-            if connected?(socket) do
-              # Track current user
-              {:ok, _} = Presence.track_user(workflow.id, user, socket)
-            end
+            # Subscribe to PubSub and track presence ONLY when WebSocket is connected
+            # This is critical: the initial HTTP mount creates a temporary process,
+            # but the WebSocket mount creates the persistent process that needs to receive updates
+            {editor_state, presences} =
+              if connected?(socket) do
+                # Subscribe to collaboration events
+                :ok = Phoenix.PubSub.subscribe(Imgd.PubSub, PubSub.session_topic(workflow.id))
+                :ok = Phoenix.PubSub.subscribe(Imgd.PubSub, PubSub.presence_topic(workflow.id))
 
-            # Get initial editor state from session server
-            editor_state =
-              case Server.get_editor_state(workflow.id) do
-                {:ok, state} -> state
-                _ -> %EditorState{workflow_id: workflow.id}
+                # Track current user
+                {:ok, _} = Presence.track_user(workflow.id, user, socket)
+
+                # Get initial editor state from session server
+                es =
+                  case Server.get_editor_state(workflow.id) do
+                    {:ok, state} -> state
+                    _ -> %EditorState{workflow_id: workflow.id}
+                  end
+
+                # Get initial presences
+                p = format_presences(Presence.list_users(workflow.id))
+
+                {es, p}
+              else
+                # Not connected yet - use defaults
+                {%EditorState{workflow_id: workflow.id}, []}
               end
-
-            # Get initial presences
-            presences = format_presences(Presence.list_users(workflow.id))
 
             socket =
               socket
@@ -109,11 +122,27 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("add_step", %{"type_id" => type_id, "position" => pos}, socket) do
+    step_type_name =
+      case StepRegistry.get(type_id) do
+        {:ok, type} -> type.name
+        _ -> "Step"
+      end
+
+    step = %{
+      id: UUID.generate(),
+      type_id: type_id,
+      name: step_type_name,
+      config: %{},
+      position: pos,
+      notes: nil
+    }
+
     operation = %{
       id: UUID.generate(),
       type: :add_step,
-      payload: %{type_id: type_id, position: pos},
-      user_id: socket.assigns.current_scope.user.id
+      payload: %{step: step},
+      user_id: socket.assigns.current_scope.user.id,
+      client_seq: nil
     }
 
     Server.apply_operation(socket.assigns.workflow.id, operation)
@@ -126,7 +155,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       id: UUID.generate(),
       type: :update_step_position,
       payload: %{step_id: step_id, position: pos},
-      user_id: socket.assigns.current_scope.user.id
+      user_id: socket.assigns.current_scope.user.id,
+      client_seq: nil
     }
 
     Server.apply_operation(socket.assigns.workflow.id, operation)
@@ -139,7 +169,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       id: UUID.generate(),
       type: :update_step_config,
       payload: %{step_id: step_id, changes: changes},
-      user_id: socket.assigns.current_scope.user.id
+      user_id: socket.assigns.current_scope.user.id,
+      client_seq: nil
     }
 
     Server.apply_operation(socket.assigns.workflow.id, operation)
@@ -152,7 +183,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       id: UUID.generate(),
       type: :remove_step,
       payload: %{step_id: step_id},
-      user_id: socket.assigns.current_scope.user.id
+      user_id: socket.assigns.current_scope.user.id,
+      client_seq: nil
     }
 
     Server.apply_operation(socket.assigns.workflow.id, operation)
@@ -165,7 +197,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       id: UUID.generate(),
       type: :add_connection,
       payload: params,
-      user_id: socket.assigns.current_scope.user.id
+      user_id: socket.assigns.current_scope.user.id,
+      client_seq: nil
     }
 
     Server.apply_operation(socket.assigns.workflow.id, operation)
@@ -178,7 +211,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       id: UUID.generate(),
       type: :remove_connection,
       payload: %{connection_id: id},
-      user_id: socket.assigns.current_scope.user.id
+      user_id: socket.assigns.current_scope.user.id,
+      client_seq: nil
     }
 
     Server.apply_operation(socket.assigns.workflow.id, operation)
@@ -218,14 +252,23 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # ============================================================================
 
   @impl true
-  def handle_info({:operation_applied, _op}, socket) do
-    {:ok, workflow} =
-      Workflows.get_workflow_with_draft(
-        socket.assigns.workflow.id,
-        socket.assigns.current_scope
-      )
+  def handle_info({:operation_applied, operation}, socket) do
+    # Apply operation locally to avoid race condition with async persistence
+    case Operations.apply(socket.assigns.workflow.draft, operation) do
+      {:ok, new_draft} ->
+        updated_workflow = %{socket.assigns.workflow | draft: new_draft}
+        {:noreply, assign(socket, :workflow, updated_workflow)}
 
-    {:noreply, assign(socket, :workflow, workflow)}
+      {:error, _reason} ->
+        # If local application fails, fall back to DB fetch (though it might be stale)
+        {:ok, workflow} =
+          Workflows.get_workflow_with_draft(
+            socket.assigns.workflow.id,
+            socket.assigns.current_scope
+          )
+
+        {:noreply, assign(socket, :workflow, workflow)}
+    end
   end
 
   @impl true

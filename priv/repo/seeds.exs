@@ -7,10 +7,11 @@ alias Imgd.Accounts
 alias Imgd.Accounts.User
 alias Imgd.Accounts.Scope
 alias Imgd.Workflows
+alias Imgd.Workflows.WorkflowShare
 
 IO.puts("🌱 Seeding database...")
 
-# Create a test user if one doesn't exist
+# Create test users if they don't exist
 user =
   case Repo.get_by(User, email: "temp@imgd.io") do
     nil ->
@@ -29,10 +30,30 @@ user =
       user
   end
 
+temp2_user =
+  case Repo.get_by(User, email: "temp2@imgd.io") do
+    nil ->
+      IO.puts("Creating user temp2@imgd.io...")
+
+      {:ok, temp2_user} =
+        Accounts.register_user(%{
+          email: "temp2@imgd.io",
+          password: "password123456"
+        })
+
+      temp2_user
+
+    temp2_user ->
+      IO.puts("Using existing user temp2@imgd.io...")
+      temp2_user
+  end
+
 scope = %Scope{user: user}
 
 IO.puts("\n🔐 Login Credentials:")
 IO.puts("  Email: temp@imgd.io")
+IO.puts("  Password: password123456")
+IO.puts("  Email: temp2@imgd.io")
 IO.puts("  Password: password123456")
 IO.puts("")
 
@@ -1037,7 +1058,41 @@ conditional_workflow =
 
 IO.puts("✅ Created Conditional Workflow: #{conditional_workflow.name}")
 
-IO.puts("\n🎉 All example workflows created successfully!")
+# ============================================================================
+# Share workflows with temp2@imgd.io as editor
+# ============================================================================
+IO.puts("\n🔗 Sharing workflows with temp2@imgd.io as editor...")
+
+workflows_to_share = [
+  linear_workflow,
+  branching_workflow,
+  diamond_workflow,
+  simple_workflow,
+  complex_workflow,
+  map_aggregate_workflow,
+  conditional_workflow
+]
+
+Enum.each(workflows_to_share, fn workflow ->
+  case Repo.get_by(WorkflowShare, user_id: temp2_user.id, workflow_id: workflow.id) do
+    nil ->
+      {:ok, _share} =
+        %WorkflowShare{}
+        |> WorkflowShare.changeset(%{
+          user_id: temp2_user.id,
+          workflow_id: workflow.id,
+          role: :editor
+        })
+        |> Repo.insert()
+
+      IO.puts("✅ Shared '#{workflow.name}' with temp2@imgd.io as editor")
+
+    _share ->
+      IO.puts("ℹ️ '#{workflow.name}' already shared with temp2@imgd.io")
+  end
+end)
+
+IO.puts("\n🎉 All example workflows created and shared successfully!")
 IO.puts("You can now log in and explore these workflow patterns:")
 IO.puts("  - Linear Data Processing")
 IO.puts("  - Branching User Status")
@@ -1046,3 +1101,4 @@ IO.puts("  - Simple Calculator")
 IO.puts("  - Complex Order Processing")
 IO.puts("  - Map/Aggregate Numbers")
 IO.puts("  - Multi-Conditional User Classification")
+IO.puts("\nAll workflows have been shared with temp2@imgd.io with editor permissions.")

@@ -261,7 +261,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
           type: operation.type,
           payload: operation.payload,
           user_id: operation.user_id,
-          client_seq: operation.client_seq,
+          client_seq: Map.get(operation, :client_seq),
           workflow_id: state.workflow_id
         }
 
