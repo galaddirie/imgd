@@ -71,7 +71,7 @@ lib/
 │   ├── accounts/         # User management
 │   ├── workflows/        # Workflow orchestration
 │   ├── executions/       # Runtime execution engine
-│   ├── nodes/           # Node type definitions
+│   ├── steps/           # Node type definitions
 │   ├── runtime/         # WebAssembly runtime
 │   └── observability/   # Monitoring & logging
 └── imgd_web/            # Phoenix web interface
