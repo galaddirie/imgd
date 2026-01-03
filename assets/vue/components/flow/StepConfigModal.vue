@@ -96,7 +96,7 @@ const toggleSection = (id: string) => {
 
 <template>
   <div v-if="isOpen"
-    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6"
+    class="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6"
     @keydown.esc="closeModal">
     <div
       class="bg-base-100 rounded-3xl shadow-2xl w-full max-w-7xl h-[90vh] flex flex-col overflow-hidden border border-base-300 animate-in fade-in zoom-in duration-300"

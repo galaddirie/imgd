@@ -59,10 +59,21 @@ const effectiveStatus = computed<NodeStatus>(() => {
 })
 
 const currentStatus = computed(() => statusConfig.value[effectiveStatus.value])
+const hasStatusStyle = computed(() => effectiveStatus.value !== 'pending')
+const pendingColor = computed(() => {
+    const neutral = themeStore.theme === 'dark'
+        ? 'oklch(70% 0.035 240)'
+        : 'oklch(55% 0.035 240)'
+
+    return oklchToHex(neutral)
+})
 
 const handleColor = computed(() => {
     if (isSelected.value) {
         return themeStore.theme === 'dark' ? '#ffffff' : '#000000' // White in dark mode, black in light mode
+    }
+    if (!hasStatusStyle.value) {
+        return pendingColor.value
     }
     return currentStatus.value.color
 })

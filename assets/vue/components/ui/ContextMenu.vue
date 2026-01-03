@@ -97,7 +97,7 @@ onUnmounted(() => {
             enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-75 ease-in"
             leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
             <div v-if="show" ref="menuRef"
-                class="fixed z-[200] min-w-[180px] py-1.5 bg-base-100 border border-base-300 rounded-xl shadow-xl"
+                class="fixed z-[1100] min-w-[180px] py-1.5 bg-base-100 border border-base-300 rounded-xl shadow-xl"
                 :style="{ left: `${adjustedPosition.x}px`, top: `${adjustedPosition.y}px` }">
                 <template v-for="(item, index) in items" :key="item.id">
                     <!-- Divider -->

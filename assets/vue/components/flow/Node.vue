@@ -91,6 +91,7 @@ const statusIconMap = {
 } as const
 
 const StatusIcon = computed(() => statusIconMap[effectiveStatus.value])
+const hasStatusStyle = computed(() => effectiveStatus.value !== 'pending')
 
 // Color configuration per status
 const statusConfig = computed(() => {
@@ -154,7 +155,7 @@ const stepKindBadge = computed(() => {
 
 // Node classes
 const nodeClasses = computed(() => [
-    'group relative flex items-start gap-3 rounded-2xl border bg-base-100 p-4 shadow-md transition-shadow',
+    'group relative flex items-start gap-3 rounded-2xl border border-base-300/50 bg-base-100 p-4 shadow-md transition-shadow',
     // Different styling for trigger nodes
     props.data.step_kind === 'trigger' ? 'rounded-[50px_0.5rem_0.5rem_10px]' : '',
     props.dragging ? 'cursor-grabbing shadow-xl' : 'cursor-grab hover:shadow-lg',
@@ -175,12 +176,21 @@ const nodeStyle = computed(() => {
         shadow += `, 0 0 0 2px ${ringColor}`
     }
 
-    return {
-        borderColor: props.selected ? oklchToHex(colorMap[props.data.status ?? 'pending']) : currentStatusStyle.value.border,
+    const style: Record<string, string> = {
         boxShadow: shadow,
-        // If selected by others, use the first selector's color for the ring
-        ...(props.data.selected_by?.length ? { '--tw-ring-color': props.data.selected_by[0].color } : {})
     }
+
+    if (hasStatusStyle.value) {
+        style.borderColor = props.selected
+            ? oklchToHex(colorMap[effectiveStatus.value])
+            : currentStatusStyle.value.border
+    }
+
+    if (props.data.selected_by?.length) {
+        style['--tw-ring-color'] = props.data.selected_by[0].color
+    }
+
+    return style
 })
 
 // Format duration for display
@@ -289,7 +299,7 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false)
             </div>
 
             <!-- Status Bubble -->
-            <div class="pointer-events-none absolute -top-4 -right-4">
+            <div v-if="hasStatusStyle" class="pointer-events-none absolute -top-4 -right-4">
                 <div class="relative">
                     <!-- Ping animation for running -->
                     <span v-if="effectiveStatus === 'running'"
@@ -310,9 +320,6 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false)
                             <!-- Status icon -->
                             <component v-else-if="StatusIcon" :is="StatusIcon" class="size-6 drop-shadow-sm"
                                 :style="{ color: currentStatusStyle.text }" />
-                            <!-- Default dot for pending -->
-                            <span v-else class="size-2 rounded-full"
-                                :style="{ backgroundColor: currentStatusStyle.text + 'CC' }" />
                         </div>
                     </div>
                 </div>

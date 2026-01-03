@@ -671,6 +671,7 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
   background-color: var(--color-base-100);
   border: 1px solid var(--color-base-300);
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  z-index: 1100;
 }
 
 .vue-flow__minimap-mask {
