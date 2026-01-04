@@ -144,6 +144,15 @@ defmodule Imgd.Steps.Registry do
     :ets.info(@ets_table, :size)
   end
 
+  @doc """
+  Returns step types formatted for the node library UI.
+  """
+  @spec library_items() :: [map()]
+  def library_items do
+    all()
+    |> Enum.map(&library_item_from_type/1)
+  end
+
   # ============================================================================
   # Server Callbacks
   # ============================================================================
@@ -191,6 +200,17 @@ defmodule Imgd.Steps.Registry do
     |> Enum.filter(&has_step_definition?/1)
     |> Enum.map(& &1.__step_definition__())
     |> validate_unique_ids()
+  end
+
+  defp library_item_from_type(%Type{} = type) do
+    %{
+      type_id: type.id,
+      name: type.name,
+      description: type.description,
+      icon: type.icon,
+      category: type.category,
+      step_kind: Atom.to_string(type.step_kind)
+    }
   end
 
   # Explicit list of builtin executor modules.

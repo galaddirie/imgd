@@ -5,6 +5,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
+  alias Imgd.Steps
   alias Imgd.Steps.Registry, as: StepRegistry
   alias Imgd.Collaboration.EditorState
   alias Imgd.Collaboration.EditSession.{Server, Presence, PubSub, Operations}
@@ -19,13 +20,15 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       {:ok, workflow} ->
         case PubSub.authorize_edit(scope, workflow.id) do
           :ok ->
-            step_types = StepRegistry.all()
+            step_types = Steps.list_types()
+            node_library_items = Steps.list_library_items()
 
             socket =
               socket
               |> assign(:page_title, "Editing #{workflow.name}")
               |> assign(:workflow, workflow)
               |> assign(:step_types, step_types)
+              |> assign(:node_library_items, node_library_items)
               |> assign(:editor_state, %EditorState{workflow_id: workflow.id})
               |> assign(:presences, [])
               |> assign(:current_user_id, user.id)
@@ -101,6 +104,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         v-socket={@socket}
         workflow={@workflow}
         stepTypes={@step_types}
+        nodeLibraryItems={@node_library_items}
         editorState={@editor_state}
         presences={@presences}
         currentUserId={@current_user_id}

@@ -38,6 +38,7 @@ import type {
   Step,
   Connection,
   StepType,
+  NodeLibraryItem,
   StepNodeData,
   EdgeData,
   Execution,
@@ -53,6 +54,7 @@ import type {
 interface Props {
   workflow: Workflow
   stepTypes?: StepType[]
+  nodeLibraryItems?: NodeLibraryItem[]
   execution?: Execution | null
   stepExecutions?: StepExecution[]
   editorState?: EditorState
@@ -62,6 +64,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   stepTypes: () => [],
+  nodeLibraryItems: () => [],
   execution: null,
   stepExecutions: () => [],
   editorState: undefined,
@@ -575,7 +578,7 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
       @save="handleSave" @run-test="handleRunTest" />
 
     <div class="flex-1 flex overflow-hidden relative">
-      <NodeLibrary v-if="store.isLibraryOpen" :step-types="stepTypes" class="shrink-0"
+      <NodeLibrary v-if="store.isLibraryOpen" :library-items="nodeLibraryItems" class="shrink-0"
         @collapse="store.isLibraryOpen = false" />
 
       <button v-else

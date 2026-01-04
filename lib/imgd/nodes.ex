@@ -103,6 +103,12 @@ defmodule Imgd.Steps do
   defdelegate type_count, to: Registry, as: :count
 
   @doc """
+  Returns step types formatted for the node library UI.
+  """
+  @spec list_library_items() :: [map()]
+  defdelegate list_library_items, to: Registry, as: :library_items
+
+  @doc """
   Validates that all step type IDs in a workflow exist.
 
   Returns `:ok` if all types exist, or `{:error, missing_ids}` with a list

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useThemeStore } from '@/stores/theme'
-import type { StepType, StepKind, NodeLibraryItem } from '@/types/workflow'
+import type { StepKind, NodeLibraryItem } from '@/types/workflow'
 import {
   MagnifyingGlassIcon,
   CursorArrowRaysIcon,
@@ -26,14 +26,14 @@ import {
   ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
 
-// Props - will receive step types from LiveView
+// Props - will receive library items from LiveView
 interface Props {
-  stepTypes?: StepType[]
+  libraryItems?: NodeLibraryItem[]
   isCollapsed?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  stepTypes: () => [],
+  libraryItems: () => [],
   isCollapsed: false,
 })
 
@@ -44,7 +44,7 @@ const emit = defineEmits<{
 }>()
 
 const searchQuery = ref('')
-const expandedCategories = ref<Set<string>>(new Set(['Triggers', 'Actions']))
+const expandedCategories = ref<Set<string>>(new Set(['Triggers', 'Integrations']))
 
 // Icon mapping for step types
 const iconMap: Record<string, typeof CursorArrowRaysIcon> = {
@@ -69,49 +69,8 @@ const iconMap: Record<string, typeof CursorArrowRaysIcon> = {
   'hero-arrow-down-tray': ArrowDownTrayIcon,
 }
 
-// Default/mock step types (will be replaced by props.stepTypes from LiveView)
-const defaultStepTypes: NodeLibraryItem[] = [
-  // Triggers
-  { type_id: 'manual_input', name: 'Manual Trigger', icon: 'hero-cursor-arrow-rays', description: 'Start workflow manually', step_kind: 'trigger', category: 'Triggers' },
-  { type_id: 'webhook', name: 'Webhook', icon: 'hero-bolt', description: 'Trigger via HTTP webhook', step_kind: 'trigger', category: 'Triggers' },
-  { type_id: 'schedule', name: 'Schedule', icon: 'hero-clock', description: 'Run on a schedule', step_kind: 'trigger', category: 'Triggers' },
-
-  // Integrations
-  { type_id: 'http_request', name: 'HTTP Request', icon: 'hero-globe-alt', description: 'Make HTTP API calls', step_kind: 'action', category: 'Integrations' },
-  { type_id: 'send_email', name: 'Send Email', icon: 'hero-envelope', description: 'Send email notifications', step_kind: 'action', category: 'Integrations' },
-  { type_id: 'db_query', name: 'Database Query', icon: 'hero-circle-stack', description: 'Query a database', step_kind: 'action', category: 'Integrations' },
-
-  // Control Flow
-  { type_id: 'condition', name: 'If/Else', icon: 'hero-arrows-right-left', description: 'Conditional branching', step_kind: 'control_flow', category: 'Control Flow' },
-  { type_id: 'switch', name: 'Switch', icon: 'hero-list-bullet', description: 'Multi-way branching', step_kind: 'control_flow', category: 'Control Flow' },
-  { type_id: 'loop', name: 'Loop', icon: 'hero-arrow-path', description: 'Iterate over items', step_kind: 'control_flow', category: 'Control Flow' },
-
-  // Transform
-  { type_id: 'data_transform', name: 'Transform', icon: 'hero-adjustments-horizontal', description: 'Transform data shape', step_kind: 'transform', category: 'Transform' },
-  { type_id: 'data_filter', name: 'Filter', icon: 'hero-funnel', description: 'Filter data fields', step_kind: 'transform', category: 'Transform' },
-  { type_id: 'format', name: 'Format String', icon: 'hero-document-text', description: 'Format text with templates', step_kind: 'transform', category: 'Transform' },
-  { type_id: 'math', name: 'Math', icon: 'hero-calculator', description: 'Arithmetic operations', step_kind: 'transform', category: 'Transform' },
-  { type_id: 'splitter', name: 'Split Items', icon: 'hero-arrows-pointing-out', description: 'Split list for parallel processing', step_kind: 'transform', category: 'Transform' },
-  { type_id: 'aggregator', name: 'Aggregate', icon: 'hero-arrows-pointing-in', description: 'Combine items back together', step_kind: 'transform', category: 'Transform' },
-
-  // Utilities
-  { type_id: 'debug', name: 'Debug', icon: 'hero-bug-ant', description: 'Log data for debugging', step_kind: 'action', category: 'Utilities' },
-  { type_id: 'data_output', name: 'Output', icon: 'hero-arrow-down-tray', description: 'Final workflow output', step_kind: 'action', category: 'Utilities' },
-]
-
-// Merge props with defaults
 const allStepTypes = computed(() => {
-  if (props.stepTypes && props.stepTypes.length > 0) {
-    return props.stepTypes.map(st => ({
-      type_id: st.id,
-      name: st.name,
-      icon: st.icon,
-      description: st.description,
-      step_kind: st.step_kind,
-      category: st.category,
-    }))
-  }
-  return defaultStepTypes
+  return props.libraryItems
 })
 
 // Group by category

@@ -53,16 +53,27 @@ export interface Trigger {
 // Step Type Registry
 // =============================================================================
 
+export type StepKind = 'trigger' | 'action' | 'transform' | 'control_flow'
+
 export interface StepType {
     id: string
     name: string
     description?: string
     category: string
     icon?: string
-    step_kind: 'trigger' | 'action' | 'condition' | 'transform'
+    step_kind: StepKind
     config_schema?: Record<string, unknown>
     input_schema?: Record<string, unknown>
     output_schema?: Record<string, unknown>
+}
+
+export interface NodeLibraryItem {
+    type_id: string
+    name: string
+    description: string
+    category: string
+    icon: string
+    step_kind: StepKind
 }
 
 // =============================================================================
@@ -77,7 +88,7 @@ export interface StepNodeData {
     notes?: string
     icon?: string
     category?: string
-    step_kind?: string
+    step_kind?: StepKind
     status?: StepExecutionStatus
     stats?: {
         duration_us?: number
