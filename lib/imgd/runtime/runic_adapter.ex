@@ -25,6 +25,7 @@ defmodule Imgd.Runtime.RunicAdapter do
   """
 
   require Runic
+  alias Runic.Component
   alias Runic.Workflow
   alias Imgd.Runtime.Steps.StepRunner
 
@@ -108,18 +109,37 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   defp add_step_to_workflow(step, workflow, parent_lookup, step_opts) do
     component = create_component(step, step_opts)
-    parent_ids = Map.get(parent_lookup, step.id, [])
 
-    if parent_ids == [] do
-      # Root step - add to workflow root
-      Workflow.add(workflow, component)
-    else
-      # Connect to first parent
-      # Note: For proper join patterns (multiple parents), Runic requires
-      # using the declarative workflow syntax with tuples. For now, we
-      # connect to the first parent only.
-      first_parent = List.first(parent_ids)
-      Workflow.add(workflow, component, to: first_parent)
+    parent_ids =
+      parent_lookup
+      |> Map.get(step.id, [])
+      |> Enum.uniq()
+
+    case parent_ids do
+      [] ->
+        # Root step - add to workflow root
+        Workflow.add(workflow, component)
+
+      [parent_id] ->
+        Workflow.add(workflow, component, to: parent_id)
+
+      _ ->
+        {workflow, join} = ensure_join(workflow, parent_ids)
+        Workflow.add(workflow, component, to: join)
+    end
+  end
+
+  defp ensure_join(%Workflow{} = workflow, parent_ids) when is_list(parent_ids) do
+    parent_steps = Enum.map(parent_ids, &Workflow.get_component!(workflow, &1))
+    parent_hashes = Enum.map(parent_steps, &Component.hash/1)
+    join = Workflow.Join.new(parent_hashes)
+
+    case Map.get(workflow.graph.vertices, join.hash) do
+      %Workflow.Join{} = existing_join ->
+        {workflow, existing_join}
+
+      nil ->
+        {Workflow.add_step(workflow, parent_steps, join), join}
     end
   end
 

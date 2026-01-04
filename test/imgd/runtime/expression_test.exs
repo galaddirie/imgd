@@ -48,6 +48,16 @@ defmodule Imgd.Runtime.ExpressionTest do
       assert {:error, %{type: :render_error}} =
                Expression.evaluate_with_vars("{{ json.name | unknown }}", %{"json" => %{}})
     end
+
+    test "handles joined input lists with filters" do
+      vars = %{"json" => [%{"value" => 1}, %{"value" => 2}]}
+
+      assert {:ok, "[{\"value\":1},{\"value\":2}]"} =
+               Expression.evaluate_with_vars("{{ json | json }}", vars)
+
+      assert {:ok, "1"} =
+               Expression.evaluate_with_vars("{{ json | dig: \"0.value\" }}", vars)
+    end
   end
 
   describe "evaluate_deep/3" do

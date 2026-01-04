@@ -390,7 +390,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
       }
 
       # Directly update state (normally done internally)
-      GenServer.call(Server.via_tuple(workflow.id), {:update_editor_state, updated_state})
+      pid = GenServer.whereis(Server.via_tuple(workflow.id))
+      :sys.replace_state(pid, fn state -> %{state | editor_state: updated_state} end)
 
       # User 2 should now be able to acquire the lock
       assert :ok = Server.acquire_step_lock(workflow.id, "input_step", user2.id)
