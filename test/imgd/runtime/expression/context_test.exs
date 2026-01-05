@@ -14,7 +14,8 @@ defmodule Imgd.Runtime.Expression.ContextTest do
         metadata: %Execution.Metadata{
           trace_id: "trace-123",
           correlation_id: "corr-456"
-        }
+        },
+        triggered_by_user_id: "user-1"
       }
 
       step_outputs = %{
@@ -30,18 +31,25 @@ defmodule Imgd.Runtime.Expression.ContextTest do
       assert vars["steps"]["step_b"]["headers"] == %{"x" => "y"}
       assert vars["execution"]["trace_id"] == "trace-123"
       assert vars["execution"]["correlation_id"] == "corr-456"
+      assert vars["request"]["user_id"] == "user-1"
     end
 
     test "uses trigger data when no current input is provided" do
       execution = %Execution{
         id: "exec-1",
         workflow_id: "wf-1",
-        trigger: %Execution.Trigger{type: :manual, data: %{"fallback" => "input"}}
+        triggered_by_user_id: "user-1",
+        trigger: %Execution.Trigger{type: :manual, data: %{"fallback" => "input"}},
+        metadata: %Execution.Metadata{
+          extras: %{"request" => %{"request_id" => "req-1"}}
+        }
       }
 
       vars = Context.build(execution, %{}, nil)
       assert vars["json"] == %{"fallback" => "input"}
       assert vars["input"] == %{"fallback" => "input"}
+      assert vars["request"]["user_id"] == "user-1"
+      assert vars["request"]["request_id"] == "req-1"
     end
   end
 

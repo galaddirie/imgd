@@ -7,6 +7,7 @@ import {
   BoltIcon,
   CpuChipIcon,
   VariableIcon,
+  GlobeAltIcon,
 } from '@heroicons/vue/24/outline'
 
 interface NodeData {
@@ -143,6 +144,7 @@ const contextData = computed(() => {
     json: activeStepExecution.value?.input_data || {},
     trigger: props.execution?.trigger?.data || {},
     variables: props.execution?.metadata?.variables || {},
+    request: props.execution?.metadata?.extras?.request || {},
     steps: props.stepExecutions?.reduce((acc: any, se: any) => {
       acc[se.step_id] = { json: se.output_data }
       return acc
@@ -157,6 +159,7 @@ const explorerData = computed(() => {
     { id: 'trigger', label: 'Trigger Data', icon: BoltIcon, data: data.trigger },
     { id: 'steps', label: 'Upstream Steps', icon: CpuChipIcon, data: data.steps },
     { id: 'variables', label: 'Workflow Variables', icon: VariableIcon, data: data.variables },
+    { id: 'request', label: 'Request Metadata', icon: GlobeAltIcon, data: data.request },
   ]
 })
 </script>

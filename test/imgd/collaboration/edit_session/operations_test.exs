@@ -347,6 +347,24 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       assert step.notes == "Updated notes"
     end
 
+    test "applies update_step_metadata including config", %{draft: draft} do
+      operation = %{
+        type: :update_step_metadata,
+        payload: %{
+          step_id: "step_1",
+          changes: %{
+            name: "Updated Name",
+            config: %{"url" => "https://updated.com"}
+          }
+        }
+      }
+
+      assert {:ok, new_draft} = Operations.apply(draft, operation)
+      step = Enum.find(new_draft.steps, &(&1.id == "step_1"))
+      assert step.name == "Updated Name"
+      assert step.config["url"] == "https://updated.com"
+    end
+
     test "applies add_connection operation", %{draft: draft} do
       draft_with_step = %{
         draft

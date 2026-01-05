@@ -28,6 +28,13 @@ defmodule Imgd.Runtime.Expression.Context do
     },
     "variables" => %{...workflow variables...},
     "metadata" => %{...execution metadata...},
+    "request" => %{
+      "user_id" => "uuid",
+      "request_id" => "uuid",
+      "headers" => %{...},
+      "body" => %{...},
+      "params" => %{...}
+    },
     "env" => %{...allowed env vars...}
   }
   ```
@@ -70,6 +77,7 @@ defmodule Imgd.Runtime.Expression.Context do
       "workflow" => build_workflow_map(execution),
       "variables" => extract_variables(execution),
       "metadata" => build_metadata_map(execution),
+      "request" => build_request_map(execution),
       "env" => build_env_map(),
       "now" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "today" => Date.utc_today() |> Date.to_iso8601()
@@ -89,6 +97,7 @@ defmodule Imgd.Runtime.Expression.Context do
       "workflow" => %{},
       "variables" => %{},
       "metadata" => %{},
+      "request" => %{},
       "env" => build_env_map(),
       "now" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "today" => Date.utc_today() |> Date.to_iso8601()
@@ -143,6 +152,21 @@ defmodule Imgd.Runtime.Expression.Context do
     %{
       "id" => execution.workflow_id
     }
+  end
+
+  defp build_request_map(%Execution{} = execution) do
+    metadata = execution.metadata || %{}
+    extras = get_metadata_field(metadata, :extras) || %{}
+    request = (extras["request"] || extras[:request] || %{}) |> normalize_value()
+
+    # Inject user_id from top level execution if not already in request
+    user_id = execution.triggered_by_user_id
+
+    if is_map(request) and user_id do
+      Map.put_new(request, "user_id", to_string(user_id))
+    else
+      request
+    end
   end
 
   defp build_metadata_map(%Execution{metadata: metadata}) when is_struct(metadata) do

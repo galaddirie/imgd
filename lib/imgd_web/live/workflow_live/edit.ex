@@ -570,7 +570,16 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         workflow_id: workflow.id,
         execution_type: :preview,
         trigger: %{type: :manual, data: trigger_data},
-        metadata: %{extras: %{preview: true}}
+        metadata: %{
+          extras: %{
+            preview: true,
+            request: %{
+              "request_id" => "mock-request-" <> UUID.generate(),
+              "headers" => %{"user-agent" => "Imgd Editor (Preview)"},
+              "body" => %{}
+            }
+          }
+        }
       }
 
       with {:ok, execution} <- Executions.create_execution(scope, attrs),

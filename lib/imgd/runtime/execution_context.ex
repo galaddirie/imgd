@@ -24,7 +24,8 @@ defmodule Imgd.Runtime.ExecutionContext do
           variables: map(),
           metadata: map(),
           input: term(),
-          trigger: term()
+          trigger: term(),
+          request: map()
         }
 
   defstruct [
@@ -35,7 +36,8 @@ defmodule Imgd.Runtime.ExecutionContext do
     variables: %{},
     metadata: %{},
     input: nil,
-    trigger: nil
+    trigger: nil,
+    request: %{}
   ]
 
   @doc """
@@ -55,7 +57,8 @@ defmodule Imgd.Runtime.ExecutionContext do
       variables: Map.get(opts, :variables, %{}),
       metadata: Map.get(opts, :metadata, %{}),
       input: Map.get(opts, :input),
-      trigger: Map.get(opts, :trigger)
+      trigger: Map.get(opts, :trigger),
+      request: Map.get(opts, :request, %{})
     }
   end
 

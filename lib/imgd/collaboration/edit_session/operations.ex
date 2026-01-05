@@ -168,6 +168,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
       step
       |> maybe_update(:name, changes)
       |> maybe_update(:notes, changes)
+      |> maybe_update(:config, changes)
     end)
   end
 
