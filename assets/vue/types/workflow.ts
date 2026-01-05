@@ -189,6 +189,7 @@ export interface UserPresence {
     } | null
     selected_steps?: string[]
     focused_step?: string | null
+    dragging_steps?: Record<string, { x: number; y: number }> | null
 }
 
 export interface EditorState {

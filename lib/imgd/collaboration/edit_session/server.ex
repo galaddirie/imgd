@@ -279,7 +279,8 @@ defmodule Imgd.Collaboration.EditSession.Server do
         # Clean up editor state if step was removed
         new_editor_state =
           if type == :remove_step do
-            step_id = operation.payload.step_id
+            step_id =
+              Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
 
             editor_state
             |> EditorState.unpin_output(step_id)
@@ -314,8 +315,8 @@ defmodule Imgd.Collaboration.EditSession.Server do
         new_editor_state =
           EditorState.disable_step(
             editor_state,
-            operation.payload.step_id,
-            operation.payload[:mode] || :skip
+            Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id"),
+            Map.get(operation.payload, :user_id) || Map.get(operation.payload, "user_id")
           )
 
         {draft, new_editor_state, true}

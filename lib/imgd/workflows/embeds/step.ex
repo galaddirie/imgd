@@ -17,7 +17,7 @@ defmodule Imgd.Workflows.Embeds.Step do
   import Ecto.Changeset
   import Imgd.ChangesetHelpers
 
-  @primary_key false
+  @primary_key {:id, :string, autogenerate: false}
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -29,7 +29,6 @@ defmodule Imgd.Workflows.Embeds.Step do
         }
 
   embedded_schema do
-    field :id, :string
     field :type_id, :string
     field :name, :string
     field :config, :map, default: %{}

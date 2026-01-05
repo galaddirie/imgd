@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, markRaw, watch } from 'vue'
-import type { Node, Edge, Connection as VueFlowConnection, Position, GraphNode } from '@vue-flow/core'
+import type { Node, Edge, Connection as VueFlowConnection, XYPosition, Position, GraphNode } from '@vue-flow/core'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -94,7 +94,7 @@ const emit = defineEmits<{
   (e: 'save_workflow'): void
   (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void
   // Collaboration events
-  (e: 'mouse_move', payload: { x: number; y: number }): void
+  (e: 'mouse_move', payload: { x: number; y: number; dragging_steps?: Record<string, XYPosition> | null }): void
   (e: 'selection_changed', payload: { step_ids: string[] }): void
   (e: 'preview_expression', payload: { step_id: string; field_key: string; expression: string }): void
 }>()
@@ -109,6 +109,7 @@ const {
   onPaneClick,
   onConnect,
   onNodeDragStop,
+  onNodeDrag,
   project,
   getNodes,
   getEdges,
@@ -138,13 +139,9 @@ const edgeTypes = {
 const clickTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const canvasRef = ref<HTMLElement | null>(null)
 
-// =============================================================================
-// Collaboration: Cursor Tracking
-// =============================================================================
-
-// Throttle cursor updates to 50ms (20 updates/sec max)
-const emitCursorPosition = useThrottleFn((x: number, y: number) => {
-  emit('mouse_move', { x, y })
+// Consolidated interaction tracking (mouse + transient dragging)
+const emitInteraction = useThrottleFn((x: number, y: number, dragging_steps?: Record<string, XYPosition> | null) => {
+  emit('mouse_move', { x, y, dragging_steps })
 }, 50)
 
 const handlePaneMouseMove = (event: MouseEvent) => {
@@ -158,8 +155,35 @@ const handlePaneMouseMove = (event: MouseEvent) => {
     y: event.clientY - top,
   })
 
-  emitCursorPosition(flowPosition.x, flowPosition.y)
+  // If we're dragging, onNodeDrag handles the emission
+  // Otherwise, we emit just the cursor position
+  if (!getSelectedNodes.value.some(n => n.dragging)) {
+    emitInteraction(flowPosition.x, flowPosition.y)
+  }
 }
+
+// Track transient node positions during drag
+const handleNodeDrag = (event: { event: MouseEvent | TouchEvent; node: Node<StepNodeData>; nodes: Node<StepNodeData>[] }) => {
+  if (!canvasRef.value) return
+
+  const { left, top } = canvasRef.value.getBoundingClientRect()
+  
+  // Get mouse position from drag event
+  const mouseEvent = 'clientX' in event.event ? event.event : event.event.touches[0]
+  const flowPosition = project({
+    x: mouseEvent.clientX - left,
+    y: mouseEvent.clientY - top,
+  })
+
+  const dragging_steps: Record<string, XYPosition> = {}
+  event.nodes.forEach(node => {
+    dragging_steps[node.id] = node.position
+  })
+
+  emitInteraction(flowPosition.x, flowPosition.y, dragging_steps)
+}
+
+onNodeDrag(handleNodeDrag)
 
 // =============================================================================
 // Collaboration: Selection Tracking
@@ -183,6 +207,16 @@ watch(() => getSelectedNodes.value, (newSelection) => {
 
 const nodes = computed<Node<StepNodeData>[]>(() => {
   const steps = props.workflow.draft?.steps || []
+  
+  // Get all transient node positions from other users' presences
+  const transientPositions = props.presences.reduce((acc, p) => {
+    if (p.user.id !== props.currentUserId && p.dragging_steps) {
+      Object.entries(p.dragging_steps).forEach(([id, pos]) => {
+        acc[id] = pos
+      })
+    }
+    return acc
+  }, {} as Record<string, XYPosition>)
 
   return steps.map(step => {
     const stepType = props.stepTypes.find(st => st.id === step.type_id)
@@ -202,7 +236,7 @@ const nodes = computed<Node<StepNodeData>[]>(() => {
     return {
       id: step.id,
       type: 'step',
-      position: step.position,
+      position: transientPositions[step.id] || step.position,
       data: {
         id: step.id,
         type_id: step.type_id,
@@ -556,6 +590,15 @@ const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
 }
 
 onNodeDragStop((event: { nodes: Node<StepNodeData>[] }) => {
+  // Clear transient drag positions and emit final positions for persistence
+  if (canvasRef.value) {
+    const lastEvent = window.event as MouseEvent // Fallback to get mouse position if needed
+    // Actually, onNodeDragStop doesn't give mouse position easily.
+    // We can just emit null for dragging_steps to clear it.
+    // For now, let's just use 0,0 for cursor as it will be updated by the next mousemove anyway.
+    emitInteraction(0, 0, null)
+  }
+
   for (const node of event.nodes) {
     emit('move_step', { step_id: node.id, position: node.position })
   }
@@ -569,6 +612,21 @@ const handleSaveConfig = (payload: { id: string; name: string; config: Record<st
 }
 
 const handleDeleteStep = (stepId: string) => emit('remove_step', { step_id: stepId })
+
+const handleNodesDelete = (nodes: Node<StepNodeData>[]) => {
+  console.log('Nodes deleted:', nodes)
+  nodes.forEach(node => {
+    emit('remove_step', { step_id: node.id })
+  })
+}
+
+const handleEdgesDelete = (edges: Edge<EdgeData>[]) => {
+  console.log('Edges deleted:', edges)
+  edges.forEach(edge => {
+    emit('remove_connection', { connection_id: edge.id })
+  })
+}
+
 const handleSave = () => emit('save_workflow')
 const handleRunTest = () => emit('run_test')
 const handleCancelExecution = () => emit('cancel_execution')
@@ -601,7 +659,7 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
             @node-double-click="handleNodeDoubleClick" @node-context-menu="handleNodeContextMenu"
             @selection-change="handleSelectionChange" @selection-context-menu="handleSelectionContextMenu"
             @pane-context-menu="handlePaneContextMenu" @edge-update="handleEdgeUpdate" @dragover="handleDragOver"
-            @drop="handleDrop">
+            @nodes-delete="handleNodesDelete" @edges-delete="handleEdgesDelete" @drop="handleDrop">
             <Background :pattern-color="oklchToHex('oklch(50% 0.05 260)')" :gap="24" />
             <Controls position="bottom-right" />
             <MiniMap position="bottom-left" />

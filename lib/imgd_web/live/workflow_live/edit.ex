@@ -199,6 +199,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("remove_step", %{"step_id" => step_id}, socket) do
+    Logger.info("Received remove_step event for step: #{step_id}")
     apply_operation(socket, :remove_step, %{step_id: step_id})
   end
 
@@ -217,6 +218,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("remove_connection", %{"connection_id" => id}, socket) do
+    Logger.info("Received remove_connection event for connection: #{id}")
     apply_operation(socket, :remove_connection, %{connection_id: id})
   end
 
@@ -250,11 +252,16 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # =============================================================================
 
   @impl true
-  def handle_event("mouse_move", %{"x" => x, "y" => y}, socket) do
-    Presence.update_cursor(
+  def handle_event("mouse_move", params, socket) do
+    x = params["x"]
+    y = params["y"]
+    dragging_steps = params["dragging_steps"]
+
+    Presence.update_interaction(
       socket.assigns.workflow.id,
       socket.assigns.current_user_id,
-      %{x: x, y: y}
+      if(x && y, do: %{x: x, y: y}, else: nil),
+      dragging_steps
     )
 
     {:noreply, socket}
@@ -421,7 +428,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         updated_workflow = %{socket.assigns.workflow | draft: new_draft}
         {:noreply, assign(socket, :workflow, updated_workflow)}
 
-      {:error, _reason} ->
+      {:error, reason} ->
+        Logger.error(
+          "edit.ex: Failed to apply operation #{inspect(operation.type)}: #{inspect(reason)}. Reloading..."
+        )
+
         # Fallback: reload from database
         case Workflows.get_workflow_with_draft(
                socket.assigns.workflow.id,
@@ -846,6 +857,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
             email: get_in(meta, [:user, :email])
           },
           cursor: meta[:cursor],
+          dragging_steps: meta[:dragging_steps],
           selected_steps: meta[:selected_steps] || [],
           focused_step: meta[:focused_step]
         }

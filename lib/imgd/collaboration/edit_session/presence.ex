@@ -98,21 +98,30 @@ defmodule Imgd.Collaboration.EditSession.Presence do
   This broadcasts a presence_diff with the updated metadata.
   """
   def update_cursor(workflow_id, user_id, %{x: _, y: _} = position) do
+    update_interaction(workflow_id, user_id, position, nil)
+  end
+
+  def update_cursor(_workflow_id, _user_id, nil), do: :ok
+
+  @doc """
+  Update user's interaction state (cursor and dragging nodes).
+  """
+  def update_interaction(workflow_id, user_id, cursor, dragging_steps) do
     topic = topic(workflow_id)
 
     case update(self(), topic, user_id, fn meta ->
-           Map.put(meta, :cursor, position)
+           meta
+           |> Map.put(:cursor, cursor)
+           |> Map.put(:dragging_steps, dragging_steps)
          end) do
       {:ok, _ref} ->
         :ok
 
       {:error, reason} ->
-        Logger.warning("Failed to update cursor for user #{user_id}: #{inspect(reason)}")
+        Logger.warning("Failed to update interaction for user #{user_id}: #{inspect(reason)}")
         {:error, reason}
     end
   end
-
-  def update_cursor(_workflow_id, _user_id, nil), do: :ok
 
   @doc """
   Update user's step selection.
@@ -212,6 +221,7 @@ defmodule Imgd.Collaboration.EditSession.Presence do
         name: name
       },
       cursor: nil,
+      dragging_steps: nil,
       selected_steps: [],
       focused_step: nil,
       joined_at: DateTime.utc_now()

@@ -10,6 +10,8 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
   - Snapshots are taken periodically for faster recovery
   """
 
+  require Logger
+
   alias Imgd.Repo
   alias Imgd.Workflows
   alias Imgd.Workflows.WorkflowDraft
@@ -57,19 +59,29 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
         # 2. Update the draft with current state
         draft
         |> WorkflowDraft.changeset(%{
-          steps: draft.steps && Enum.map(draft.steps, &Map.from_struct/1),
-          connections: draft.connections && Enum.map(draft.connections, &Map.from_struct/1),
+          steps: draft.steps && Enum.map(draft.steps, &ensure_map/1),
+          connections: draft.connections && Enum.map(draft.connections, &ensure_map/1),
+          triggers: draft.triggers && Enum.map(draft.triggers, &ensure_map/1),
           settings: Map.put(draft.settings || %{}, "last_persisted_seq", seq)
         })
         |> Repo.update!()
       end)
       |> case do
-        {:ok, _} -> :ok
-        {:error, reason} -> {:error, reason}
+        {:ok, _} ->
+          Logger.info("Persistence.persist: Successfully persisted ops and draft.")
+          :ok
+
+        {:error, reason} ->
+          Logger.error("Persistence.persist: Transaction failed: #{inspect(reason)}")
+          {:error, reason}
       end
     rescue
-      Ecto.StaleEntryError -> :ok
-      Ecto.InvalidChangesetError -> :ok
+      e ->
+        Logger.error(
+          "Persistence.persist: CRASHED: #{inspect(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
+        )
+
+        reraise e, __STACKTRACE__
     end
   end
 
@@ -105,4 +117,8 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
       inserted_at: DateTime.utc_now()
     }
   end
+
+  defp ensure_map(%_{} = struct), do: Map.from_struct(struct)
+  defp ensure_map(map) when is_map(map), do: map
+  defp ensure_map(nil), do: nil
 end

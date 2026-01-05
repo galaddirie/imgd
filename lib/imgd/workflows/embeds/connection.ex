@@ -16,7 +16,7 @@ defmodule Imgd.Workflows.Embeds.Connection do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @primary_key false
+  @primary_key {:id, :string, autogenerate: false}
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -27,7 +27,6 @@ defmodule Imgd.Workflows.Embeds.Connection do
         }
 
   embedded_schema do
-    field :id, :string
     field :source_step_id, :string
     field :source_output, :string, default: "main"
     field :target_step_id, :string
