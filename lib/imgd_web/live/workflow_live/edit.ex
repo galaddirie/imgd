@@ -452,11 +452,12 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     else
       preview_draft = build_preview_draft(draft, editor_state)
       pinned_outputs = editor_state.pinned_outputs || %{}
+      trigger_data = find_trigger_data(preview_draft)
 
       attrs = %{
         workflow_id: workflow.id,
         execution_type: :preview,
-        trigger: %{type: :manual, data: %{}},
+        trigger: %{type: :manual, data: trigger_data},
         metadata: %{extras: %{preview: true}}
       }
 
@@ -488,11 +489,34 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       RunicAdapter.to_runic_workflow(draft,
         execution_id: execution.id,
         metadata: metadata,
-        step_outputs: pinned_outputs
+        step_outputs: pinned_outputs,
+        trigger_data: execution.trigger.data || %{}
       )
 
     snapshot = :erlang.term_to_binary(runic_workflow)
     Executions.put_execution_snapshot(scope, execution, snapshot)
+  end
+
+  defp find_trigger_data(draft) do
+    # Find the first manual_input step and extract its trigger_data config
+    manual_input_step =
+      Enum.find(draft.steps, fn step ->
+        step.type_id == "manual_input"
+      end)
+
+    case manual_input_step do
+      %{config: %{"trigger_data" => raw_json}} when is_binary(raw_json) ->
+        case Jason.decode(raw_json) do
+          {:ok, data} when is_map(data) -> data
+          _ -> %{}
+        end
+
+      %{config: %{"trigger_data" => data}} when is_map(data) ->
+        data
+
+      _ ->
+        %{}
+    end
   end
 
   defp build_preview_draft(draft, %EditorState{} = editor_state) do

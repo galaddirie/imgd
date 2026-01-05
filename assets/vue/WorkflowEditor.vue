@@ -620,6 +620,7 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
       </div>
 
       <StepConfigModal :is-open="store.isConfigModalOpen" :node="selectedNode" :step-type="selectedStepType"
+        :execution="execution" :step-executions="stepExecutions"
         @close="store.closeConfigModal" @save="handleSaveConfig" @delete="handleDeleteStep" />
 
       <ContextMenu :show="store.contextMenu.show" :x="store.contextMenu.x" :y="store.contextMenu.y"

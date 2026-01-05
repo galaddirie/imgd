@@ -35,6 +35,7 @@ defmodule Imgd.Runtime.RunicAdapter do
           variables: map(),
           metadata: map(),
           step_outputs: map(),
+          trigger_data: map(),
           default_compute: term()
         ]
 
@@ -66,6 +67,7 @@ defmodule Imgd.Runtime.RunicAdapter do
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
       step_outputs: step_outputs,
+      trigger_data: Keyword.get(opts, :trigger_data, %{}),
       default_compute: Keyword.get(opts, :default_compute)
     ]
 

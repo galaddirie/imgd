@@ -23,7 +23,8 @@ defmodule Imgd.Runtime.ExecutionContext do
           step_outputs: %{String.t() => term()},
           variables: map(),
           metadata: map(),
-          input: term()
+          input: term(),
+          trigger: term()
         }
 
   defstruct [
@@ -33,7 +34,8 @@ defmodule Imgd.Runtime.ExecutionContext do
     step_outputs: %{},
     variables: %{},
     metadata: %{},
-    input: nil
+    input: nil,
+    trigger: nil
   ]
 
   @doc """
@@ -52,7 +54,8 @@ defmodule Imgd.Runtime.ExecutionContext do
       step_outputs: step_outputs,
       variables: Map.get(opts, :variables, %{}),
       metadata: Map.get(opts, :metadata, %{}),
-      input: Map.get(opts, :input)
+      input: Map.get(opts, :input),
+      trigger: Map.get(opts, :trigger)
     }
   end
 

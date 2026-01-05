@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import {
+  ArrowRightOnRectangleIcon,
+  BoltIcon,
+  CpuChipIcon,
+  VariableIcon,
+} from '@heroicons/vue/24/outline'
 
 interface NodeData {
   id: string
@@ -11,14 +17,16 @@ interface NodeData {
 
 interface Node {
   id: string
-  data: NodeData
+  data: Record<string, any>
   [key: string]: any
 }
 
 interface Props {
-  node: Node | null
+  node: any | null
   isOpen: boolean
+  stepType?: any
   execution?: any
+  stepExecutions?: any[]
 }
 
 const props = defineProps<Props>()
@@ -61,15 +69,32 @@ const toggleMode = (field: string) => {
   fieldModes.value[field] = fieldModes.value[field] === 'literal' ? 'expression' : 'literal'
 }
 
-// Mock schema inference
+// Map schema types to input types
 const fields = computed(() => {
   if (!props.node) return []
+
+  const schema = props.stepType?.config_schema?.properties || {}
   const config = props.node.data.config || {}
-  return Object.keys(config).map(key => ({
-    key,
-    label: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-    type: inferType(config[key]),
-  }))
+
+  // Combine schema-defined fields and existing config fields
+  const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)])
+
+  return Array.from(allKeys).map(key => {
+    const schemaField = schema[key] || {}
+    let type = inferType(config[key] ?? schemaField.default)
+
+    if (schemaField.format === 'json') {
+      type = 'json'
+    } else if (schemaField.type === 'string' && schemaField.format === 'textarea') {
+      type = 'textarea'
+    }
+
+    return {
+      key,
+      label: schemaField.title || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      type,
+    }
+  })
 })
 
 const inferType = (val: any) => {
@@ -79,19 +104,43 @@ const inferType = (val: any) => {
   return 'text'
 }
 
-// Variable Explorer Mock Data
-const explorerSections = [
-  { id: 'json', label: 'Current Input', icon: 'hero-arrow-right-on-rectangle' },
-  { id: 'steps', label: 'Upstream Steps', icon: 'hero-cpu-chip' },
-  { id: 'variables', label: 'Workflow Variables', icon: 'hero-variable' },
-  { id: 'system', label: 'System', icon: 'hero-globe-alt' },
-]
-
-const expandedSections = ref<Record<string, boolean>>({ json: true, steps: true })
+const expandedSections = ref<Record<string, boolean>>({ json: true, trigger: true, steps: true, variables: true })
 
 const toggleSection = (id: string) => {
   expandedSections.value[id] = !expandedSections.value[id]
 }
+
+const activeStepExecution = computed(() => {
+  if (!props.node || !props.stepExecutions) return null
+  return props.stepExecutions.find(se => se.step_id === props.node?.id) || null
+})
+
+const evaluatedConfig = computed(() => {
+  return activeStepExecution.value?.metadata?.evaluated_config || {}
+})
+
+const contextData = computed(() => {
+  if (!props.execution) return {}
+  return {
+    json: activeStepExecution.value?.input_data || {},
+    trigger: props.execution?.trigger?.data || {},
+    variables: props.execution?.metadata?.variables || {},
+    steps: props.stepExecutions?.reduce((acc: any, se: any) => {
+      acc[se.step_id] = { json: se.output_data }
+      return acc
+    }, {}) || {}
+  }
+})
+
+const explorerData = computed(() => {
+  const data = contextData.value
+  return [
+    { id: 'json', label: 'Current Input', icon: ArrowRightOnRectangleIcon, data: data.json },
+    { id: 'trigger', label: 'Trigger Data', icon: BoltIcon, data: data.trigger },
+    { id: 'steps', label: 'Upstream Steps', icon: CpuChipIcon, data: data.steps },
+    { id: 'variables', label: 'Workflow Variables', icon: VariableIcon, data: data.variables },
+  ]
+})
 </script>
 
 <template>
@@ -159,17 +208,14 @@ const toggleSection = (id: string) => {
             </div>
           </div>
           <div class="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-            <div v-for="section in explorerSections" :key="section.id" class="overflow-hidden">
+            <div v-for="section in explorerData" :key="section.id" class="overflow-hidden">
               <button
                 class="w-full flex items-center justify-between p-2 rounded-xl text-xs font-bold transition-all hover:bg-primary/5 group"
                 :class="expandedSections[section.id] ? 'text-primary bg-primary/5' : 'text-base-content/60'"
                 @click="toggleSection(section.id)">
                 <div class="flex items-center gap-2">
                   <span class="opacity-70 group-hover:opacity-100">
-                    <!-- Icon Placeholder -->
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path d="M4 6h16M4 12h16m-7 6h7" stroke-width="2" stroke-linecap="round" />
-                    </svg>
+                    <component :is="section.icon" class="w-4 h-4" />
                   </span>
                   {{ section.label }}
                 </div>
@@ -179,7 +225,16 @@ const toggleSection = (id: string) => {
                 </svg>
               </button>
               <div v-if="expandedSections[section.id]" class="mt-1 ml-4 pl-2 border-l border-base-200 py-1 space-y-1">
-                <div class="p-2 text-[10px] text-base-content/40 italic">No variables available</div>
+                <template v-if="Object.keys(section.data || {}).length > 0">
+                  <div v-for="(val, key) in section.data" :key="key" 
+                    class="p-1.5 rounded-lg hover:bg-base-200 group cursor-pointer transition-all">
+                    <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-mono text-base-content">{{ key }}</span>
+                    </div>
+                    <div class="text-[10px] text-base-content/40 truncate mt-0.5">{{ JSON.stringify(val) }}</div>
+                  </div>
+                </template>
+                <div v-else class="p-2 text-[10px] text-base-content/40 italic">No variables available</div>
               </div>
             </div>
           </div>
@@ -217,8 +272,9 @@ const toggleSection = (id: string) => {
 
                   <div class="p-5">
                     <template v-if="fieldModes[field.key] === 'literal'">
-                      <textarea v-if="field.type === 'textarea'" v-model="fieldValues[field.key]"
-                        class="textarea textarea-bordered w-full font-mono text-xs bg-base-200/10 border-base-300 focus:border-primary min-h-[100px] rounded-xl"></textarea>
+                      <textarea v-if="field.type === 'textarea' || field.type === 'json'" v-model="fieldValues[field.key]"
+                        class="textarea textarea-bordered w-full font-mono text-xs bg-base-200/10 border-base-300 focus:border-primary min-h-[100px] rounded-xl"
+                        :placeholder="field.type === 'json' ? '{ \n  &quot;key&quot;: &quot;value&quot; \n}' : ''"></textarea>
                       <input v-else v-model="fieldValues[field.key]" :type="field.type === 'number' ? 'number' : 'text'"
                         class="input input-md w-full bg-base-200/20 border-base-300 focus:border-primary font-medium text-sm rounded-xl" />
                     </template>
@@ -227,12 +283,25 @@ const toggleSection = (id: string) => {
                         <textarea v-model="fieldValues[field.key]"
                           class="textarea w-full font-mono text-[13px] bg-base-100 border-2 border-secondary/10 focus:border-secondary/40 focus:ring-4 focus:ring-secondary/5 min-h-[80px] rounded-xl"
                           placeholder="{{ steps.PreviousStep.json.field }}"></textarea>
-                        <div class="overflow-hidden rounded-xl border border-base-200/60 bg-base-200/20">
+                        
+                        <!-- Result from execution -->
+                        <div v-if="evaluatedConfig[field.key] !== undefined" class="overflow-hidden rounded-xl border border-secondary/20 bg-secondary/[0.03]">
+                          <div
+                            class="flex items-center justify-between px-4 py-1.5 border-b border-secondary/10 bg-secondary/5">
+                            <span class="text-[9px] font-bold uppercase tracking-widest text-secondary/60">Resolved Result</span>
+                            <span class="text-[9px] font-bold text-secondary uppercase">Value</span>
+                          </div>
+                          <div class="p-3 text-[11px] font-mono text-base-content/70">
+                            {{ evaluatedConfig[field.key] }}
+                          </div>
+                        </div>
+
+                        <!-- Live Preview (Mock or fallback) -->
+                        <div v-else class="overflow-hidden rounded-xl border border-base-200/60 bg-base-200/20">
                           <div
                             class="flex items-center justify-between px-4 py-1.5 border-b border-base-200/40 bg-base-200/30">
-                            <span class="text-[9px] font-bold uppercase tracking-widest text-base-content/30">Live
-                              Preview</span>
-                            <span class="text-[9px] font-bold text-success uppercase">Success</span>
+                            <span class="text-[9px] font-bold uppercase tracking-widest text-base-content/30">Sample Preview</span>
+                            <span class="text-[9px] font-bold text-success uppercase">Draft</span>
                           </div>
                           <div class="p-3 text-[11px] font-mono text-base-content/70">
                             {{ fieldValues[field.key] }}
@@ -246,13 +315,41 @@ const toggleSection = (id: string) => {
             </div>
           </div>
 
-          <div v-else-if="activeTab === 'output'" class="h-full flex flex-col items-center justify-center opacity-40">
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-16 h-16 mb-4" fill="none" viewBox="0 0 24 24"
-              stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            <p class="text-sm font-bold">No output available yet</p>
-            <p class="text-xs">Run this step to see captured data</p>
+          <div v-else-if="activeTab === 'output'" class="max-w-4xl mx-auto p-4 space-y-8 h-full custom-scrollbar">
+            <div v-if="activeStepExecution" class="space-y-8 pb-20">
+              <section>
+                <h4 class="text-xs font-bold uppercase tracking-widest text-base-content/40 mb-3">Input Data</h4>
+                <div class="bg-base-300/30 rounded-2xl p-4 font-mono text-xs overflow-x-auto whitespace-pre">
+                  {{ JSON.stringify(activeStepExecution.input_data, null, 2) }}
+                </div>
+              </section>
+
+              <section>
+                <div class="flex items-center justify-between mb-3">
+                  <h4 class="text-xs font-bold uppercase tracking-widest text-base-content/40">Output Data</h4>
+                  <span v-if="activeStepExecution.status === 'completed'" class="badge badge-success badge-sm">Success</span>
+                </div>
+                <div class="bg-base-300/30 rounded-2xl p-4 font-mono text-xs overflow-x-auto whitespace-pre border-2 border-success/10">
+                  {{ JSON.stringify(activeStepExecution.output_data, null, 2) }}
+                </div>
+              </section>
+
+              <section v-if="activeStepExecution.error">
+                <h4 class="text-xs font-bold uppercase tracking-widest text-error/60 mb-3">Error</h4>
+                <div class="bg-error/5 border border-error/20 rounded-2xl p-4 font-mono text-xs text-error">
+                  {{ activeStepExecution.error }}
+                </div>
+              </section>
+            </div>
+
+            <div v-else class="h-full flex flex-col items-center justify-center opacity-40">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-16 h-16 mb-4" fill="none" viewBox="0 0 24 24"
+                stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <p class="text-sm font-bold">No execution data available</p>
+              <p class="text-xs">Run the workflow to see inputs and outputs</p>
+            </div>
           </div>
 
           <div v-else class="h-full flex flex-col items-center justify-center opacity-40">

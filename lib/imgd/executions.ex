@@ -519,6 +519,25 @@ defmodule Imgd.Executions do
     end
   end
 
+  @doc false
+  @spec update_step_execution_metadata(Ecto.UUID.t(), String.t(), map()) ::
+          {:ok, StepExecution.t()} | {:error, term()}
+  def update_step_execution_metadata(execution_id, step_id, metadata) do
+    case fetch_latest_active_step_execution(execution_id, step_id) do
+      nil ->
+        {:error, :not_found}
+
+      %StepExecution{} = step_execution ->
+        new_metadata = Map.merge(step_execution.metadata || %{}, metadata)
+
+        safe_repo(fn ->
+          step_execution
+          |> StepExecution.changeset(%{metadata: new_metadata})
+          |> Repo.update()
+        end)
+    end
+  end
+
   defp fetch_latest_active_step_execution(execution_id, step_id) do
     from(se in StepExecution,
       where:

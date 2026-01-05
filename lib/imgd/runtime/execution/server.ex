@@ -168,6 +168,7 @@ defmodule Imgd.Runtime.Execution.Server do
         opts = [
           execution_id: execution.id,
           variables: Map.get(execution.metadata, "variables", %{}),
+          trigger_data: execution.trigger.data || %{},
           metadata: %{
             trace_id: Map.get(execution.metadata, "trace_id"),
             workflow_id: execution.workflow_id

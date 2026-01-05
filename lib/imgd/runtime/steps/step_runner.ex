@@ -28,7 +28,8 @@ defmodule Imgd.Runtime.Steps.StepRunner do
           workflow_id: String.t(),
           variables: map(),
           metadata: map(),
-          step_outputs: map()
+          step_outputs: map(),
+          trigger_data: map()
         ]
 
   @doc """
@@ -109,11 +110,18 @@ defmodule Imgd.Runtime.Steps.StepRunner do
     # Build context from options and input
     ctx = build_context(step, input, opts)
 
-    # Evaluate expressions in the config
     evaluated_config =
       case evaluate_config(step.config, ctx) do
-        {:ok, config} -> config
-        {:error, reason} -> throw({:step_error, step.id, {:expression_error, reason}})
+        {:ok, config} ->
+          # Persist evaluated config for UI/Debug purposes
+          Imgd.Executions.update_step_execution_metadata(ctx.execution_id, ctx.step_id, %{
+            "evaluated_config" => config
+          })
+
+          config
+
+        {:error, reason} ->
+          throw({:step_error, step.id, {:expression_error, reason}})
       end
 
     # Resolve and execute the step
@@ -144,7 +152,8 @@ defmodule Imgd.Runtime.Steps.StepRunner do
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
       input: input,
-      step_outputs: Keyword.get(opts, :step_outputs, %{})
+      step_outputs: Keyword.get(opts, :step_outputs, %{}),
+      trigger: Keyword.get(opts, :trigger_data, %{})
     )
   end
 
@@ -168,7 +177,8 @@ defmodule Imgd.Runtime.Steps.StepRunner do
         "id" => ctx.workflow_id
       },
       "variables" => ctx.variables,
-      "metadata" => ctx.metadata
+      "metadata" => ctx.metadata,
+      "trigger" => %{"data" => ctx.trigger}
     }
   end
 

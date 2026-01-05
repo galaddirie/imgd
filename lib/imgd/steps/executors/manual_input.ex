@@ -7,6 +7,18 @@ defmodule Imgd.Steps.Executors.ManualInput do
     icon: "hero-cursor-arrow-rays",
     kind: :trigger
 
+  @config_schema %{
+    "type" => "object",
+    "properties" => %{
+      "trigger_data" => %{
+        "type" => "string",
+        "title" => "Trigger Data (JSON)",
+        "format" => "json",
+        "default" => "{}"
+      }
+    }
+  }
+
   @behaviour Imgd.Steps.Executors.Behaviour
 
   @impl true

@@ -82,9 +82,11 @@ IO.puts("Creating Linear Workflow...")
 linear_steps = [
   %{
     id: "start",
-    type_id: "debug",
+    type_id: "manual_input",
     name: "Start",
-    config: %{"message" => "Starting linear workflow"},
+    config: %{
+      "trigger_data" => "{\"name\": \"John Doe\", \"timestamp\": \"2026-01-04 20:00:00\"}"
+    },
     position: %{"x" => 100, "y" => 100}
   },
   %{
@@ -165,9 +167,9 @@ IO.puts("Creating Branching Workflow...")
 branching_steps = [
   %{
     id: "input",
-    type_id: "debug",
+    type_id: "manual_input",
     name: "Input",
-    config: %{"message" => "Received input data"},
+    config: %{"trigger_data" => "{\"name\": \"Alice\", \"status\": \"active\"}"},
     position: %{"x" => 100, "y" => 150}
   },
   %{
@@ -269,9 +271,9 @@ IO.puts("Creating Diamond Workflow...")
 diamond_steps = [
   %{
     id: "start",
-    type_id: "debug",
+    type_id: "manual_input",
     name: "Start",
-    config: %{"message" => "Starting diamond workflow"},
+    config: %{"trigger_data" => "{\"type\": \"user\", \"name\": \"Bob\"}"},
     position: %{"x" => 100, "y" => 200}
   },
   %{
@@ -423,9 +425,9 @@ IO.puts("Creating Simple Workflow...")
 simple_steps = [
   %{
     id: "input_data",
-    type_id: "debug",
+    type_id: "manual_input",
     name: "Input Data",
-    config: %{"message" => "Received calculation input"},
+    config: %{"trigger_data" => "{\"a\": 10, \"b\": 20, \"operation\": \"add\"}"},
     position: %{"x" => 100, "y" => 100}
   },
   %{
@@ -510,9 +512,11 @@ IO.puts("Creating Complex Workflow...")
 complex_steps = [
   %{
     id: "receive_order",
-    type_id: "debug",
+    type_id: "manual_input",
     name: "Receive Order",
-    config: %{"message" => "New order received"},
+    config: %{
+      "trigger_data" => "{\"customer\": \"Acme Corp\", \"subtotal\": 150, \"total\": 150}"
+    },
     position: %{"x" => 100, "y" => 150}
   },
   %{
@@ -703,9 +707,9 @@ IO.puts("Creating Map/Aggregate Workflow...")
 map_aggregate_steps = [
   %{
     id: "input_list",
-    type_id: "debug",
+    type_id: "manual_input",
     name: "Input List",
-    config: %{"message" => "Received list of numbers"},
+    config: %{"trigger_data" => "{\"numbers\": [1, 2, 3, 4, 5]}"},
     position: %{"x" => 100, "y" => 150}
   },
   %{
