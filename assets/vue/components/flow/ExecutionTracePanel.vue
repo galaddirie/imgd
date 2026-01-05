@@ -68,15 +68,32 @@ const traces = computed<TraceEntry[]>(() => {
       step_name: se.step_id, // Would need to resolve from step registry
       status: se.status,
       duration_us: se.duration_us,
-      timestamp: se.started_at ? new Date(se.started_at).toLocaleTimeString() : '',
+      timestamp: se.started_at
+        ? new Date(se.started_at).toLocaleTimeString()
+        : se.completed_at
+          ? new Date(se.completed_at).toLocaleTimeString()
+          : '',
       error: se.error ? JSON.stringify(se.error) : undefined,
     }))
   }
+
+  if (props.execution) {
+    return []
+  }
+
   return mockTraces
 })
 
 const logs = computed<LogEntry[]>(() => {
-  return props.logs.length > 0 ? props.logs : mockLogs
+  if (props.logs.length > 0) {
+    return props.logs
+  }
+
+  if (props.execution) {
+    return []
+  }
+
+  return mockLogs
 })
 
 // Execution status

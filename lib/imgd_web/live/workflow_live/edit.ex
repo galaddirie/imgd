@@ -9,6 +9,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   alias Imgd.Steps.Registry, as: StepRegistry
   alias Imgd.Collaboration.EditorState
   alias Imgd.Collaboration.EditSession.{Server, Presence, PubSub, Operations}
+  alias Imgd.Executions
+  alias Imgd.Executions.Execution
+  alias Imgd.Executions.PubSub, as: ExecutionPubSub
+  alias Imgd.Runtime.Execution.Supervisor, as: ExecutionSupervisor
+  alias Imgd.Runtime.RunicAdapter
   alias Ecto.UUID
 
   @impl true
@@ -32,6 +37,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               |> assign(:editor_state, %EditorState{workflow_id: workflow.id})
               |> assign(:presences, [])
               |> assign(:current_user_id, user.id)
+              |> assign(:execution, nil)
+              |> assign(:step_executions, [])
+              |> assign(:execution_id, nil)
 
             # Only set up collaboration when WebSocket is connected
             socket =
@@ -97,33 +105,38 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="h-screen w-screen overflow-hidden bg-base-200">
-      <.vue
-        v-component="WorkflowEditor"
-        v-ssr={false}
-        v-socket={@socket}
-        workflow={@workflow}
-        stepTypes={@step_types}
-        nodeLibraryItems={@node_library_items}
-        editorState={@editor_state}
-        presences={@presences}
-        currentUserId={@current_user_id}
-        v-on:add_step={JS.push("add_step")}
-        v-on:move_step={JS.push("move_step")}
-        v-on:update_step={JS.push("update_step")}
-        v-on:remove_step={JS.push("remove_step")}
-        v-on:add_connection={JS.push("add_connection")}
-        v-on:remove_connection={JS.push("remove_connection")}
-        v-on:save_workflow={JS.push("save_workflow")}
-        v-on:mouse_move={JS.push("mouse_move")}
-        v-on:selection_changed={JS.push("selection_changed")}
-        v-on:pin_output={JS.push("pin_output")}
-        v-on:unpin_output={JS.push("unpin_output")}
-        v-on:disable_step={JS.push("disable_step")}
-        v-on:enable_step={JS.push("enable_step")}
-        v-on:run_test={JS.push("run_test")}
-      />
-    </div>
+    <Layouts.app flash={@flash} current_scope={@current_scope} hide_nav={true} full_bleed={true}>
+      <div class="h-screen w-full overflow-hidden bg-base-200">
+        <.vue
+          v-component="WorkflowEditor"
+          v-ssr={false}
+          v-socket={@socket}
+          workflow={@workflow}
+          stepTypes={@step_types}
+          nodeLibraryItems={@node_library_items}
+          editorState={@editor_state}
+          presences={@presences}
+          currentUserId={@current_user_id}
+          execution={@execution}
+          stepExecutions={@step_executions}
+          v-on:add_step={JS.push("add_step")}
+          v-on:move_step={JS.push("move_step")}
+          v-on:update_step={JS.push("update_step")}
+          v-on:remove_step={JS.push("remove_step")}
+          v-on:add_connection={JS.push("add_connection")}
+          v-on:remove_connection={JS.push("remove_connection")}
+          v-on:save_workflow={JS.push("save_workflow")}
+          v-on:mouse_move={JS.push("mouse_move")}
+          v-on:selection_changed={JS.push("selection_changed")}
+          v-on:pin_output={JS.push("pin_output")}
+          v-on:unpin_output={JS.push("unpin_output")}
+          v-on:disable_step={JS.push("disable_step")}
+          v-on:enable_step={JS.push("enable_step")}
+          v-on:run_test={JS.push("run_test")}
+          v-on:cancel_execution={JS.push("cancel_execution")}
+        />
+      </div>
+    </Layouts.app>
     """
   end
 
@@ -247,8 +260,41 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("run_test", _params, socket) do
-    # TODO: Implement test execution
-    {:noreply, put_flash(socket, :info, "Test execution started")}
+    case start_preview_execution(socket) do
+      {:ok, socket} ->
+        {:noreply, put_flash(socket, :info, "Test execution started")}
+
+      {:error, reason, socket} ->
+        {:noreply, put_flash(socket, :error, "Failed to start test: #{reason}")}
+    end
+  end
+
+  @impl true
+  def handle_event("cancel_execution", _params, socket) do
+    case socket.assigns.execution do
+      %Execution{} = execution ->
+        _ = maybe_stop_execution_process(execution.id)
+
+        case Executions.cancel_execution(socket.assigns.current_scope, execution) do
+          {:ok, updated_execution} ->
+            {:noreply, assign(socket, :execution, updated_execution)}
+
+          {:error, :already_terminal} ->
+            {:noreply, socket}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Unable to cancel execution")}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def terminate(_reason, socket) do
+    _ = unsubscribe_execution(socket)
+    :ok
   end
 
   # =============================================================================
@@ -326,6 +372,41 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_info({:execution_event, %{execution_id: execution_id} = event}, socket) do
+    if execution_id == socket.assigns.execution_id do
+      {:noreply, refresh_execution_from_event(socket, event)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_info({:execution_started, %Execution{} = execution}, socket) do
+    {:noreply, update_execution_assign(socket, execution)}
+  end
+
+  @impl true
+  def handle_info({:execution_updated, %Execution{} = execution}, socket) do
+    {:noreply, update_execution_assign(socket, execution)}
+  end
+
+  @impl true
+  def handle_info({:execution_completed, %Execution{} = execution}, socket) do
+    {:noreply, update_execution_assign(socket, execution)}
+  end
+
+  @impl true
+  def handle_info({:execution_failed, %Execution{} = execution, _error}, socket) do
+    {:noreply, update_execution_assign(socket, execution)}
+  end
+
+  @impl true
+  def handle_info({event, payload}, socket)
+      when event in [:step_started, :step_completed, :step_failed] do
+    {:noreply, update_step_executions(socket, event, payload)}
+  end
+
   # Catch-all for unhandled messages (useful for debugging)
   @impl true
   def handle_info(msg, socket) do
@@ -357,6 +438,242 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         {:noreply, put_flash(socket, :error, "Operation failed")}
     end
   end
+
+  defp start_preview_execution(socket) do
+    socket = unsubscribe_execution(socket)
+
+    workflow = socket.assigns.workflow
+    draft = workflow.draft
+    editor_state = socket.assigns.editor_state
+    scope = socket.assigns.current_scope
+
+    if is_nil(draft) do
+      {:error, "workflow draft missing", socket}
+    else
+      preview_draft = build_preview_draft(draft, editor_state)
+      pinned_outputs = editor_state.pinned_outputs || %{}
+
+      attrs = %{
+        workflow_id: workflow.id,
+        execution_type: :preview,
+        trigger: %{type: :manual, data: %{}},
+        metadata: %{extras: %{preview: true}}
+      }
+
+      with {:ok, execution} <- Executions.create_execution(scope, attrs),
+           {:ok, execution} <-
+             put_runic_snapshot(scope, execution, preview_draft, pinned_outputs),
+           :ok <- subscribe_execution(scope, execution.id),
+           {:ok, _pid} <- start_execution_process(execution.id) do
+        step_executions = build_initial_step_executions(execution.id, preview_draft.steps)
+
+        socket =
+          socket
+          |> assign(:execution, execution)
+          |> assign(:execution_id, execution.id)
+          |> assign(:step_executions, step_executions)
+
+        {:ok, socket}
+      else
+        {:error, reason} ->
+          {:error, format_execution_error(reason), socket}
+      end
+    end
+  end
+
+  defp put_runic_snapshot(scope, %Execution{} = execution, draft, pinned_outputs) do
+    metadata = normalize_execution_metadata(execution.metadata)
+
+    runic_workflow =
+      RunicAdapter.to_runic_workflow(draft,
+        execution_id: execution.id,
+        metadata: metadata,
+        step_outputs: pinned_outputs
+      )
+
+    snapshot = :erlang.term_to_binary(runic_workflow)
+    Executions.put_execution_snapshot(scope, execution, snapshot)
+  end
+
+  defp build_preview_draft(draft, %EditorState{} = editor_state) do
+    disabled_steps = editor_state.disabled_steps || MapSet.new()
+
+    steps =
+      Enum.reject(draft.steps, fn step ->
+        MapSet.member?(disabled_steps, step.id)
+      end)
+
+    step_ids = MapSet.new(Enum.map(steps, & &1.id))
+
+    connections =
+      Enum.filter(draft.connections, fn conn ->
+        MapSet.member?(step_ids, conn.source_step_id) and
+          MapSet.member?(step_ids, conn.target_step_id)
+      end)
+
+    %{draft | steps: steps, connections: connections}
+  end
+
+  defp build_initial_step_executions(execution_id, steps) do
+    now = DateTime.utc_now()
+
+    Enum.map(steps, fn step ->
+      %{
+        id: "#{execution_id}:#{step.id}",
+        execution_id: execution_id,
+        step_id: step.id,
+        step_type_id: step.type_id,
+        status: :pending,
+        attempt: 1,
+        inserted_at: now
+      }
+    end)
+  end
+
+  defp normalize_execution_metadata(nil), do: %{}
+
+  defp normalize_execution_metadata(%{__struct__: _} = metadata) do
+    Map.from_struct(metadata)
+  end
+
+  defp normalize_execution_metadata(metadata) when is_map(metadata), do: metadata
+  defp normalize_execution_metadata(_metadata), do: %{}
+
+  defp subscribe_execution(scope, execution_id) do
+    case ExecutionPubSub.subscribe_execution(scope, execution_id) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp unsubscribe_execution(socket) do
+    case socket.assigns.execution_id do
+      nil ->
+        socket
+
+      execution_id ->
+        ExecutionPubSub.unsubscribe_execution(execution_id)
+
+        socket
+        |> assign(:execution_id, nil)
+        |> assign(:execution, nil)
+        |> assign(:step_executions, [])
+    end
+  end
+
+  defp start_execution_process(execution_id) do
+    case ExecutionSupervisor.start_execution(execution_id) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_stop_execution_process(execution_id) do
+    case ExecutionSupervisor.get_execution_pid(execution_id) do
+      {:ok, pid} ->
+        Process.exit(pid, :shutdown)
+        :ok
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  defp refresh_execution_from_event(socket, %{execution_id: execution_id}) do
+    case Executions.get_execution(socket.assigns.current_scope, execution_id) do
+      {:ok, execution} -> assign(socket, :execution, execution)
+      {:error, _} -> socket
+    end
+  end
+
+  defp update_execution_assign(socket, %Execution{id: execution_id} = execution) do
+    if execution_id == socket.assigns.execution_id do
+      assign(socket, :execution, execution)
+    else
+      socket
+    end
+  end
+
+  defp update_step_executions(socket, event, payload) do
+    execution_id = socket.assigns.execution_id
+    step_execution = normalize_step_payload(payload, execution_id, event)
+
+    if step_execution do
+      step_executions = upsert_step_execution(socket.assigns.step_executions, step_execution)
+      assign(socket, :step_executions, step_executions)
+    else
+      socket
+    end
+  end
+
+  defp normalize_step_payload(payload, execution_id, event) do
+    step_id = fetch_payload_value(payload, :step_id)
+    payload_execution_id = fetch_payload_value(payload, :execution_id) || execution_id
+
+    if step_id && payload_execution_id && payload_execution_id == execution_id do
+      %{
+        id: fetch_payload_value(payload, :id) || "#{payload_execution_id}:#{step_id}",
+        execution_id: payload_execution_id,
+        step_id: step_id,
+        step_type_id: fetch_payload_value(payload, :step_type_id),
+        status: fetch_payload_value(payload, :status) || default_step_status(event),
+        input_data: fetch_payload_value(payload, :input_data),
+        output_data: fetch_payload_value(payload, :output_data),
+        error: fetch_payload_value(payload, :error),
+        attempt: fetch_payload_value(payload, :attempt) || 1,
+        queued_at: fetch_payload_value(payload, :queued_at),
+        started_at: fetch_payload_value(payload, :started_at),
+        completed_at: fetch_payload_value(payload, :completed_at),
+        duration_us: fetch_payload_value(payload, :duration_us),
+        metadata: fetch_payload_value(payload, :metadata)
+      }
+    end
+  end
+
+  defp fetch_payload_value(payload, key) when is_map(payload) do
+    Map.get(payload, key) || Map.get(payload, Atom.to_string(key))
+  end
+
+  defp fetch_payload_value(_payload, _key), do: nil
+
+  defp default_step_status(:step_started), do: :running
+  defp default_step_status(:step_failed), do: :failed
+  defp default_step_status(:step_completed), do: :completed
+  defp default_step_status(_event), do: :pending
+
+  defp upsert_step_execution(step_executions, step_execution) do
+    step_id = Map.get(step_execution, :step_id)
+
+    case Enum.find_index(step_executions, fn existing ->
+           Map.get(existing, :step_id) == step_id
+         end) do
+      nil ->
+        step_executions ++ [step_execution]
+
+      index ->
+        existing = Enum.at(step_executions, index)
+        updated = Map.merge(existing, step_execution)
+        List.replace_at(step_executions, index, updated)
+    end
+  end
+
+  defp format_execution_error(:access_denied), do: "access denied"
+  defp format_execution_error(:workflow_not_found), do: "workflow not found"
+  defp format_execution_error(:workflow_not_published), do: "workflow not published"
+  defp format_execution_error(:unauthorized), do: "access denied"
+  defp format_execution_error(:not_found), do: "execution not found"
+
+  defp format_execution_error(%Ecto.Changeset{} = changeset) do
+    error =
+      changeset
+      |> Ecto.Changeset.traverse_errors(fn {msg, _opts} -> msg end)
+      |> inspect()
+
+    "invalid execution: #{error}"
+  end
+
+  defp format_execution_error(reason), do: inspect(reason)
 
   defp handle_presence_diff(socket, _diff) do
     # Fetch latest full presence list

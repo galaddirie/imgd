@@ -184,7 +184,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
     runic_workflow =
       RunicAdapter.to_runic_workflow(draft,
         execution_id: execution.id,
-        pinned_outputs: editor_state.pinned_outputs
+        step_outputs: editor_state.pinned_outputs
       )
 
     # Execute synchronously for preview

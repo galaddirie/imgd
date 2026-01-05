@@ -27,7 +27,8 @@ defmodule Imgd.Runtime.Steps.StepRunner do
           execution_id: String.t(),
           workflow_id: String.t(),
           variables: map(),
-          metadata: map()
+          metadata: map(),
+          step_outputs: map()
         ]
 
   @doc """

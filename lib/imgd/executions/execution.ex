@@ -26,6 +26,23 @@ defmodule Imgd.Executions.Execution do
              :inserted_at,
              :updated_at
            ]}
+  @derive {LiveVue.Encoder,
+           only: [
+             :id,
+             :workflow_id,
+             :status,
+             :execution_type,
+             :trigger,
+             :context,
+             :output,
+             :error,
+             :metadata,
+             :triggered_by_user_id,
+             :started_at,
+             :completed_at,
+             :inserted_at,
+             :updated_at
+           ]}
   use Imgd.Schema
   import Imgd.ChangesetHelpers
 
@@ -43,6 +60,7 @@ defmodule Imgd.Executions.Execution do
   defmodule Trigger do
     @moduledoc "Embedded trigger data for an execution"
     @derive Jason.Encoder
+    @derive {LiveVue.Encoder, only: [:type, :data]}
     use Ecto.Schema
 
     @type t :: %__MODULE__{
@@ -61,6 +79,15 @@ defmodule Imgd.Executions.Execution do
     @moduledoc "Embedded metadata for execution correlation and debugging"
     use Ecto.Schema
     @derive Jason.Encoder
+    @derive {LiveVue.Encoder,
+             only: [
+               :trace_id,
+               :correlation_id,
+               :triggered_by,
+               :parent_execution_id,
+               :tags,
+               :extras
+             ]}
 
     @type t :: %__MODULE__{
             trace_id: String.t() | nil,

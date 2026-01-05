@@ -148,9 +148,7 @@ defmodule ImgdWeb.WorkflowLive.Show do
                         </td>
                         <td>
                           <.link
-                            navigate={
-                              ~p"/workflows/#{@workflow.id}/edit?execution_id=#{execution.id}"
-                            }
+                            navigate={~p"/workflows/#{@workflow.id}/execution/#{execution.id}"}
                             class="btn btn-ghost btn-xs"
                             title="Inspect execution"
                           >

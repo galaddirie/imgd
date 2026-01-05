@@ -33,7 +33,9 @@ defmodule Imgd.Runtime.RunicAdapter do
   @type build_opts :: [
           execution_id: String.t(),
           variables: map(),
-          metadata: map()
+          metadata: map(),
+          step_outputs: map(),
+          default_compute: term()
         ]
 
   @doc """
@@ -45,6 +47,7 @@ defmodule Imgd.Runtime.RunicAdapter do
   - `:variables` - Workflow-level variables for expressions
   - `:variables` - Workflow-level variables for experiments
   - `:metadata` - Execution metadata
+  - `:step_outputs` - Precomputed step outputs (e.g., pinned outputs)
   - `:default_compute` - Default compute target for all steps
 
   ## Returns
@@ -54,11 +57,15 @@ defmodule Imgd.Runtime.RunicAdapter do
   @spec to_runic_workflow(source(), build_opts()) :: Workflow.t()
   def to_runic_workflow(source, opts \\ []) do
     # Build options for StepRunner creation
+    step_outputs =
+      Keyword.get(opts, :step_outputs, Keyword.get(opts, :pinned_outputs, %{}))
+
     step_opts = [
       execution_id: Keyword.get(opts, :execution_id),
       workflow_id: extract_source_id(source),
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
+      step_outputs: step_outputs,
       default_compute: Keyword.get(opts, :default_compute)
     ]
 

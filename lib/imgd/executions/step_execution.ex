@@ -6,6 +6,25 @@ defmodule Imgd.Executions.StepExecution do
   is created to capture input, output, timing, and any errors.
   """
   @derive {Jason.Encoder, except: [:__meta__, :execution]}
+  @derive {LiveVue.Encoder,
+           only: [
+             :id,
+             :execution_id,
+             :step_id,
+             :step_type_id,
+             :status,
+             :input_data,
+             :output_data,
+             :error,
+             :attempt,
+             :retry_of_id,
+             :queued_at,
+             :started_at,
+             :completed_at,
+             :metadata,
+             :inserted_at,
+             :updated_at
+           ]}
   use Imgd.Schema
   import Imgd.ChangesetHelpers
 

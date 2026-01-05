@@ -237,6 +237,26 @@ defmodule Imgd.Executions do
   end
 
   @doc """
+  Stores a Runic snapshot for an execution.
+
+  Returns `{:ok, execution}` if successful, `{:error, :access_denied}` otherwise.
+  """
+  @spec put_execution_snapshot(Scope.t() | nil, Execution.t(), binary()) ::
+          {:ok, Execution.t()} | {:error, :access_denied}
+  def put_execution_snapshot(scope, %Execution{} = execution, snapshot)
+      when is_binary(snapshot) do
+    execution = Repo.preload(execution, :workflow)
+
+    if Scope.can_view_workflow?(scope, execution.workflow) do
+      execution
+      |> Execution.changeset(%{runic_snapshot: snapshot})
+      |> Repo.update()
+    else
+      {:error, :access_denied}
+    end
+  end
+
+  @doc """
   Cancels an execution.
 
   Returns `{:ok, execution}` if successful, `{:error, reason}` otherwise.
