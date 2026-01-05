@@ -12,7 +12,7 @@
 - [ ] Add **Publish** button
 - [ ] Unsaved changes indicator + autosave
 - [ ] Undo/redo (unsaved changes remain in session local storage)
-- [ ] Add error highlighting to Expression UI
+- [x] Add error highlighting to Expression UI
 - [ ] Fix edit operations (remove client-side UUID)
 
 
