@@ -13,7 +13,7 @@
 - [ ] Unsaved changes indicator + autosave
 - [ ] Undo/redo (unsaved changes remain in session local storage)
 - [x] Add error highlighting to Expression UI
-- [ ] Fix edit operations (remove client-side UUID)
+- [x] Fix edit operations (remove client-side UUID)
 
 
 - [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
@@ -73,4 +73,4 @@ How would this work in a zero trust environment?
 
 
 BUGS
-- [ ] When initially loading a edit session with previous preview execution data present, we arent able to update the expression preview unless we reun a new execution
+- [ ] When initially loading a edit session with previous preview execution data present, we arent able to update the expression preview unless we reun a new execution. the  step config modal shows Resolved Result instead of Live Preview

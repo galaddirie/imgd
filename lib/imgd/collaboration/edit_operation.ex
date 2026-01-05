@@ -18,7 +18,6 @@ defmodule Imgd.Collaboration.EditOperation do
           | :enable_step
 
   schema "edit_operations" do
-    # Client-generated UUID
     field :operation_id, :string
     # Server-assigned sequence
     field :seq, :integer
