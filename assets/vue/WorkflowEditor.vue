@@ -60,6 +60,7 @@ interface Props {
   editorState?: EditorState
   presences?: UserPresence[]
   currentUserId?: string
+  expressionPreviews?: Record<string, any>
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -70,6 +71,7 @@ const props = withDefaults(defineProps<Props>(), {
   editorState: undefined,
   presences: () => [],
   currentUserId: undefined,
+  expressionPreviews: () => ({}),
 })
 
 // =============================================================================
@@ -94,6 +96,7 @@ const emit = defineEmits<{
   // Collaboration events
   (e: 'mouse_move', payload: { x: number; y: number }): void
   (e: 'selection_changed', payload: { step_ids: string[] }): void
+  (e: 'preview_expression', payload: { step_id: string; field_key: string; expression: string }): void
 }>()
 
 // =============================================================================
@@ -620,8 +623,9 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
       </div>
 
       <StepConfigModal :is-open="store.isConfigModalOpen" :node="selectedNode" :step-type="selectedStepType"
-        :execution="execution" :step-executions="stepExecutions"
-        @close="store.closeConfigModal" @save="handleSaveConfig" @delete="handleDeleteStep" />
+        :execution="execution" :step-executions="stepExecutions" :expression-previews="expressionPreviews"
+        @close="store.closeConfigModal" @save="handleSaveConfig" @delete="handleDeleteStep"
+        @preview_expression="(payload: { step_id: string; field_key: string; expression: string }) => emit('preview_expression', payload)" />
 
       <ContextMenu :show="store.contextMenu.show" :x="store.contextMenu.x" :y="store.contextMenu.y"
         :items="contextMenuItems" @select="handleContextMenuSelect" @close="closeContextMenu" />

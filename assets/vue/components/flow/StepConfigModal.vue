@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { watchDebounced } from '@vueuse/core'
+import ExpressionPreviewError from './ExpressionPreviewError.vue'
 import {
   ArrowRightOnRectangleIcon,
   BoltIcon,
@@ -27,10 +29,11 @@ interface Props {
   stepType?: any
   execution?: any
   stepExecutions?: any[]
+  expressionPreviews?: Record<string, any>
 }
 
 const props = defineProps<Props>()
-const emit = defineEmits(['close', 'save'])
+const emit = defineEmits(['close', 'save', 'preview_expression'])
 
 const activeTab = ref<'config' | 'output' | 'pinned'>('config')
 const fieldModes = ref<Record<string, 'literal' | 'expression'>>({})
@@ -54,6 +57,21 @@ watch([() => props.node, () => props.isOpen], ([newNode, open]) => {
     fieldValues.value = values
   }
 }, { immediate: true })
+
+// Watch for changes and emit preview events
+watchDebounced(fieldValues, (newValues) => {
+  if (!props.isOpen || !props.node) return
+
+  Object.entries(newValues).forEach(([key, value]) => {
+    if (fieldModes.value[key] === 'expression' && typeof value === 'string') {
+      emit('preview_expression', {
+        step_id: props.node.id,
+        field_key: key,
+        expression: value
+      })
+    }
+  })
+}, { debounce: 300, deep: true })
 
 const closeModal = () => emit('close')
 
@@ -300,11 +318,16 @@ const explorerData = computed(() => {
                         <div v-else class="overflow-hidden rounded-xl border border-base-200/60 bg-base-200/20">
                           <div
                             class="flex items-center justify-between px-4 py-1.5 border-b border-base-200/40 bg-base-200/30">
-                            <span class="text-[9px] font-bold uppercase tracking-widest text-base-content/30">Sample Preview</span>
+                            <span class="text-[9px] font-bold uppercase tracking-widest text-base-content/30">Live Preview</span>
                             <span class="text-[9px] font-bold text-success uppercase">Draft</span>
                           </div>
                           <div class="p-3 text-[11px] font-mono text-base-content/70">
-                            {{ fieldValues[field.key] }}
+                            <template v-if="typeof (expressionPreviews?.[`${node?.id}:${field.key}`]) === 'object' && expressionPreviews?.[`${node?.id}:${field.key}`] !== null">
+                              <ExpressionPreviewError :error="expressionPreviews?.[`${node?.id}:${field.key}`]" />
+                            </template>
+                            <template v-else>
+                              {{ expressionPreviews?.[`${node?.id}:${field.key}`] || 'Run a test to see preview results' }}
+                            </template>
                           </div>
                         </div>
                       </div>

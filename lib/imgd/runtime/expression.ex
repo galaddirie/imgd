@@ -213,9 +213,12 @@ defmodule Imgd.Runtime.Expression do
 
     task =
       Task.async(fn ->
-        with {:ok, compiled} <- Cache.get_or_compile(template),
-             {:ok, result} <- do_render(compiled, vars, opts) do
-          {:ok, result}
+        case Cache.get_or_compile(template) do
+          {:ok, compiled} ->
+            do_render(compiled, vars, opts)
+
+          {:error, reason} ->
+            {:error, format_parse_error(reason)}
         end
       end)
 

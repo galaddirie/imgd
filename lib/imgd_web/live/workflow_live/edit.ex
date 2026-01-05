@@ -40,6 +40,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               |> assign(:execution, nil)
               |> assign(:step_executions, [])
               |> assign(:execution_id, nil)
+              |> assign(:expression_previews, %{})
 
             # Only set up collaboration when WebSocket is connected
             socket =
@@ -97,9 +98,29 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     # Get initial presence list
     presences = format_presences(Presence.list_users(workflow_id))
 
+    # Get latest execution
+    {execution, step_executions} =
+      case Executions.list_workflow_executions(
+             socket.assigns.current_scope,
+             socket.assigns.workflow,
+             limit: 1
+           ) do
+        [latest] ->
+          {:ok, full_execution} =
+            Executions.get_execution_with_steps(socket.assigns.current_scope, latest.id)
+
+          {full_execution, full_execution.step_executions}
+
+        [] ->
+          {nil, []}
+      end
+
     socket
     |> assign(:editor_state, editor_state)
     |> assign(:presences, presences)
+    |> assign(:execution, execution)
+    |> assign(:execution_id, if(execution, do: execution.id, else: nil))
+    |> assign(:step_executions, step_executions)
   end
 
   @impl true
@@ -134,6 +155,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:enable_step={JS.push("enable_step")}
           v-on:run_test={JS.push("run_test")}
           v-on:cancel_execution={JS.push("cancel_execution")}
+          v-on:preview_expression={JS.push("preview_expression")}
+          expressionPreviews={@expression_previews}
         />
       </div>
     </Layouts.app>
@@ -295,6 +318,95 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def terminate(_reason, socket) do
     _ = unsubscribe_execution(socket)
     :ok
+  end
+
+  @impl true
+  def handle_event(
+        "preview_expression",
+        %{"expression" => template, "step_id" => step_id, "field_key" => field_key},
+        socket
+      ) do
+    execution = socket.assigns.execution
+    step_executions = socket.assigns.step_executions
+
+    # Reconstruct context
+    steps = socket.assigns.workflow.draft.steps
+    step_id_to_name = Map.new(steps, fn s -> {s.id, s.name} end)
+
+    step_outputs =
+      Enum.reduce(step_executions, %{}, fn se, acc ->
+        acc = Map.put(acc, se.step_id, se.output_data)
+
+        if name = step_id_to_name[se.step_id] do
+          Map.put(acc, name, se.output_data)
+        else
+          acc
+        end
+      end)
+
+    current_step_execution = Enum.find(step_executions, fn se -> se.step_id == step_id end)
+    current_input = if current_step_execution, do: current_step_execution.input_data, else: nil
+
+    result =
+      cond do
+        !Imgd.Runtime.Expression.contains_expression?(template) ->
+          template
+
+        execution ->
+          vars = Imgd.Runtime.Expression.Context.build(execution, step_outputs, current_input)
+
+          case Imgd.Runtime.Expression.evaluate_with_vars(template, vars) do
+            {:ok, val} -> to_string(val)
+            {:error, reason} -> Map.put(reason, :text, template)
+          end
+
+        # Attempt to load the latest execution if nil
+        true ->
+          case Executions.list_workflow_executions(
+                 socket.assigns.current_scope,
+                 socket.assigns.workflow,
+                 limit: 1
+               ) do
+            [latest] ->
+              {:ok, full_execution} =
+                Executions.get_execution_with_steps(socket.assigns.current_scope, latest.id)
+
+              # Re-build step outputs and current input with loaded data
+              so =
+                Map.new(full_execution.step_executions, fn se -> {se.step_id, se.output_data} end)
+
+              # Also add name mappings
+              so =
+                Enum.reduce(full_execution.step_executions, so, fn se, acc ->
+                  if name = step_id_to_name[se.step_id],
+                    do: Map.put(acc, name, se.output_data),
+                    else: acc
+                end)
+
+              ci =
+                Enum.find(full_execution.step_executions, fn se -> se.step_id == step_id end)
+                |> then(fn
+                  nil -> nil
+                  se -> se.input_data
+                end)
+
+              vars = Imgd.Runtime.Expression.Context.build(full_execution, so, ci)
+
+              case Imgd.Runtime.Expression.evaluate_with_vars(template, vars) do
+                {:ok, val} -> to_string(val)
+                {:error, reason} -> Map.put(reason, :text, template)
+              end
+
+            [] ->
+              "Run a test to see preview results"
+          end
+      end
+
+    # Update previews in socket assigns
+    previews = socket.assigns.expression_previews
+    new_previews = Map.put(previews, "#{step_id}:#{field_key}", result)
+
+    {:noreply, assign(socket, :expression_previews, new_previews)}
   end
 
   # =============================================================================
