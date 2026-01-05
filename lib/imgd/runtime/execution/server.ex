@@ -10,6 +10,7 @@ defmodule Imgd.Runtime.Execution.Server do
   alias Imgd.Runtime.RunicAdapter
   alias Imgd.Runtime.Events
   alias Imgd.Runtime.Hooks.Observability
+  alias Imgd.Executions
   alias Imgd.Executions.Execution
   alias Imgd.Repo
 
@@ -230,13 +231,41 @@ defmodule Imgd.Runtime.Execution.Server do
 
   defp handle_failure(state, step_id, reason) do
     error_map = Execution.format_error({:step_failed, step_id, reason})
+    completed_at = DateTime.utc_now()
+
+    step_execution =
+      case Executions.record_step_execution_failed_by_step(state.execution_id, step_id, reason) do
+        {:ok, step_execution} ->
+          step_execution
+
+        {:error, failure_reason} ->
+          Logger.warning("Failed to persist step execution failure",
+            execution_id: state.execution_id,
+            step_id: step_id,
+            reason: inspect(failure_reason)
+          )
+
+          nil
+      end
+
+    payload =
+      %{
+        execution_id: state.execution_id,
+        step_id: step_id,
+        status: :failed,
+        error: error_map,
+        completed_at: (step_execution && step_execution.completed_at) || completed_at
+      }
+      |> maybe_put_step_type(step_execution)
+
+    Imgd.Executions.PubSub.broadcast_step(:step_failed, state.execution_id, nil, payload)
 
     Execution
     |> Repo.get!(state.execution_id)
     |> Execution.changeset(%{
       status: :failed,
       error: error_map,
-      completed_at: DateTime.utc_now()
+      completed_at: completed_at
     })
     |> Repo.update!()
 
@@ -273,4 +302,11 @@ defmodule Imgd.Runtime.Execution.Server do
       end
     end)
   end
+
+  defp maybe_put_step_type(payload, %{step_type_id: step_type_id})
+       when not is_nil(step_type_id) do
+    Map.put(payload, :step_type_id, step_type_id)
+  end
+
+  defp maybe_put_step_type(payload, _step_execution), do: payload
 end

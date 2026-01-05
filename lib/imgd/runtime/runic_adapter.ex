@@ -79,9 +79,12 @@ defmodule Imgd.Runtime.RunicAdapter do
     sorted_steps = topological_sort_steps(source.steps, source.connections)
 
     # Add each step as a Runic component
-    Enum.reduce(sorted_steps, wrk, fn step, acc ->
-      add_step_to_workflow(step, acc, parent_lookup, step_opts)
-    end)
+    wrk =
+      Enum.reduce(sorted_steps, wrk, fn step, acc ->
+        add_step_to_workflow(step, acc, parent_lookup, step_opts)
+      end)
+
+    put_step_types(wrk, source.steps)
   end
 
   @doc """
@@ -194,6 +197,24 @@ defmodule Imgd.Runtime.RunicAdapter do
       topo_sort_bfs(rest ++ children, adjacency, visited, result)
     end
   end
+
+  defp put_step_types(workflow, steps) when is_list(steps) do
+    step_types =
+      Enum.reduce(steps, %{}, fn step, acc ->
+        step_id = Map.get(step, :id)
+        step_type_id = Map.get(step, :type_id)
+
+        if step_id && step_type_id do
+          Map.put(acc, step_id, step_type_id)
+        else
+          acc
+        end
+      end)
+
+    Map.put(workflow, :__step_types__, step_types)
+  end
+
+  defp put_step_types(workflow, _steps), do: workflow
 
   # ===========================================================================
   # Private: Component Creation

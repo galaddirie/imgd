@@ -12,6 +12,9 @@ defmodule Imgd.Executions do
   alias Imgd.Executions.{Execution, StepExecution}
   alias Imgd.Workflows.Workflow
   alias Imgd.Accounts.Scope
+  alias Imgd.Runtime.Serializer
+
+  @active_step_statuses [:pending, :queued, :running]
 
   @type execution_params :: %{
           required(:workflow_id) => Ecto.UUID.t(),
@@ -423,6 +426,115 @@ defmodule Imgd.Executions do
     else
       {:error, :access_denied}
     end
+  end
+
+  @doc false
+  @spec record_step_execution_started(Ecto.UUID.t(), String.t(), String.t(), term()) ::
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | term()}
+  def record_step_execution_started(execution_id, step_id, step_type_id, input_data) do
+    attrs = %{
+      execution_id: execution_id,
+      step_id: step_id,
+      step_type_id: step_type_id,
+      status: :running,
+      input_data: Serializer.wrap_for_db(input_data),
+      started_at: DateTime.utc_now()
+    }
+
+    safe_repo(fn ->
+      %StepExecution{}
+      |> StepExecution.changeset(attrs)
+      |> Repo.insert()
+    end)
+  end
+
+  @doc false
+  @spec record_step_execution_completed_by_id(Ecto.UUID.t(), term()) ::
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | term()}
+  def record_step_execution_completed_by_id(step_execution_id, output_data) do
+    case Repo.get(StepExecution, step_execution_id) do
+      nil ->
+        {:error, :not_found}
+
+      %StepExecution{} = step_execution ->
+        updates = %{
+          status: :completed,
+          output_data: Serializer.wrap_for_db(output_data),
+          completed_at: DateTime.utc_now()
+        }
+
+        safe_repo(fn ->
+          step_execution
+          |> StepExecution.changeset(updates)
+          |> Repo.update()
+        end)
+    end
+  end
+
+  @doc false
+  @spec record_step_execution_completed_by_step(Ecto.UUID.t(), String.t(), term()) ::
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | term()}
+  def record_step_execution_completed_by_step(execution_id, step_id, output_data) do
+    case fetch_latest_active_step_execution(execution_id, step_id) do
+      nil ->
+        {:error, :not_found}
+
+      %StepExecution{} = step_execution ->
+        updates = %{
+          status: :completed,
+          output_data: Serializer.wrap_for_db(output_data),
+          completed_at: DateTime.utc_now()
+        }
+
+        safe_repo(fn ->
+          step_execution
+          |> StepExecution.changeset(updates)
+          |> Repo.update()
+        end)
+    end
+  end
+
+  @doc false
+  @spec record_step_execution_failed_by_step(Ecto.UUID.t(), String.t(), term()) ::
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | term()}
+  def record_step_execution_failed_by_step(execution_id, step_id, reason) do
+    case fetch_latest_active_step_execution(execution_id, step_id) do
+      nil ->
+        {:error, :not_found}
+
+      %StepExecution{} = step_execution ->
+        error = Execution.format_error({:step_failed, step_id, reason})
+
+        updates = %{
+          status: :failed,
+          error: error,
+          completed_at: DateTime.utc_now()
+        }
+
+        safe_repo(fn ->
+          step_execution
+          |> StepExecution.changeset(updates)
+          |> Repo.update()
+        end)
+    end
+  end
+
+  defp fetch_latest_active_step_execution(execution_id, step_id) do
+    from(se in StepExecution,
+      where:
+        se.execution_id == ^execution_id and se.step_id == ^step_id and
+          se.status in ^@active_step_statuses,
+      order_by: [desc: se.inserted_at],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp safe_repo(fun) when is_function(fun, 0) do
+    fun.()
+  rescue
+    error ->
+      {:error, error}
   end
 
   @doc """

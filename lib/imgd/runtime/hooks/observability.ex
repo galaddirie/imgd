@@ -21,6 +21,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
   require Logger
   alias Runic.Workflow
+  alias Imgd.Executions
 
   @type hook_opts :: [execution_id: String.t(), workflow_id: String.t()]
 
@@ -121,12 +122,34 @@ defmodule Imgd.Runtime.Hooks.Observability do
     workflow
   end
 
-  defp before_step_telemetry(step, workflow, _fact, execution_id) do
+  defp before_step_telemetry(step, workflow, fact, execution_id) do
     step_name = get_step_name(step)
     start_time = System.monotonic_time()
+    step_type_id = get_step_type_id(step, workflow)
+    persisted_step_type_id = step_type_id || "unknown"
 
     # Store start time for duration calculation
     workflow = put_step_start_time(workflow, step_name, start_time)
+
+    workflow =
+      case Executions.record_step_execution_started(
+             execution_id,
+             step_name,
+             persisted_step_type_id,
+             fact.value
+           ) do
+        {:ok, step_execution} ->
+          put_step_execution_id(workflow, step_name, step_execution.id)
+
+        {:error, reason} ->
+          Logger.warning("Failed to persist step execution start",
+            execution_id: execution_id,
+            step_id: step_name,
+            reason: inspect(reason)
+          )
+
+          workflow
+      end
 
     :telemetry.execute(
       [:imgd, :step, :start],
@@ -136,6 +159,18 @@ defmodule Imgd.Runtime.Hooks.Observability do
         execution_id: execution_id
       }
     )
+
+    payload =
+      %{
+        execution_id: execution_id,
+        step_id: step_name,
+        status: :running,
+        input_data: sanitize_for_broadcast(fact.value),
+        started_at: DateTime.utc_now()
+      }
+      |> maybe_put_step_type(step_type_id)
+
+    Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, payload)
 
     workflow
   end
@@ -158,6 +193,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
   defp after_step_telemetry(step, workflow, result_fact, execution_id) do
     step_name = get_step_name(step)
+    step_type_id = get_step_type_id(step, workflow)
 
     # Calculate duration
     start_time = get_step_start_time(workflow, step_name)
@@ -182,15 +218,48 @@ defmodule Imgd.Runtime.Hooks.Observability do
       }
     )
 
+    completed_at = DateTime.utc_now()
+
+    update_result =
+      case get_step_execution_id(workflow, step_name) do
+        nil ->
+          Executions.record_step_execution_completed_by_step(
+            execution_id,
+            step_name,
+            result_fact.value
+          )
+
+        step_execution_id ->
+          Executions.record_step_execution_completed_by_id(step_execution_id, result_fact.value)
+      end
+
+    completed_at =
+      case update_result do
+        {:ok, step_execution} ->
+          step_execution.completed_at || completed_at
+
+        {:error, reason} ->
+          Logger.warning("Failed to persist step execution completion",
+            execution_id: execution_id,
+            step_id: step_name,
+            reason: inspect(reason)
+          )
+
+          completed_at
+      end
+
     # Broadcast event for real-time updates using the standardized PubSub
-    payload = %{
-      step_id: step_name,
-      status: :completed,
-      output_data: sanitize_for_broadcast(result_fact.value),
-      output_item_count: output_item_count,
-      duration_us: duration_us,
-      completed_at: DateTime.utc_now()
-    }
+    payload =
+      %{
+        execution_id: execution_id,
+        step_id: step_name,
+        status: :completed,
+        output_data: sanitize_for_broadcast(result_fact.value),
+        output_item_count: output_item_count,
+        duration_us: duration_us,
+        completed_at: completed_at
+      }
+      |> maybe_put_step_type(step_type_id)
 
     Logger.debug("Broadcasting step_completed", payload: payload)
     Imgd.Executions.PubSub.broadcast_step(:step_completed, execution_id, nil, payload)
@@ -205,6 +274,19 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp get_step_name(%{name: name}) when is_binary(name), do: name
   defp get_step_name(%{name: name}) when is_atom(name), do: Atom.to_string(name)
   defp get_step_name(_), do: "unknown"
+
+  defp get_step_type_id(step, workflow) do
+    step_name = get_step_name(step)
+
+    workflow
+    |> Map.get(:__step_types__, %{})
+    |> Map.get(step_name)
+  end
+
+  defp maybe_put_step_type(payload, nil), do: payload
+
+  defp maybe_put_step_type(payload, step_type_id),
+    do: Map.put(payload, :step_type_id, step_type_id)
 
   defp preview_value(value) when is_binary(value) do
     if String.length(value) > 100 do
@@ -258,6 +340,17 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp get_step_start_time(workflow, step_name) do
     workflow
     |> Map.get(:__step_times__, %{})
+    |> Map.get(step_name)
+  end
+
+  defp put_step_execution_id(workflow, step_name, id) do
+    ids = Map.get(workflow, :__step_exec_ids__, %{})
+    Map.put(workflow, :__step_exec_ids__, Map.put(ids, step_name, id))
+  end
+
+  defp get_step_execution_id(workflow, step_name) do
+    workflow
+    |> Map.get(:__step_exec_ids__, %{})
     |> Map.get(step_name)
   end
 end
