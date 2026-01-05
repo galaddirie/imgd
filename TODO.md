@@ -70,3 +70,7 @@ How would this work in a zero trust environment?
 - [ ] Evaluations
 - [ ] AI chat workflow builder
 - [ ] Lightweight deployments + easy installs (run full system on a Raspberry Pi)
+
+
+BUGS
+- [ ] When initially loading a edit session with previous preview execution data present, we arent able to update the expression preview unless we reun a new execution
