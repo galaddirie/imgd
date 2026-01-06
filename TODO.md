@@ -73,4 +73,7 @@ How would this work in a zero trust environment?
 
 
 BUGS
-- [ ] When initially loading a edit session with previous preview execution data present, we arent able to update the expression preview unless we reun a new execution. the  step config modal shows Resolved Result instead of Live Preview
+- [x] When initially loading a edit session with previous preview execution data present, we arent able to update the expression preview unless we reun a new execution. the  step config modal shows Resolved Result instead of Live Preview
+
+
+- [ ] investigate how n8n secures its webhook endpoints
