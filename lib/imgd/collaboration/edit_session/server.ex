@@ -79,6 +79,11 @@ defmodule Imgd.Collaboration.EditSession.Server do
     GenServer.cast(via_tuple(workflow_id), :persist)
   end
 
+  @doc "Force a persistence of current state and wait for completion."
+  def persist_sync(workflow_id) do
+    GenServer.call(via_tuple(workflow_id), :persist_sync)
+  end
+
   # =============================================================================
   # Server Callbacks
   # =============================================================================
@@ -135,6 +140,11 @@ defmodule Imgd.Collaboration.EditSession.Server do
     {:reply, {:ok, state.editor_state}, state}
   end
 
+  def handle_call(:persist_sync, _from, state) do
+    {result, new_state} = persist_state(state)
+    {:reply, result, new_state}
+  end
+
   @impl true
   def handle_cast({:release_lock, step_id, user_id}, state) do
     new_editor_state = EditorState.release_lock(state.editor_state, step_id, user_id)
@@ -144,13 +154,13 @@ defmodule Imgd.Collaboration.EditSession.Server do
   end
 
   def handle_cast(:persist, state) do
-    new_state = do_persist(state)
+    {_result, new_state} = persist_state(state)
     {:noreply, new_state}
   end
 
   @impl true
   def handle_info(:persist, state) do
-    new_state = do_persist(state)
+    {_result, new_state} = persist_state(state)
     persist_timer = Process.send_after(self(), :persist, @persist_interval)
     {:noreply, %{new_state | persist_timer: persist_timer}}
   end
@@ -397,19 +407,19 @@ defmodule Imgd.Collaboration.EditSession.Server do
     %{state | idle_timer: idle_timer}
   end
 
-  defp do_persist(state) do
+  defp persist_state(state) do
     if state.dirty do
       case Persistence.persist(state) do
         :ok ->
           Logger.debug("Persisted edit session state")
-          %{state | dirty: false}
+          {:ok, %{state | dirty: false}}
 
         {:error, reason} ->
           Logger.error("Failed to persist: #{inspect(reason)}")
-          state
+          {{:error, reason}, state}
       end
     else
-      state
+      {:noop, state}
     end
   end
 end

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, markRaw, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, markRaw, watch, nextTick } from 'vue'
 import type { Node, Edge, Connection as VueFlowConnection, XYPosition, Position, GraphNode } from '@vue-flow/core'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -108,6 +108,8 @@ const store = useClientStore()
 const {
   onPaneClick,
   onConnect,
+  onNodesChange,
+  onEdgesChange,
   onNodeDragStop,
   onNodeDrag,
   project,
@@ -116,14 +118,23 @@ const {
   getSelectedNodes,
   updateNode,
   updateEdge,
+  applyNodeChanges,
+  applyEdgeChanges,
+  removeNodes,
+  setNodes,
+  setEdges,
   viewport,
 } = useVueFlow()
 
 const vueFlowRef = ref<any>(null)
 
 const isMounted = ref(false)
+const isSyncingDraft = ref(false)
+const pendingNodeRemovalIds = new Set<string>()
+const pendingEdgeRemovalIds = new Set<string>()
 onMounted(() => {
   isMounted.value = true
+  syncDraftState()
 })
 
 const { layout, previousDirection } = useLayout()
@@ -277,6 +288,68 @@ const edges = computed<Edge<EdgeData>[]>(() => {
       data: { animated: isAnimated } satisfies EdgeData,
     }
   })
+})
+
+const syncDraftState = async () => {
+  if (!isMounted.value) return
+  isSyncingDraft.value = true
+  setNodes(nodes.value)
+  setEdges(edges.value)
+  await nextTick()
+  pendingNodeRemovalIds.clear()
+  pendingEdgeRemovalIds.clear()
+  isSyncingDraft.value = false
+}
+
+watch(
+  () => [props.workflow.draft?.steps, props.workflow.draft?.connections],
+  () => {
+    syncDraftState()
+  },
+  { deep: true }
+)
+
+onNodesChange((changes) => {
+  if (isSyncingDraft.value) return
+
+  const nextChanges = []
+
+  for (const change of changes) {
+    if (change.type === 'remove') {
+      if (!pendingNodeRemovalIds.has(change.id)) {
+        pendingNodeRemovalIds.add(change.id)
+        emit('remove_step', { step_id: change.id })
+      }
+    }
+
+    nextChanges.push(change)
+  }
+
+  const nextNodes = applyNodeChanges(nextChanges)
+  setNodes(nextNodes)
+})
+
+onEdgesChange((changes) => {
+  if (isSyncingDraft.value) return
+
+  const nextChanges = []
+
+  for (const change of changes) {
+    if (change.type === 'remove') {
+      if (!pendingEdgeRemovalIds.has(change.id)) {
+        pendingEdgeRemovalIds.add(change.id)
+        const connectionId = resolveConnectionId(change)
+        if (connectionId) {
+          emit('remove_connection', { connection_id: connectionId })
+        }
+      }
+    }
+
+    nextChanges.push(change)
+  }
+
+  const nextEdges = applyEdgeChanges(nextChanges)
+  setEdges(nextEdges)
 })
 
 const selectedNode = computed<Node<StepNodeData> | null>(() => {
@@ -479,7 +552,7 @@ const handleContextMenuSelect = (itemId: string) => {
       if (nodeId) store.openConfigModal(nodeId)
       break
     case 'delete':
-      if (nodeId) handleDeleteStep(nodeId)
+      if (nodeId) requestNodeRemoval(nodeId)
       break
     case 'duplicate':
       if (nodeId) {
@@ -580,7 +653,10 @@ const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
   }
 
   updateEdge(resolvedEdge, normalizedConnection, false)
-  emit('remove_connection', { connection_id: edge.id })
+  const connectionId = resolveConnectionId(edge)
+  if (connectionId) {
+    emit('remove_connection', { connection_id: connectionId })
+  }
   emit('add_connection', {
     source_step_id: normalizedConnection.source,
     target_step_id: normalizedConnection.target,
@@ -611,26 +687,48 @@ const handleSaveConfig = (payload: { id: string; name: string; config: Record<st
   })
 }
 
-const handleDeleteStep = (stepId: string) => emit('remove_step', { step_id: stepId })
-
-const handleNodesDelete = (nodes: Node<StepNodeData>[]) => {
-  console.log('Nodes deleted:', nodes)
-  nodes.forEach(node => {
-    emit('remove_step', { step_id: node.id })
-  })
-}
-
-const handleEdgesDelete = (edges: Edge<EdgeData>[]) => {
-  console.log('Edges deleted:', edges)
-  edges.forEach(edge => {
-    emit('remove_connection', { connection_id: edge.id })
-  })
-}
+const handleDeleteStep = (stepId: string) => requestNodeRemoval(stepId)
 
 const handleSave = () => emit('save_workflow')
 const handleRunTest = () => emit('run_test')
 const handleCancelExecution = () => emit('cancel_execution')
 const selectTraceStep = (stepId: string) => store.selectNode(stepId)
+
+type ConnectionLookupEdge = {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
+}
+
+const resolveConnectionId = (edge: ConnectionLookupEdge) => {
+  const connections = props.workflow.draft?.connections || []
+  const directMatch = connections.find(conn => conn.id === edge.id)
+  if (directMatch) return directMatch.id
+
+  const sourceHandle = edge.sourceHandle ?? 'main'
+  const targetHandle = edge.targetHandle ?? 'main'
+
+  const endpointMatch = connections.find(
+    conn =>
+      conn.source_step_id === edge.source &&
+      conn.target_step_id === edge.target &&
+      conn.source_output === sourceHandle &&
+      conn.target_input === targetHandle
+  )
+
+  if (!endpointMatch) {
+    console.warn('No matching connection found for edge deletion', edge)
+    return null
+  }
+
+  return endpointMatch.id
+}
+
+const requestNodeRemoval = (nodeId: string) => {
+  removeNodes(nodeId, true)
+}
 </script>
 
 <template>
@@ -654,12 +752,12 @@ const selectTraceStep = (stepId: string) => store.selectNode(stepId)
       <div class="flex-1 flex flex-col min-w-0 relative">
         <div ref="canvasRef" class="flex-1 overflow-hidden relative" @mousemove="handlePaneMouseMove">
           <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes"
-            :nodes-connectable="true" :nodes-draggable="true" :edges-updatable="true"
+            :nodes-connectable="true" :nodes-draggable="true" :edges-updatable="true" :apply-default="false"
             :default-viewport="{ zoom: 1.2, x: 100, y: 50 }" fit-view-on-init @node-click="handleNodeClick"
             @node-double-click="handleNodeDoubleClick" @node-context-menu="handleNodeContextMenu"
             @selection-change="handleSelectionChange" @selection-context-menu="handleSelectionContextMenu"
             @pane-context-menu="handlePaneContextMenu" @edge-update="handleEdgeUpdate" @dragover="handleDragOver"
-            @nodes-delete="handleNodesDelete" @edges-delete="handleEdgesDelete" @drop="handleDrop">
+            @drop="handleDrop">
             <Background :pattern-color="oklchToHex('oklch(50% 0.05 260)')" :gap="24" />
             <Controls position="bottom-right" />
             <MiniMap position="bottom-left" />

@@ -99,6 +99,15 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     # Get initial presence list
     presences = format_presences(Presence.list_users(workflow_id))
 
+    {draft, editor_state} =
+      case Server.get_sync_state(workflow_id) do
+        {:ok, %{type: :full_sync, draft: draft, editor_state: sync_editor_state}} ->
+          {draft, deserialize_editor_state(sync_editor_state, workflow_id)}
+
+        _ ->
+          {socket.assigns.workflow.draft, editor_state}
+      end
+
     # Get latest execution
     {execution, step_executions} =
       case Executions.list_workflow_executions(
@@ -117,6 +126,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       end
 
     socket
+    |> assign(:workflow, %{socket.assigns.workflow | draft: draft})
     |> assign(:editor_state, editor_state)
     |> assign(:presences, presences)
     |> assign(:execution, execution)
@@ -285,8 +295,18 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("save_workflow", _params, socket) do
-    Server.persist(socket.assigns.workflow.id)
-    {:noreply, put_flash(socket, :info, "Workflow draft saved")}
+    case Server.persist_sync(socket.assigns.workflow.id) do
+      :ok ->
+        socket = refresh_workflow(socket)
+        {:noreply, put_flash(socket, :info, "Workflow draft saved")}
+
+      :noop ->
+        {:noreply, put_flash(socket, :info, "No draft changes to save")}
+
+      {:error, reason} ->
+        Logger.error("Failed to persist workflow draft: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to save workflow draft")}
+    end
   end
 
   @impl true
@@ -560,6 +580,16 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         require Logger
         Logger.warning("Operation failed: #{inspect(reason)}")
         {:noreply, put_flash(socket, :error, "Operation failed")}
+    end
+  end
+
+  defp refresh_workflow(socket) do
+    case Workflows.get_workflow_with_draft(
+           socket.assigns.current_scope,
+           socket.assigns.workflow.id
+         ) do
+      {:ok, workflow} -> assign(socket, :workflow, workflow)
+      {:error, _} -> socket
     end
   end
 
