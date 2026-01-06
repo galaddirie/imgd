@@ -287,14 +287,17 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false)
                 </div>
 
                 <!-- Stats -->
-                <div v-if="showStats"
-                    class="mt-1.5 flex shrink-0 items-center gap-1 text-[11px] text-base-content/60 font-mono">
-                    <ClockIcon class="size-3.5" />
-                    <span>{{ formatDuration(data.stats?.duration_us) }}</span>
-                    <template v-if="formatBytes(data.stats?.bytes)">
-                        <span class="mx-0.5 text-base-content/40">•</span>
-                        <span>{{ formatBytes(data.stats?.bytes) }}</span>
+                <div class="mt-1.5 flex shrink-0 items-center gap-1 text-[11px] text-base-content/60 font-mono min-h-[16px]">
+                    <template v-if="showStats">
+                        <ClockIcon class="size-3.5" />
+                        <span>{{ formatDuration(data.stats?.duration_us) }}</span>
+                        <template v-if="formatBytes(data.stats?.bytes)">
+                            <span class="mx-0.5 text-base-content/40">•</span>
+                            <span>{{ formatBytes(data.stats?.bytes) }}</span>
+                        </template>
                     </template>
+                    <!-- Invisible placeholder to maintain consistent height -->
+                    <span v-else class="invisible">—</span>
                 </div>
             </div>
 
