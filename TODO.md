@@ -4,7 +4,7 @@
 - [ ] Credentials system
 - [ ] API keys management
 - [ ] Sub-workflows
-- [ ] Add request metadata to expression context ( user id, request id, headers, body, etc)
+- [x] Add request metadata to expression context ( user id, request id, headers, body, etc)
 - [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)
     - [ ] Add variable trigger nodes (ex. variable changed)
 ### Editor UX
