@@ -15,6 +15,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   alias Imgd.Runtime.Execution.Supervisor, as: ExecutionSupervisor
   alias Imgd.Runtime.RunicAdapter
   alias Ecto.UUID
+  require Logger
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -322,12 +323,6 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   @impl true
-  def terminate(_reason, socket) do
-    _ = unsubscribe_execution(socket)
-    :ok
-  end
-
-  @impl true
   def handle_event(
         "preview_expression",
         %{"expression" => template, "step_id" => step_id, "field_key" => field_key},
@@ -414,6 +409,12 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     new_previews = Map.put(previews, "#{step_id}:#{field_key}", result)
 
     {:noreply, assign(socket, :expression_previews, new_previews)}
+  end
+
+  @impl true
+  def terminate(_reason, socket) do
+    _ = unsubscribe_execution(socket)
+    :ok
   end
 
   # =============================================================================

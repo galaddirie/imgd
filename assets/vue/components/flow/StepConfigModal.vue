@@ -162,6 +162,20 @@ const explorerData = computed(() => {
     { id: 'request', label: 'Request Metadata', icon: GlobeAltIcon, data: data.request },
   ]
 })
+
+const previewKeyFor = (fieldKey: string) => (props.node ? `${props.node.id}:${fieldKey}` : '')
+
+const hasPreviewFor = (fieldKey: string) => {
+  const key = previewKeyFor(fieldKey)
+  if (!key) return false
+  return Object.prototype.hasOwnProperty.call(props.expressionPreviews || {}, key)
+}
+
+const previewValueFor = (fieldKey: string) => {
+  const key = previewKeyFor(fieldKey)
+  if (!key) return undefined
+  return props.expressionPreviews?.[key]
+}
 </script>
 
 <template>
@@ -305,8 +319,25 @@ const explorerData = computed(() => {
                           class="textarea w-full font-mono text-[13px] bg-base-100 border-2 border-secondary/10 focus:border-secondary/40 focus:ring-4 focus:ring-secondary/5 min-h-[80px] rounded-xl"
                           placeholder="{{ steps.PreviousStep.json.field }}"></textarea>
                         
+                        <!-- Live Preview -->
+                        <div v-if="hasPreviewFor(field.key)" class="overflow-hidden rounded-xl border border-base-200/60 bg-base-200/20">
+                          <div
+                            class="flex items-center justify-between px-4 py-1.5 border-b border-base-200/40 bg-base-200/30">
+                            <span class="text-[9px] font-bold uppercase tracking-widest text-base-content/30">Live Preview</span>
+                            <span class="text-[9px] font-bold text-success uppercase">Draft</span>
+                          </div>
+                          <div class="p-3 text-[11px] font-mono text-base-content/70">
+                            <template v-if="typeof (previewValueFor(field.key)) === 'object' && previewValueFor(field.key) !== null">
+                              <ExpressionPreviewError :error="previewValueFor(field.key)" />
+                            </template>
+                            <template v-else>
+                              {{ previewValueFor(field.key) || 'Run a test to see preview results' }}
+                            </template>
+                          </div>
+                        </div>
+
                         <!-- Result from execution -->
-                        <div v-if="evaluatedConfig[field.key] !== undefined" class="overflow-hidden rounded-xl border border-secondary/20 bg-secondary/[0.03]">
+                        <div v-else-if="evaluatedConfig[field.key] !== undefined" class="overflow-hidden rounded-xl border border-secondary/20 bg-secondary/[0.03]">
                           <div
                             class="flex items-center justify-between px-4 py-1.5 border-b border-secondary/10 bg-secondary/5">
                             <span class="text-[9px] font-bold uppercase tracking-widest text-secondary/60">Resolved Result</span>
@@ -325,12 +356,7 @@ const explorerData = computed(() => {
                             <span class="text-[9px] font-bold text-success uppercase">Draft</span>
                           </div>
                           <div class="p-3 text-[11px] font-mono text-base-content/70">
-                            <template v-if="typeof (expressionPreviews?.[`${node?.id}:${field.key}`]) === 'object' && expressionPreviews?.[`${node?.id}:${field.key}`] !== null">
-                              <ExpressionPreviewError :error="expressionPreviews?.[`${node?.id}:${field.key}`]" />
-                            </template>
-                            <template v-else>
-                              {{ expressionPreviews?.[`${node?.id}:${field.key}`] || 'Run a test to see preview results' }}
-                            </template>
+                            {{ 'Run a test to see preview results' }}
                           </div>
                         </div>
                       </div>

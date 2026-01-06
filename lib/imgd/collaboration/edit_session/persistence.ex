@@ -56,15 +56,27 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
           Repo.insert_all(EditOperation, entries, on_conflict: :nothing)
         end
 
-        # 2. Update the draft with current state
-        draft
-        |> WorkflowDraft.changeset(%{
-          steps: draft.steps && Enum.map(draft.steps, &ensure_map/1),
-          connections: draft.connections && Enum.map(draft.connections, &ensure_map/1),
-          triggers: draft.triggers && Enum.map(draft.triggers, &ensure_map/1),
+        # 2. Update (or create) the draft with current state.
+        # Use a fresh DB copy so Ecto can detect changes even when the in-memory
+        # draft already reflects the latest edits.
+        draft_attrs = %{
+          steps: Enum.map(draft.steps || [], &ensure_map/1),
+          connections: Enum.map(draft.connections || [], &ensure_map/1),
+          triggers: Enum.map(draft.triggers || [], &ensure_map/1),
           settings: Map.put(draft.settings || %{}, "last_persisted_seq", seq)
-        })
-        |> Repo.update!()
+        }
+
+        case Repo.get_by(WorkflowDraft, workflow_id: draft.workflow_id) do
+          nil ->
+            %WorkflowDraft{workflow_id: draft.workflow_id}
+            |> WorkflowDraft.changeset(Map.put(draft_attrs, :workflow_id, draft.workflow_id))
+            |> Repo.insert!()
+
+          db_draft ->
+            db_draft
+            |> WorkflowDraft.changeset(draft_attrs)
+            |> Repo.update!()
+        end
       end)
       |> case do
         {:ok, _} ->

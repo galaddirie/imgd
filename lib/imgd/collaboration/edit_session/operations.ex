@@ -5,7 +5,6 @@ defmodule Imgd.Collaboration.EditSession.Operations do
 
   alias Imgd.Workflows.WorkflowDraft
   alias Imgd.Workflows.Embeds.{Step, Connection}
-  alias Imgd.Collaboration.EditOperation
   alias Imgd.Graph
   require Logger
 
