@@ -45,14 +45,10 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
   def persist(%{workflow_id: _workflow_id, draft: draft, op_buffer: ops, seq: seq}) do
     try do
       Repo.transaction(fn ->
-        # 1. Batch insert any new operations
-        new_ops =
-          Enum.filter(ops, fn op ->
-            not operation_persisted?(op)
-          end)
-
-        if new_ops != [] do
-          entries = Enum.map(new_ops, &operation_to_entry/1)
+        # 1. Batch insert any new operations.
+        # DB constraints + on_conflict: :nothing handles duplicates efficiently.
+        if ops != [] do
+          entries = Enum.map(ops, &operation_to_entry/1)
           Repo.insert_all(EditOperation, entries, on_conflict: :nothing)
         end
 
@@ -109,12 +105,6 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
       op_buffer: [],
       seq: seq
     })
-  end
-
-  defp operation_persisted?(op) do
-    EditOperation
-    |> where([o], o.operation_id == ^op.operation_id)
-    |> Repo.exists?()
   end
 
   defp operation_to_entry(op) do

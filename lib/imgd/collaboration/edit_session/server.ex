@@ -216,8 +216,15 @@ defmodule Imgd.Collaboration.EditSession.Server do
   defp replay_operations(draft, ops, initial_seq) do
     Enum.reduce(ops, {draft, initial_seq}, fn op, {d, seq} ->
       case Operations.apply(d, op) do
-        {:ok, new_draft} -> {new_draft, max(seq, op.seq)}
-        {:error, _} -> {d, seq}
+        {:ok, new_draft} ->
+          {new_draft, max(seq, op.seq)}
+
+        {:error, reason} ->
+          Logger.error(
+            "Failed to replay operation #{op.operation_id} (type: #{op.type}) during recovery: #{inspect(reason)}"
+          )
+
+          {d, seq}
       end
     end)
   end
@@ -346,11 +353,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
   end
 
   defp broadcast_editor_state_update(workflow_id, editor_state) do
-    Phoenix.PubSub.broadcast(
-      Imgd.PubSub,
-      PubSub.session_topic(workflow_id),
-      {:editor_state_updated, editor_state}
-    )
+    PubSub.broadcast_editor_state_updated(workflow_id, editor_state)
   end
 
   defp append_to_buffer(buffer, op) do

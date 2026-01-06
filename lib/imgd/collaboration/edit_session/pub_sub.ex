@@ -213,4 +213,16 @@ defmodule Imgd.Collaboration.EditSession.PubSub do
   def broadcast_lock_released(workflow_id, step_id) do
     Phoenix.PubSub.broadcast(@pubsub, session_topic(workflow_id), {:lock_released, step_id})
   end
+
+  @doc """
+  Broadcast an updated editor state to all session subscribers.
+  """
+  @spec broadcast_editor_state_updated(String.t(), term()) :: :ok
+  def broadcast_editor_state_updated(workflow_id, editor_state) do
+    Phoenix.PubSub.broadcast(
+      @pubsub,
+      session_topic(workflow_id),
+      {:editor_state_updated, editor_state}
+    )
+  end
 end
