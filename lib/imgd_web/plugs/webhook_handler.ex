@@ -11,16 +11,22 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
   alias Imgd.Workflows.Workflow
   alias Imgd.Executions
   alias Imgd.Workers.ExecutionWorker
+  alias Imgd.Accounts.Scope
 
   def init(opts), do: opts
 
   def call(conn, _opts) do
     workflow_id = conn.params["workflow_id"]
+    scope = conn.assigns[:current_scope]
 
     case Repo.get(Workflow, workflow_id) do
       %Workflow{status: :active, published_version_id: pub_id} = workflow
       when not is_nil(pub_id) ->
-        handle_trigger(conn, workflow)
+        if Scope.can_view_workflow?(scope, workflow) do
+          handle_trigger(conn, workflow, scope)
+        else
+          send_error(conn, 404, "Workflow not found")
+        end
 
       %Workflow{status: :active} ->
         send_error(conn, 400, "Workflow is not published")
@@ -33,7 +39,7 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
     end
   end
 
-  defp handle_trigger(conn, workflow) do
+  defp handle_trigger(conn, workflow, scope) do
     # 1. Extract payload
     payload = %{
       "body" => conn.body_params,
@@ -56,9 +62,7 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
       }
     }
 
-    # We use nil for scope because webhooks are external.
-    # The create_execution logic allows production trigger if workflow is active/published.
-    case Executions.create_execution(nil, attrs) do
+    case Executions.create_execution(scope, attrs) do
       {:ok, execution} ->
         # 3. Enqueue for background execution
         ExecutionWorker.enqueue(execution.id)

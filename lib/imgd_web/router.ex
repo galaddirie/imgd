@@ -15,6 +15,7 @@ defmodule ImgdWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug ImgdWeb.Plugs.ApiAuth
   end
 
   scope "/", ImgdWeb do

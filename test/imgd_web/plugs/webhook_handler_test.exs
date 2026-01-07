@@ -25,7 +25,7 @@ defmodule ImgdWeb.Plugs.WebhookHandlerTest do
 
       Repo.update_all(Workflow, set: [published_version_id: version.id])
 
-      %{workflow: workflow, version: version}
+      %{workflow: workflow, version: version, user: user}
     end
 
     test "successfully triggers a workflow with JSON payload", %{conn: conn, workflow: workflow} do
@@ -103,6 +103,47 @@ defmodule ImgdWeb.Plugs.WebhookHandlerTest do
       workflow = insert(:workflow, status: :active, public: true)
       conn = post(conn, ~p"/api/hooks/#{workflow.id}", %{})
       assert json_response(conn, 400)["errors"]["detail"] == "Workflow is not published"
+    end
+
+    test "successfully triggers a PRIVATE workflow with a valid API key", %{
+      conn: conn,
+      user: user
+    } do
+      # Create a private workflow
+      workflow = insert(:workflow, user: user, status: :active, public: false)
+      version = insert(:workflow_version, workflow: workflow)
+      Repo.update_all(Workflow, set: [published_version_id: version.id])
+
+      # Create an API key
+      {:ok, {api_key, raw_token}} = Imgd.Accounts.create_api_key(user, %{name: "Test"})
+
+      payload = %{"test" => "data"}
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw_token}")
+        |> post(~p"/api/hooks/#{workflow.id}", payload)
+
+      assert json_response(conn, 202)["status"] == "accepted"
+
+      # Verify execution has the user as triggered_by
+      execution = Repo.get_by(Execution, workflow_id: workflow.id)
+      assert execution.triggered_by_user_id == user.id
+
+      # Verify API key last_used_at was updated (it's async, so we might need a small sleep or just check Repo)
+      # Since it's async, let's just assert it was updated in the DB after a short delay
+      Process.sleep(100)
+      updated_key = Repo.get!(Imgd.Accounts.ApiKey, api_key.id)
+      assert updated_key.last_used_at != nil
+    end
+
+    test "returns 404 for a private workflow WITHOUT an API key", %{conn: conn, user: user} do
+      workflow = insert(:workflow, user: user, status: :active, public: false)
+      version = insert(:workflow_version, workflow: workflow)
+      Repo.update_all(Workflow, set: [published_version_id: version.id])
+
+      conn = post(conn, ~p"/api/hooks/#{workflow.id}", %{})
+      assert json_response(conn, 404)["errors"]["detail"] == "Workflow not found"
     end
   end
 
