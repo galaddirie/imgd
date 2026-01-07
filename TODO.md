@@ -3,7 +3,7 @@
 ### Core / Platform
 - [ ] build workflow node groups ( basically a sub workflow that can be used as a node in a larger workflow) but without registering it as a workflow in the database. the execution context will be local and nodes in the workflow outside the group will not be able to access the context of the group. except for the final output of the group which will be available to the parent workflow.
 - [ ] Credentials system
-- [ ] API keys management
+- [x] API keys management
 - [ ] Sub-workflows
 - [x] Add request metadata to expression context ( user id, request id, headers, body, etc)
 - [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)

@@ -98,6 +98,15 @@ defmodule ImgdWeb.WorkflowLive.Index do
             <div class="flex gap-3">
               <button
                 type="button"
+                phx-click={show_modal("test-modal")}
+                class="btn btn-sm btn-outline gap-2"
+              >
+                <.icon name="hero-beaker" class="size-5" />
+                <span>Test Modal</span>
+              </button>
+
+              <button
+                type="button"
                 phx-click="open_create_modal"
                 class="btn btn-sm btn-primary gap-2 "
               >
@@ -250,6 +259,22 @@ defmodule ImgdWeb.WorkflowLive.Index do
           </div>
         </section>
       </div>
+
+      <.modal id="test-modal">
+        <div class="space-y-4">
+          <h2 class="text-xl font-bold">Test Modal</h2>
+          <p>This is a test modal component using DaisyUI.</p>
+          <div class="flex justify-end">
+            <button
+              type="button"
+              phx-click={hide_modal("test-modal")}
+              class="btn btn-primary"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </.modal>
     </Layouts.app>
     """
   end

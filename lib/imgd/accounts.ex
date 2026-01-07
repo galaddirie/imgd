@@ -4,9 +4,10 @@ defmodule Imgd.Accounts do
   """
 
   import Ecto.Query, warn: false
+  import Ecto.Changeset
   alias Imgd.Repo
 
-  alias Imgd.Accounts.{User, UserToken, UserNotifier}
+  alias Imgd.Accounts.{User, UserToken, UserNotifier, ApiKey}
 
   ## Database getters
 
@@ -279,6 +280,59 @@ defmodule Imgd.Accounts do
   def delete_user_session_token(token) do
     Repo.delete_all(from(UserToken, where: [token: ^token, context: "session"]))
     :ok
+  end
+
+  ## API Keys
+
+  @doc """
+  Returns the list of api_keys for a user.
+  """
+  def list_api_keys(%User{} = user) do
+    Repo.all(from k in ApiKey, where: k.user_id == ^user.id, order_by: [desc: k.inserted_at])
+  end
+
+  @doc """
+  Creates an api_key.
+
+  Returns `{:ok, {api_key, raw_token}}` or `{:error, changeset}`.
+  """
+  def create_api_key(%User{} = user, attrs \\ %{}) do
+    raw_token = "imgd_" <> (:crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false))
+    hashed_token = :crypto.hash(:sha256, raw_token)
+
+    # Partial preview: prefix + first 4 and last 4 characters of the random part
+    # Total preview: imgd_...abcd
+    partial_key = String.slice(raw_token, 0, 8) <> "..." <> String.slice(raw_token, -4, 4)
+
+    changeset =
+      %ApiKey{}
+      |> ApiKey.changeset(attrs)
+      |> put_change(:user_id, user.id)
+      |> put_change(:hashed_token, hashed_token)
+      |> put_change(:partial_key, partial_key)
+
+    case Repo.insert(changeset) do
+      {:ok, api_key} -> {:ok, {api_key, raw_token}}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Deletes an api_key.
+  """
+  def delete_api_key(%User{} = user, id) do
+    case Repo.get_by(ApiKey, id: id, user_id: user.id) do
+      nil -> {:error, :not_found}
+      api_key -> Repo.delete(api_key)
+    end
+  end
+
+  @doc """
+  Gets an api_key by its raw token.
+  """
+  def get_api_key_by_token(raw_token) do
+    hashed_token = :crypto.hash(:sha256, raw_token)
+    Repo.one(from k in ApiKey, where: k.hashed_token == ^hashed_token, preload: [:user])
   end
 
   ## Token helper

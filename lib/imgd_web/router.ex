@@ -60,6 +60,8 @@ defmodule ImgdWeb.Router do
       # live "/workflows/:workflow_id/executions/:id", WorkflowLive.Execution.Show, :show
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
+      live "/users/settings/api-keys", ApiKeyLive.Index, :index
+      live "/users/settings/api-keys/new", ApiKeyLive.Index, :new
       live "/vue_demo", VueDemoLive
     end
 
