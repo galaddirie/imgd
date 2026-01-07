@@ -15,7 +15,7 @@ defmodule Imgd.Runtime.Execution.Server do
   alias Imgd.Repo
 
   defmodule State do
-    defstruct [:execution_id, :runic_workflow, :status, :metadata]
+    defstruct [:execution_id, :runic_workflow, :status, :metadata, :runtime_opts]
   end
 
   # ============================================================================
@@ -24,7 +24,7 @@ defmodule Imgd.Runtime.Execution.Server do
 
   def start_link(opts) do
     execution_id = Keyword.fetch!(opts, :execution_id)
-    GenServer.start_link(__MODULE__, execution_id, name: via_tuple(execution_id))
+    GenServer.start_link(__MODULE__, opts, name: via_tuple(execution_id))
   end
 
   defp via_tuple(execution_id) do
@@ -36,19 +36,23 @@ defmodule Imgd.Runtime.Execution.Server do
   # ============================================================================
 
   @impl true
-  def init(execution_id) do
+  def init(opts) do
+    execution_id = Keyword.fetch!(opts, :execution_id)
+    runtime_opts = Keyword.drop(opts, [:execution_id])
+
     Logger.metadata(execution_id: execution_id)
     Logger.info("Initializing execution server")
 
     case load_with_source(execution_id) do
       {:ok, execution} ->
-        case build_runic_workflow(execution) do
+        case build_runic_workflow(execution, runtime_opts) do
           {:ok, runic_wrk} ->
             state = %State{
               execution_id: execution_id,
               runic_workflow: runic_wrk,
               status: execution.status,
-              metadata: execution.metadata
+              metadata: execution.metadata,
+              runtime_opts: runtime_opts
             }
 
             # Trigger execution if process was started for a pending/running execution
@@ -123,12 +127,12 @@ defmodule Imgd.Runtime.Execution.Server do
     execution =
       Execution
       |> Repo.get(id)
-      |> Repo.preload(workflow: :draft)
+      |> Repo.preload(workflow: [:draft, :published_version])
 
     if execution, do: {:ok, execution}, else: {:error, :not_found}
   end
 
-  defp build_runic_workflow(execution) do
+  defp build_runic_workflow(execution, runtime_opts \\ []) do
     # Hydrate Runic Workflow (from snapshot or build from draft)
     runic_wrk =
       cond do
@@ -137,11 +141,11 @@ defmodule Imgd.Runtime.Execution.Server do
 
         execution.runic_log && length(execution.runic_log) > 0 ->
           # Option for replaying construction log here if needed
-          build_from_source(execution)
+          build_from_source(execution, runtime_opts)
 
         true ->
           # Fresh start
-          build_from_source(execution)
+          build_from_source(execution, runtime_opts)
       end
 
     if runic_wrk do
@@ -158,21 +162,26 @@ defmodule Imgd.Runtime.Execution.Server do
     end
   end
 
-  defp build_from_source(execution) do
+  defp build_from_source(execution, runtime_opts) do
     case get_source(execution) do
       nil ->
         nil
 
       source ->
+        # Merge runtime opts (like ephemeral PIDs) into metadata
+        metadata =
+          %{
+            trace_id: Map.get(execution.metadata, "trace_id"),
+            workflow_id: execution.workflow_id
+          }
+          |> Map.merge(Map.new(runtime_opts))
+
         # Pass execution context to the adapter
         opts = [
           execution_id: execution.id,
           variables: Map.get(execution.metadata, "variables", %{}),
           trigger_data: execution.trigger.data || %{},
-          metadata: %{
-            trace_id: Map.get(execution.metadata, "trace_id"),
-            workflow_id: execution.workflow_id
-          }
+          metadata: metadata
         ]
 
         RunicAdapter.to_runic_workflow(source, opts)
@@ -186,6 +195,13 @@ defmodule Imgd.Runtime.Execution.Server do
       Logger.error("Failed to hydrate execution snapshot: #{inspect(e)}")
       nil
   end
+
+  defp get_source(%Execution{
+         execution_type: :production,
+         workflow: %{published_version: version}
+       })
+       when not is_nil(version),
+       do: version
 
   defp get_source(%Execution{workflow: %{draft: draft}}), do: draft
   defp get_source(_), do: nil

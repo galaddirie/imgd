@@ -22,10 +22,22 @@ defmodule Imgd.Steps.Executors.WebhookTrigger do
   @config_schema %{
     "type" => "object",
     "properties" => %{
-      "path_label" => %{
+      "path" => %{
         "type" => "string",
-        "title" => "Path Label",
-        "description" => "Descriptive name for the endpoint"
+        "title" => "Webhook Path",
+        "description" => "Custom slug for the webhook endpoint"
+      },
+      "http_method" => %{
+        "type" => "string",
+        "title" => "HTTP Method",
+        "enum" => ["GET", "POST", "PUT", "PATCH", "DELETE"],
+        "default" => "POST"
+      },
+      "response_mode" => %{
+        "type" => "string",
+        "title" => "Response Mode",
+        "enum" => ["immediate", "on_completion", "on_respond_node"],
+        "default" => "immediate"
       },
       "auth_token" => %{
         "type" => "string",

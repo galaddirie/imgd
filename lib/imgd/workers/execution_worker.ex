@@ -136,6 +136,22 @@ defmodule Imgd.Workers.ExecutionWorker do
     end
   end
 
+  @doc """
+  Runs an execution synchronously and waits for it to finish.
+  """
+  def run_sync(execution_id) do
+    case Imgd.Runtime.Execution.Supervisor.start_execution(execution_id) do
+      {:ok, pid} ->
+        monitor_and_wait(pid, execution_id)
+
+      {:error, {:already_started, pid}} ->
+        monitor_and_wait(pid, execution_id)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp monitor_and_wait(pid, execution_id) do
     ref = Process.monitor(pid)
 

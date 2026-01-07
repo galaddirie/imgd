@@ -18,8 +18,8 @@ defmodule Imgd.Runtime.Execution.Supervisor do
   @doc """
   Starts a new execution process.
   """
-  def start_execution(execution_id) do
-    DynamicSupervisor.start_child(__MODULE__, {Server, execution_id: execution_id})
+  def start_execution(execution_id, opts \\ []) do
+    DynamicSupervisor.start_child(__MODULE__, {Server, [execution_id: execution_id] ++ opts})
   end
 
   @doc """
