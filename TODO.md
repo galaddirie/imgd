@@ -1,6 +1,7 @@
 # TODO
 
 ### Core / Platform
+- [ ] build workflow node groups ( basically a sub workflow that can be used as a node in a larger workflow) but without registering it as a workflow in the database. the execution context will be local and nodes in the workflow outside the group will not be able to access the context of the group. except for the final output of the group which will be available to the parent workflow.
 - [ ] Credentials system
 - [ ] API keys management
 - [ ] Sub-workflows
