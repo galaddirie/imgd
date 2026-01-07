@@ -23,10 +23,11 @@ defmodule ImgdWeb.Router do
     get "/", PageController, :home
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", ImgdWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", ImgdWeb do
+    pipe_through :api
+
+    post "/hooks/:workflow_id", Plugs.WebhookHandler, :handle
+  end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:imgd, :dev_routes) do

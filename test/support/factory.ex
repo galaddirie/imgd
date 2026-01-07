@@ -40,8 +40,7 @@ defmodule Imgd.Factory do
       steps: steps,
       connections: connections,
       triggers: triggers,
-      source_hash:
-        Imgd.Workflows.WorkflowVersion.compute_source_hash(steps, connections, triggers),
+      source_hash: "0000000000000000000000000000000000000000000000000000000000000000",
       workflow: insert(:workflow)
     }
   end
@@ -52,7 +51,7 @@ defmodule Imgd.Factory do
     %Imgd.Executions.Execution{
       status: :pending,
       workflow: workflow,
-      trigger: %{type: :manual, data: %{}},
+      trigger: %Imgd.Executions.Execution.Trigger{type: :manual, data: %{}},
       context: %{}
     }
   end

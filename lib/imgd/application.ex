@@ -28,6 +28,8 @@ defmodule Imgd.Application do
         Imgd.Runtime.Execution.Supervisor,
         Imgd.Runtime.Expression.Cache,
         Imgd.Sandbox.Supervisor,
+        # Trigger runtime
+        Imgd.Runtime.Triggers.Registry,
         # Collaboration modules
         {Registry, keys: :unique, name: Imgd.Collaboration.EditSession.Registry},
         Imgd.Collaboration.EditSession.Supervisor,

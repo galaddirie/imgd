@@ -118,8 +118,13 @@ defmodule Imgd.Workflows do
     Repo.all(from w in Workflow, where: w.user_id == ^user_id, order_by: [desc: w.updated_at])
   end
 
-  # ============================================================================
-  # Read Functions
+  @doc """
+  Returns a query for active workflows.
+  """
+  def list_active_workflows_query do
+    from w in Workflow, where: w.status == :active
+  end
+
   # ============================================================================
 
   @doc """

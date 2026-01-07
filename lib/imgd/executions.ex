@@ -7,6 +7,7 @@ defmodule Imgd.Executions do
   """
 
   import Ecto.Query, warn: false
+  require Logger
   alias Imgd.Repo
 
   alias Imgd.Executions.{Execution, StepExecution}
@@ -160,7 +161,6 @@ defmodule Imgd.Executions do
                 attrs =
                   attrs
                   |> maybe_put_triggered_by_user(scope)
-                  |> Map.put(:workflow_version_id, published_version_id)
 
                 %Execution{}
                 |> Execution.changeset(attrs)

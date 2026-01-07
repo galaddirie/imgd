@@ -60,6 +60,9 @@ defmodule Imgd.Workers.ExecutionWorker do
     Logger.metadata(execution_id: execution_id)
     Logger.info("Starting workflow execution job")
 
+    # If this was a scheduled trigger, schedule the next one
+    maybe_schedule_next(execution_id)
+
     # Start the execution process (or attach to existing)
     case Imgd.Runtime.Execution.Supervisor.start_execution(execution_id) do
       {:ok, pid} ->
@@ -77,6 +80,59 @@ defmodule Imgd.Workers.ExecutionWorker do
 
         # Will retry if max_attempts > 1, but configured to 1
         {:error, reason}
+    end
+  end
+
+  @doc false
+  def maybe_schedule_next(execution_id) do
+    execution =
+      Imgd.Repo.get(Imgd.Executions.Execution, execution_id)
+      |> Imgd.Repo.preload(workflow: :draft)
+
+    case execution do
+      %{trigger: %{type: :schedule}, status: :pending} ->
+        schedule_next_run(execution)
+
+      _ ->
+        :ok
+    end
+  end
+
+  @doc false
+  def schedule_next_run(execution) do
+    # Look for interval or cron in trigger config
+    config = execution.trigger.data || %{}
+    interval_sec = Map.get(config, "interval_seconds") || Map.get(config, "interval")
+
+    if interval_sec do
+      next_run = DateTime.add(DateTime.utc_now(), interval_sec, :second)
+
+      Logger.info(
+        "Scheduling next execution for workflow #{execution.workflow_id} in #{interval_sec}s"
+      )
+
+      # Create a NEW execution for the next run
+      # The trigger info should be preserved
+      attrs = %{
+        workflow_id: execution.workflow_id,
+        execution_type: execution.execution_type,
+        trigger: %{
+          "type" => "schedule",
+          "data" => config
+        }
+      }
+
+      case Imgd.Executions.create_execution(nil, attrs) do
+        {:ok, next_execution} ->
+          enqueue(next_execution.id, scheduled_at: next_run)
+
+        {:error, reason} ->
+          Logger.error("Failed to schedule next execution: #{inspect(reason)}")
+      end
+    else
+      Logger.warning("Schedule trigger found but no interval/cron configured",
+        execution_id: execution.id
+      )
     end
   end
 
