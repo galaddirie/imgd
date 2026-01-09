@@ -90,4 +90,4 @@ webhook test system
 
 - maybe all webhooks have a built in hook/:id/health endpoint
 
-- when we probe a webhook test endpoint, the collabrative edit session should update in real time (like when we run a manual trigger)
+- determine risk of api key exposure in webhook trigger outputs
