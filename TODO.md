@@ -87,8 +87,7 @@ webhook test system
 - triggers are being marked completed even when they werent the source of the event. 
 - for example if manually run the other triggers should be marked as skipped
 - if a webhook triggers a run, the manual trigger should be marked as skipped
-- trigger step config ui not showing the webhook ui
-
-- we need a ui that shows all active webhook triggers and the ability to test them/ probe 
 
 - maybe all webhooks have a built in hook/:id/health endpoint
+
+- when we probe a webhook test endpoint, the collabrative edit session should update in real time (like when we run a manual trigger)
