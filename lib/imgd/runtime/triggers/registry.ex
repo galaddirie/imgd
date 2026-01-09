@@ -4,7 +4,6 @@ defmodule Imgd.Runtime.Triggers.Registry do
 
   Responsibilities:
   - Tracks which workflows are active and have triggers.
-  - Manages poller lifecycles.
   - Acts as a lookup for webhook routing (to verify workflow status).
   """
   use GenServer
@@ -15,7 +14,6 @@ defmodule Imgd.Runtime.Triggers.Registry do
 
   @type state :: %{
           active_workflows: MapSet.t(),
-          pollers: %{Ecto.UUID.t() => pid()}
         }
 
   # ============================================================================
@@ -36,7 +34,7 @@ defmodule Imgd.Runtime.Triggers.Registry do
   end
 
   @doc """
-  Unregisters a workflow, stopping its pollers and removing it from active registry.
+  Unregisters a workflow, stopping its child processes and removing it from active registry.
   """
   def unregister(workflow_id, name \\ __MODULE__) do
     GenServer.cast(name, {:unregister, workflow_id})
@@ -57,7 +55,7 @@ defmodule Imgd.Runtime.Triggers.Registry do
   def init(_opts) do
     Logger.info("Initializing Trigger Registry")
 
-    {:ok, %{active_workflows: MapSet.new(), pollers: %{}}, {:continue, :load_active_workflows}}
+    {:ok, %{active_workflows: MapSet.new()}, {:continue, :load_active_workflows}}
   end
 
   @impl true
