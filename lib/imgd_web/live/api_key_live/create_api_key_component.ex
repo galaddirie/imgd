@@ -14,7 +14,7 @@ defmodule ImgdWeb.ApiKeyLive.CreateApiKeyComponent do
 
       <%= if @raw_token do %>
         <div class="mt-8 space-y-4">
-          <div class="alert alert-warning">
+          <div class="alert alert-info">
             <strong>Important:</strong> Copy your API key now. You won't be able to see it again.
           </div>
           <div class="flex items-center gap-2 p-3 bg-base-100 text-base-content rounded-md overflow-x-auto font-mono text-sm group relative">
