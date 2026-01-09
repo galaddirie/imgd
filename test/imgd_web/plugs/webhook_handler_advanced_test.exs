@@ -17,10 +17,20 @@ defmodule ImgdWeb.Plugs.WebhookHandlerAdvancedTest do
     version =
       insert(:workflow_version,
         workflow: workflow,
-        triggers: [%{type: :webhook, config: trigger_config}]
+        steps: [
+          %{
+            id: "webhook_trigger",
+            type_id: "webhook_trigger",
+            name: "Trigger",
+            config: trigger_config,
+            position: %{}
+          }
+        ]
       )
 
     Repo.update_all(Workflow, set: [published_version_id: version.id])
+    workflow = Repo.get!(Workflow, workflow.id)
+    Imgd.Runtime.Triggers.Activator.activate(workflow)
     %{workflow: workflow, version: version}
   end
 
@@ -112,6 +122,13 @@ defmodule ImgdWeb.Plugs.WebhookHandlerAdvancedTest do
 
       # Steps
       steps = [
+        %{
+          id: "webhook_trigger",
+          type_id: "webhook_trigger",
+          name: "Webhook",
+          config: trigger_config,
+          position: %{x: -100, y: 0}
+        },
         # Step 1: Debug Node (receives webhook payload)
         %{
           id: "step_debug_1",
@@ -149,6 +166,13 @@ defmodule ImgdWeb.Plugs.WebhookHandlerAdvancedTest do
       connections = [
         %{
           id: Ecto.UUID.generate(),
+          source_step_id: "webhook_trigger",
+          source_output: "default",
+          target_step_id: "step_debug_1",
+          target_input: "default"
+        },
+        %{
+          id: Ecto.UUID.generate(),
           source_step_id: "step_debug_1",
           source_output: "default",
           target_step_id: "step_respond",
@@ -167,12 +191,13 @@ defmodule ImgdWeb.Plugs.WebhookHandlerAdvancedTest do
       version =
         insert(:workflow_version,
           workflow: workflow,
-          triggers: [%{type: :webhook, config: trigger_config}],
           steps: steps,
           connections: connections
         )
 
       Repo.update_all(Workflow, set: [published_version_id: version.id])
+      workflow = Repo.get!(Workflow, workflow.id)
+      Imgd.Runtime.Triggers.Activator.activate(workflow)
 
       # 2. Trigger Webhook
       payload = %{"test_input" => "initial_value"}
@@ -195,9 +220,11 @@ defmodule ImgdWeb.Plugs.WebhookHandlerAdvancedTest do
 
       # Verify Step Executions in Order
       steps = Imgd.Executions.list_step_executions(nil, execution)
-      assert length(steps) == 3
+      assert length(steps) == 4
 
-      [s1, s2, s3] = steps
+      [t1, s1, s2, s3] = steps
+      assert t1.step_id == "webhook_trigger"
+
       assert s1.step_id == "step_debug_1"
       # Debug node passes input through: input was webhook payload
       assert s1.input_data["body"] == payload

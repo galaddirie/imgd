@@ -421,7 +421,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
           EditorState.disable_step(
             editor_state,
             Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id"),
-            Map.get(operation.payload, :user_id) || Map.get(operation.payload, "user_id")
+            Map.get(operation.payload, :mode) || Map.get(operation.payload, "mode") || :skip
           )
 
         {draft, new_editor_state, true}
@@ -526,25 +526,15 @@ defmodule Imgd.Collaboration.EditSession.Server do
   defp webhook_trigger_exists?(_draft, nil, _method), do: false
 
   defp webhook_trigger_exists?(draft, path, method) do
-    trigger_match? =
-      Enum.any?(draft.triggers || [], fn trigger ->
-        trigger_type = Map.get(trigger, :type) || Map.get(trigger, "type")
-        config = Map.get(trigger, :config) || Map.get(trigger, "config") || %{}
-
-        trigger_type in [:webhook, "webhook"] &&
-          normalize_path(Map.get(config, "path") || Map.get(config, :path)) == path &&
-          normalize_method(Map.get(config, "http_method") || Map.get(config, :http_method)) ==
-            method
-      end)
-
-    step_match? =
-      Enum.any?(draft.steps || [], fn step ->
-        step.type_id == "webhook_trigger" &&
-          normalize_path(Map.get(step.config, "path") || step.id) == path &&
-          normalize_method(Map.get(step.config, "http_method")) == method
-      end)
-
-    trigger_match? || step_match?
+    # Only search steps (triggers are now steps)
+    Enum.any?(draft.steps || [], fn step ->
+      step.type_id == "webhook_trigger" &&
+        normalize_path(Map.get(step.config, "path") || Map.get(step.config, :path) || step.id) ==
+          path &&
+        normalize_method(
+          Map.get(step.config, "http_method") || Map.get(step.config, :http_method)
+        ) == method
+    end)
   end
 
   defp webhook_test_matches?(nil, _path, _method), do: :error

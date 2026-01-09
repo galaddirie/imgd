@@ -5,13 +5,12 @@ defmodule Imgd.Workflows.WorkflowDraft do
   use Imgd.Schema
 
   alias Imgd.Workflows.Workflow
-  alias Imgd.Workflows.Embeds.{Step, Connection, Trigger}
+  alias Imgd.Workflows.Embeds.{Step, Connection}
 
   @type t :: %__MODULE__{
           workflow_id: Ecto.UUID.t(),
-          steps: [Step.t()],
-          connections: [Connection.t()],
-          triggers: [Trigger.t()],
+          steps: [Step.t()] | nil,
+          connections: [Connection.t()] | nil,
           settings: map(),
           workflow: Workflow.t() | Ecto.Association.NotLoaded.t(),
           inserted_at: DateTime.t(),
@@ -23,7 +22,6 @@ defmodule Imgd.Workflows.WorkflowDraft do
              :workflow_id,
              :steps,
              :connections,
-             :triggers,
              :settings,
              :inserted_at,
              :updated_at
@@ -34,7 +32,6 @@ defmodule Imgd.Workflows.WorkflowDraft do
 
     embeds_many :steps, Step, on_replace: :delete
     embeds_many :connections, Connection, on_replace: :delete
-    embeds_many :triggers, Trigger, on_replace: :delete
 
     field :settings, :map,
       default: %{
@@ -50,7 +47,20 @@ defmodule Imgd.Workflows.WorkflowDraft do
     |> cast(attrs, [:workflow_id, :settings])
     |> cast_embed(:steps)
     |> cast_embed(:connections)
-    |> cast_embed(:triggers)
     |> validate_required([:workflow_id])
+    |> ensure_embed_defaults()
+  end
+
+  defp ensure_embed_defaults(changeset) do
+    changeset
+    |> maybe_put_default_embed(:steps)
+    |> maybe_put_default_embed(:connections)
+  end
+
+  defp maybe_put_default_embed(changeset, field) do
+    case get_field(changeset, field) do
+      nil -> put_change(changeset, field, [])
+      _ -> changeset
+    end
   end
 end

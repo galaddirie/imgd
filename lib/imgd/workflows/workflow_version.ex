@@ -15,7 +15,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
   import Imgd.ChangesetHelpers
 
   alias Imgd.Workflows.Workflow
-  alias Imgd.Workflows.Embeds.{Step, Connection, Trigger}
+  alias Imgd.Workflows.Embeds.{Step, Connection}
   alias Imgd.Accounts.User
 
   @type t :: %__MODULE__{
@@ -24,7 +24,6 @@ defmodule Imgd.Workflows.WorkflowVersion do
           source_hash: String.t(),
           steps: [Step.t()],
           connections: [Connection.t()],
-          triggers: [Trigger.t()],
           changelog: String.t() | nil,
           published_at: DateTime.t() | nil,
           published_by: Ecto.UUID.t() | nil,
@@ -38,12 +37,11 @@ defmodule Imgd.Workflows.WorkflowVersion do
     # Human-friendly semver, e.g. "1.0.0", "1.2.0-beta.1"
     field :version_tag, :string
 
-    # Content hash of steps + connections + triggers (SHA-256)
+    # Content hash of steps + connections (SHA-256)
     field :source_hash, :string
 
     embeds_many :steps, Step, on_replace: :delete
     embeds_many :connections, Connection, on_replace: :delete
-    embeds_many :triggers, Trigger, on_replace: :delete
 
     field :changelog, :string
 
@@ -68,7 +66,6 @@ defmodule Imgd.Workflows.WorkflowVersion do
     ])
     |> cast_embed(:steps, required: true)
     |> cast_embed(:connections)
-    |> cast_embed(:triggers)
     |> validate_required([:version_tag, :workflow_id, :source_hash])
     |> validate_version_tag()
     |> validate_hex_hash(:source_hash, length: 64)
@@ -85,15 +82,14 @@ defmodule Imgd.Workflows.WorkflowVersion do
   end
 
   @doc """
-  Computes a content hash for the given steps, connections, and triggers.
+  Computes a content hash for the given steps and connections.
   Used to detect changes between versions.
   """
-  def compute_source_hash(steps, connections, triggers) do
+  def compute_source_hash(steps, connections) do
     content =
       %{
         steps: normalize_for_hash(steps),
-        connections: normalize_for_hash(connections),
-        triggers: normalize_for_hash(triggers)
+        connections: normalize_for_hash(connections)
       }
       |> Jason.encode!()
 
@@ -110,9 +106,6 @@ defmodule Imgd.Workflows.WorkflowVersion do
 
       %Connection{} = conn ->
         Map.take(conn, [:id, :source_step_id, :source_output, :target_step_id, :target_input])
-
-      %Trigger{} = trigger ->
-        Map.take(trigger, [:type, :config])
 
       item when is_map(item) ->
         Map.drop(item, [:position, :__struct__, :__meta__])

@@ -22,7 +22,6 @@ defmodule Imgd.Factory do
       workflow_id: sequence(:workflow_id, &"#{&1}"),
       steps: [],
       connections: [],
-      triggers: [],
       settings: %{}
     }
   end
@@ -33,13 +32,11 @@ defmodule Imgd.Factory do
     ]
 
     connections = []
-    triggers = []
 
     %Imgd.Workflows.WorkflowVersion{
       version_tag: sequence(:version_tag, &"1.0.#{&1}"),
       steps: steps,
       connections: connections,
-      triggers: triggers,
       source_hash: "0000000000000000000000000000000000000000000000000000000000000000",
       workflow: insert(:workflow)
     }

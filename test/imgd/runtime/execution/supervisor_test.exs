@@ -39,8 +39,7 @@ defmodule Imgd.Runtime.Execution.SupervisorTest do
     %WorkflowDraft{
       workflow_id: workflow.id,
       steps: steps,
-      connections: [],
-      triggers: []
+      connections: []
     }
     |> Repo.insert!()
   end

@@ -58,7 +58,6 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
         draft_attrs = %{
           steps: Enum.map(draft.steps || [], &ensure_map/1),
           connections: Enum.map(draft.connections || [], &ensure_map/1),
-          triggers: Enum.map(draft.triggers || [], &ensure_map/1),
           settings: Map.put(draft.settings || %{}, "last_persisted_seq", seq)
         }
 

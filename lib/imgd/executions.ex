@@ -534,15 +534,23 @@ defmodule Imgd.Executions do
     end
   end
 
+  defp fetch_latest_active_step_execution(nil, _step_id), do: nil
+
   defp fetch_latest_active_step_execution(execution_id, step_id) do
-    from(se in StepExecution,
-      where:
-        se.execution_id == ^execution_id and se.step_id == ^step_id and
-          se.status in ^@active_step_statuses,
-      order_by: [desc: se.inserted_at],
-      limit: 1
-    )
-    |> Repo.one()
+    case Ecto.UUID.cast(execution_id) do
+      {:ok, uuid} ->
+        from(se in StepExecution,
+          where:
+            se.execution_id == ^uuid and se.step_id == ^step_id and
+              se.status in ^@active_step_statuses,
+          order_by: [desc: se.inserted_at],
+          limit: 1
+        )
+        |> Repo.one()
+
+      :error ->
+        nil
+    end
   end
 
   defp safe_repo(fun) when is_function(fun, 0) do

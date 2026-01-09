@@ -19,14 +19,18 @@ defmodule ImgdWeb.Plugs.WebhookTestTriggerTest do
       draft =
         %Imgd.Workflows.WorkflowDraft{
           workflow_id: workflow.id,
-          steps: [%{id: "step_1", type_id: "debug", name: "Debug 1", config: %{}, position: %{}}],
-          connections: [],
-          triggers: [
+          steps: [
+            %{id: "step_1", type_id: "debug", name: "Debug 1", config: %{}, position: %{}},
             %{
-              type: :webhook,
-              config: %{"path" => "my-test-path", "response_mode" => "immediate"}
+              id: "webhook_1",
+              type_id: "webhook_trigger",
+              name: "Webhook",
+              config: %{"path" => "my-test-path", "response_mode" => "immediate"},
+              position: %{}
             }
-          ]
+          ],
+          connections: [],
+          settings: %{}
         }
         |> Repo.insert!()
 

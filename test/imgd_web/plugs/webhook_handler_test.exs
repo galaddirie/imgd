@@ -17,13 +17,23 @@ defmodule ImgdWeb.Plugs.WebhookHandlerTest do
           workflow_id: workflow.id,
           version_tag: "1.0.0",
           source_hash: "0000000000000000000000000000000000000000000000000000000000000000",
-          steps: [%{id: "step_1", type_id: "debug", name: "Debug 1", config: %{}, position: %{}}],
-          connections: [],
-          triggers: []
+          steps: [
+            %{id: "step_1", type_id: "debug", name: "Debug 1", config: %{}, position: %{}},
+            %{
+              id: "webhook_1",
+              type_id: "webhook_trigger",
+              name: "Webhook",
+              config: %{"path" => nil, "http_method" => "POST"},
+              position: %{}
+            }
+          ],
+          connections: []
         }
         |> Repo.insert!()
 
       Repo.update_all(Workflow, set: [published_version_id: version.id])
+      workflow = Repo.get!(Workflow, workflow.id)
+      Imgd.Runtime.Triggers.Activator.activate(workflow)
 
       %{workflow: workflow, version: version, user: user}
     end

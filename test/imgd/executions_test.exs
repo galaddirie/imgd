@@ -18,8 +18,7 @@ defmodule Imgd.ExecutionsTest do
       # Create and publish a version
       draft_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
-        connections: [],
-        triggers: [%{type: :manual, config: %{}}]
+        connections: []
       }
 
       {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
@@ -81,8 +80,7 @@ defmodule Imgd.ExecutionsTest do
 
       draft_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
-        connections: [],
-        triggers: [%{type: :manual, config: %{}}]
+        connections: []
       }
 
       {:ok, _draft} = Workflows.update_workflow_draft(scope, draft_workflow, draft_attrs)
@@ -168,8 +166,7 @@ defmodule Imgd.ExecutionsTest do
       # Create and publish a version
       draft_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
-        connections: [],
-        triggers: [%{type: :manual, config: %{}}]
+        connections: []
       }
 
       {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
@@ -260,8 +257,7 @@ defmodule Imgd.ExecutionsTest do
       # Create and publish a version
       draft_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
-        connections: [],
-        triggers: [%{type: :manual, config: %{}}]
+        connections: []
       }
 
       {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)
@@ -514,8 +510,7 @@ defmodule Imgd.ExecutionsTest do
       # Publish versions
       draft_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
-        connections: [],
-        triggers: [%{type: :manual, config: %{}}]
+        connections: []
       }
 
       {:ok, _draft1} = Workflows.update_workflow_draft(scope1, workflow1, draft_attrs)

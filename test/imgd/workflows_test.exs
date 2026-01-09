@@ -217,7 +217,6 @@ defmodule Imgd.WorkflowsTest do
       draft_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
-        triggers: [%{type: :manual, config: %{}}],
         settings: %{timeout_ms: 300_000, max_retries: 3}
       }
 
@@ -321,7 +320,6 @@ defmodule Imgd.WorkflowsTest do
       draft_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
         connections: [],
-        triggers: [%{type: :manual, config: %{}}],
         settings: %{timeout_ms: 300_000, max_retries: 3}
       }
 
@@ -332,15 +330,13 @@ defmodule Imgd.WorkflowsTest do
       assert hd(draft.steps).type_id == "input"
       assert hd(draft.steps).name == "Input Step"
       assert length(draft.connections) == 0
-      assert length(draft.triggers) == 1
     end
 
     test "update_workflow_draft/3 updates existing draft", %{scope: scope, workflow: workflow} do
       # Create initial draft
       initial_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
-        connections: [],
-        triggers: []
+        connections: []
       }
 
       {:ok, draft} = Workflows.update_workflow_draft(scope, workflow, initial_attrs)
@@ -367,7 +363,7 @@ defmodule Imgd.WorkflowsTest do
 
       other_scope = Scope.for_user(other_user)
 
-      draft_attrs = %{steps: %{}, connections: [], triggers: []}
+      draft_attrs = %{steps: %{}, connections: []}
 
       assert {:error, :access_denied} =
                Workflows.update_workflow_draft(other_scope, workflow, draft_attrs)
@@ -383,8 +379,7 @@ defmodule Imgd.WorkflowsTest do
       # Create and publish a version
       draft_attrs = %{
         steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
-        connections: [],
-        triggers: [%{type: :manual, config: %{}}]
+        connections: []
       }
 
       {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)

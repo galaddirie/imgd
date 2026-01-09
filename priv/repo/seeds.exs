@@ -60,13 +60,12 @@ IO.puts("")
 IO.puts("📋 Creating example workflows...")
 
 # Helper function to create workflow with draft
-create_workflow_with_draft = fn attrs, steps, connections, triggers ->
+create_workflow_with_draft = fn attrs, steps, connections ->
   {:ok, workflow} = Workflows.create_workflow(scope, attrs)
 
   draft_attrs = %{
     steps: steps,
     connections: connections,
-    triggers: triggers,
     settings: %{timeout_ms: 300_000, max_retries: 3}
   }
 
@@ -136,14 +135,8 @@ linear_connections = [
   }
 ]
 
-linear_triggers = [
-  %{
-    id: "manual_trigger",
-    type: "manual",
-    name: "Manual Start",
-    config: %{"input_schema" => %{"name" => "string", "timestamp" => "string"}}
-  }
-]
+# Triggers are now defined as steps (webhook_trigger, schedule_trigger)
+# Manual triggers are represented by manual_input steps in the UI.
 
 linear_workflow =
   create_workflow_with_draft.(
@@ -153,8 +146,7 @@ linear_workflow =
       public: true
     },
     linear_steps,
-    linear_connections,
-    linear_triggers
+    linear_connections
   )
 
 IO.puts("✅ Created Linear Workflow: #{linear_workflow.name}")
@@ -240,15 +232,6 @@ branching_connections = [
   }
 ]
 
-branching_triggers = [
-  %{
-    id: "user_trigger",
-    type: "manual",
-    name: "Process User",
-    config: %{"input_schema" => %{"name" => "string", "status" => "string"}}
-  }
-]
-
 branching_workflow =
   create_workflow_with_draft.(
     %{
@@ -257,8 +240,7 @@ branching_workflow =
       public: true
     },
     branching_steps,
-    branching_connections,
-    branching_triggers
+    branching_connections
   )
 
 IO.puts("✅ Created Branching Workflow: #{branching_workflow.name}")
@@ -394,15 +376,6 @@ diamond_connections = [
   }
 ]
 
-diamond_triggers = [
-  %{
-    id: "type_trigger",
-    type: "manual",
-    name: "Process by Type",
-    config: %{"input_schema" => %{"type" => "string", "name" => "string", "level" => "number"}}
-  }
-]
-
 diamond_workflow =
   create_workflow_with_draft.(
     %{
@@ -411,8 +384,7 @@ diamond_workflow =
       public: true
     },
     diamond_steps,
-    diamond_connections,
-    diamond_triggers
+    diamond_connections
   )
 
 IO.puts("✅ Created Diamond Workflow: #{diamond_workflow.name}")
@@ -481,15 +453,6 @@ simple_connections = [
   }
 ]
 
-simple_triggers = [
-  %{
-    id: "calc_trigger",
-    type: "manual",
-    name: "Simple Calculator",
-    config: %{"input_schema" => %{"a" => "number", "b" => "number", "operation" => "string"}}
-  }
-]
-
 simple_workflow =
   create_workflow_with_draft.(
     %{
@@ -498,8 +461,7 @@ simple_workflow =
       public: true
     },
     simple_steps,
-    simple_connections,
-    simple_triggers
+    simple_connections
   )
 
 IO.puts("✅ Created Simple Workflow: #{simple_workflow.name}")
@@ -676,15 +638,6 @@ complex_connections = [
   }
 ]
 
-complex_triggers = [
-  %{
-    id: "order_trigger",
-    type: "manual",
-    name: "Process Order",
-    config: %{"input_schema" => %{"customer" => "string", "subtotal" => "number"}}
-  }
-]
-
 complex_workflow =
   create_workflow_with_draft.(
     %{
@@ -693,8 +646,7 @@ complex_workflow =
       public: true
     },
     complex_steps,
-    complex_connections,
-    complex_triggers
+    complex_connections
   )
 
 IO.puts("✅ Created Complex Workflow: #{complex_workflow.name}")
@@ -840,15 +792,6 @@ map_aggregate_connections = [
   }
 ]
 
-map_aggregate_triggers = [
-  %{
-    id: "numbers_trigger",
-    type: "manual",
-    name: "Process Numbers",
-    config: %{"input_schema" => %{"numbers" => "array"}}
-  }
-]
-
 map_aggregate_workflow =
   create_workflow_with_draft.(
     %{
@@ -857,8 +800,7 @@ map_aggregate_workflow =
       public: true
     },
     map_aggregate_steps,
-    map_aggregate_connections,
-    map_aggregate_triggers
+    map_aggregate_connections
   )
 
 IO.puts("✅ Created Map/Aggregate Workflow: #{map_aggregate_workflow.name}")
@@ -1032,22 +974,6 @@ conditional_connections = [
   }
 ]
 
-conditional_triggers = [
-  %{
-    id: "user_trigger",
-    type: "manual",
-    name: "Classify User",
-    config: %{
-      "input_schema" => %{
-        "name" => "string",
-        "age" => "number",
-        "membership" => "string",
-        "last_login_days" => "number"
-      }
-    }
-  }
-]
-
 conditional_workflow =
   create_workflow_with_draft.(
     %{
@@ -1056,11 +982,107 @@ conditional_workflow =
       public: true
     },
     conditional_steps,
-    conditional_connections,
-    conditional_triggers
+    conditional_connections
   )
 
 IO.puts("✅ Created Conditional Workflow: #{conditional_workflow.name}")
+
+# ============================================================================
+# Example 8: Webhook Workflow - Triggered by an external HTTP request
+# ============================================================================
+IO.puts("Creating Webhook Workflow...")
+
+webhook_steps = [
+  %{
+    id: "webhook_start",
+    type_id: "webhook_trigger",
+    name: "Incoming Webhook",
+    config: %{
+      "path" => "my-webhook",
+      "http_method" => "POST",
+      "response_mode" => "immediate"
+    },
+    position: %{"x" => 100, "y" => 100}
+  },
+  %{
+    id: "log_payload",
+    type_id: "debug",
+    name: "Log Payload",
+    config: %{"message" => "Received webhook with data: {{json.body}}"},
+    position: %{"x" => 350, "y" => 100}
+  }
+]
+
+webhook_connections = [
+  %{
+    id: "webhook_to_log",
+    source_step_id: "webhook_start",
+    source_output: "default",
+    target_step_id: "log_payload",
+    target_input: "default"
+  }
+]
+
+webhook_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "External Webhook Handler",
+      description: "Demonstrates how to trigger a workflow via HTTP POST",
+      public: true
+    },
+    webhook_steps,
+    webhook_connections
+  )
+
+IO.puts("✅ Created Webhook Workflow: #{webhook_workflow.name}")
+
+# ============================================================================
+# Example 9: Scheduled Workflow - Runs periodically on a schedule
+# ============================================================================
+IO.puts("Creating Scheduled Workflow...")
+
+scheduled_steps = [
+  %{
+    id: "schedule_start",
+    type_id: "schedule_trigger",
+    name: "Daily Cleanup",
+    config: %{
+      "cron" => "0 0 * * *",
+      "timezone" => "UTC"
+    },
+    position: %{"x" => 100, "y" => 100}
+  },
+  %{
+    id: "cleanup_task",
+    type_id: "debug",
+    name: "Cleanup Task",
+    config: %{"message" => "Running scheduled cleanup job"},
+    position: %{"x" => 350, "y" => 100}
+  }
+]
+
+scheduled_connections = [
+  %{
+    id: "schedule_to_task",
+    source_step_id: "schedule_start",
+    source_output: "default",
+    target_step_id: "cleanup_task",
+    target_input: "default"
+  }
+]
+
+scheduled_workflow =
+  create_workflow_with_draft.(
+    %{
+      name: "Daily Maintenance Schedule",
+      description: "A workflow that runs automatically every day at midnight",
+      public: true
+    },
+    scheduled_steps,
+    scheduled_connections
+  )
+
+IO.puts("✅ Created Scheduled Workflow: #{scheduled_workflow.name}")
 
 # ============================================================================
 # Share workflows with temp2@imgd.io as editor
@@ -1074,7 +1096,9 @@ workflows_to_share = [
   simple_workflow,
   complex_workflow,
   map_aggregate_workflow,
-  conditional_workflow
+  conditional_workflow,
+  webhook_workflow,
+  scheduled_workflow
 ]
 
 Enum.each(workflows_to_share, fn workflow ->
@@ -1105,4 +1129,6 @@ IO.puts("  - Simple Calculator")
 IO.puts("  - Complex Order Processing")
 IO.puts("  - Map/Aggregate Numbers")
 IO.puts("  - Multi-Conditional User Classification")
+IO.puts("  - External Webhook Handler")
+IO.puts("  - Daily Maintenance Schedule")
 IO.puts("\nAll workflows have been shared with temp2@imgd.io with editor permissions.")

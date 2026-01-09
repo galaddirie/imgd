@@ -13,7 +13,7 @@ defmodule Imgd.Runtime.Triggers.RegistryTest do
     # Initially not active (unless it was in DB at boot)
     assert Registry.active?(workflow_id, name) == false
 
-    Registry.register(workflow_id, name)
+    Registry.register(workflow_id, [], name)
     # It's a cast, so we might need a small peek or use call if we want sync
     # But let's see if it works with a small sleep or a sync call
     Process.sleep(50)

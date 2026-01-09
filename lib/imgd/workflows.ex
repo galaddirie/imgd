@@ -153,11 +153,7 @@ defmodule Imgd.Workflows do
         where: w.status == :active,
         where:
           fragment(
-            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS t WHERE t->>'type' = 'webhook' AND t->'config'->>'path' = ? AND (t->'config'->>'http_method' = ? OR (t->'config'->>'http_method' IS NULL AND ? = 'POST'))) OR EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
-            v.triggers,
-            ^path,
-            ^method,
-            ^method,
+            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
             v.steps,
             ^path,
             ^method,
@@ -181,11 +177,7 @@ defmodule Imgd.Workflows do
         join: d in assoc(w, :draft),
         where:
           fragment(
-            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS t WHERE t->>'type' = 'webhook' AND t->'config'->>'path' = ? AND (t->'config'->>'http_method' = ? OR (t->'config'->>'http_method' IS NULL AND ? = 'POST'))) OR EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
-            d.triggers,
-            ^path,
-            ^method,
-            ^method,
+            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
             d.steps,
             ^path,
             ^method,
@@ -229,7 +221,7 @@ defmodule Imgd.Workflows do
 
       %Workflow{} = workflow ->
         if Scope.can_view_workflow?(scope, workflow) do
-          {:ok, workflow}
+          {:ok, %{workflow | draft: ensure_draft_defaults(workflow.draft)}}
         else
           {:error, :not_found}
         end
@@ -282,6 +274,7 @@ defmodule Imgd.Workflows do
           {:ok, Workflow.t()} | {:error, :not_found | :access_denied}
   def delete_workflow(%Scope{} = scope, %Workflow{} = workflow) do
     if Scope.owns_workflow?(scope, workflow) do
+      Imgd.Runtime.Triggers.Activator.deactivate(workflow.id)
       Repo.delete(workflow)
     else
       {:error, :access_denied}
@@ -297,6 +290,7 @@ defmodule Imgd.Workflows do
   @spec archive_workflow(Scope.t(), Workflow.t()) ::
           {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
   def archive_workflow(%Scope{} = scope, %Workflow{} = workflow) do
+    Imgd.Runtime.Triggers.Activator.deactivate(workflow.id)
     update_workflow(scope, workflow, %{status: :archived})
   end
 
@@ -314,7 +308,7 @@ defmodule Imgd.Workflows do
 
         draft =
           workflow.draft ||
-            %WorkflowDraft{steps: [], connections: [], triggers: [], settings: %{}}
+            %WorkflowDraft{steps: [], connections: [], settings: %{}}
 
         workflow_attrs = %{
           name: "Copy of #{workflow.name}",
@@ -330,7 +324,6 @@ defmodule Imgd.Workflows do
         draft_attrs = %{
           steps: Enum.map(draft.steps || [], &Map.from_struct/1),
           connections: Enum.map(draft.connections || [], &Map.from_struct/1),
-          triggers: Enum.map(draft.triggers || [], &Map.from_struct/1),
           settings: draft.settings || %{}
         }
 
@@ -374,7 +367,6 @@ defmodule Imgd.Workflows do
           |> Map.put(:source_hash, compute_source_hash(draft))
           |> Map.put(:steps, Enum.map(draft.steps, &Map.from_struct/1))
           |> Map.put(:connections, Enum.map(draft.connections || [], &Map.from_struct/1))
-          |> Map.put(:triggers, Enum.map(draft.triggers || [], &Map.from_struct/1))
           |> Map.put(:published_by, scope.user.id)
 
         {:ok, version} =
@@ -394,6 +386,14 @@ defmodule Imgd.Workflows do
 
         {updated_workflow, version}
       end)
+      |> case do
+        {:ok, {updated_workflow, version}} ->
+          Imgd.Runtime.Triggers.Activator.activate(updated_workflow)
+          {:ok, {updated_workflow, version}}
+
+        error ->
+          error
+      end
     else
       {:error, :access_denied}
     end
@@ -455,7 +455,7 @@ defmodule Imgd.Workflows do
   def get_draft(workflow_id) do
     case Repo.get_by(WorkflowDraft, workflow_id: workflow_id) do
       nil -> {:error, :not_found}
-      draft -> {:ok, draft}
+      draft -> {:ok, ensure_draft_defaults(draft)}
     end
   end
 
@@ -533,12 +533,21 @@ defmodule Imgd.Workflows do
     data = %{
       steps: draft.steps,
       connections: draft.connections,
-      triggers: draft.triggers,
       settings: draft.settings
     }
 
     :crypto.hash(:sha256, :erlang.term_to_binary(data))
     |> Base.encode16()
     |> String.downcase()
+  end
+
+  defp ensure_draft_defaults(nil), do: nil
+
+  defp ensure_draft_defaults(draft) do
+    %{
+      draft
+      | steps: draft.steps || [],
+        connections: draft.connections || []
+    }
   end
 end

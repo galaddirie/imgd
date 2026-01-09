@@ -114,9 +114,11 @@ defmodule Imgd.Runtime.Steps.StepRunner do
       case evaluate_config(step.config, ctx) do
         {:ok, config} ->
           # Persist evaluated config for UI/Debug purposes
-          Imgd.Executions.update_step_execution_metadata(ctx.execution_id, ctx.step_id, %{
-            "evaluated_config" => config
-          })
+          if ctx.execution_id do
+            Imgd.Executions.update_step_execution_metadata(ctx.execution_id, ctx.step_id, %{
+              "evaluated_config" => config
+            })
+          end
 
           config
 

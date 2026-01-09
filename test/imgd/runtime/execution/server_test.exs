@@ -85,8 +85,7 @@ defmodule Imgd.Runtime.Execution.ServerTest do
     %WorkflowDraft{
       workflow_id: workflow.id,
       steps: steps,
-      connections: connections,
-      triggers: []
+      connections: connections
     }
     |> Repo.insert!()
   end

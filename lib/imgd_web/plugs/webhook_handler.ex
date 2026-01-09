@@ -25,32 +25,38 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
     if is_test and not Scope.authenticated?(scope) do
       send_error(conn, 401, "API key required")
     else
+      alias Imgd.Runtime.Triggers.Registry
+
       # 1. Try lookup by path first (new way)
-      workflow =
-        if is_test do
-          Imgd.Workflows.get_workflow_by_webhook_draft_path(path, conn.method)
-        else
-          Imgd.Workflows.get_active_workflow_by_webhook(path, conn.method)
-        end
+      # Registry lookup is much faster as it bypasses DB search
+      {workflow, config} =
+        case Registry.lookup_webhook(path, conn.method) do
+          {:ok, %{workflow_id: id, config: config}} ->
+            {Repo.get(Workflow, id), config}
 
-      # 2. Try lookup by ID if first segment is a UUID (legacy way)
-      workflow =
-        if is_nil(workflow) do
-          case List.first(path_segments) do
-            nil ->
-              nil
-
-            id ->
-              case Ecto.UUID.cast(id) do
-                {:ok, uuid} ->
-                  Repo.get(Workflow, uuid)
-
-                _ ->
+          :error ->
+            # 2. Try lookup by ID if first segment is a UUID (legacy way)
+            workflow =
+              case List.first(path_segments) do
+                nil ->
                   nil
+
+                id ->
+                  case Ecto.UUID.cast(id) do
+                    {:ok, uuid} -> Repo.get(Workflow, uuid)
+                    _ -> nil
+                  end
               end
-          end
-        else
-          workflow
+
+            # If it's a test route, we might need a DB lookup if registry doesn't have it
+            workflow =
+              if is_nil(workflow) and is_test do
+                Imgd.Workflows.get_workflow_by_webhook_draft_path(path, conn.method)
+              else
+                workflow
+              end
+
+            {workflow, nil}
         end
 
       case workflow do
@@ -68,12 +74,12 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
                 case EditSessionServer.test_webhook_enabled?(workflow.id, path, conn.method) do
                   {:ok, _webhook_test} ->
                     config =
-                      webhook_config_for(
-                        workflow.draft.triggers,
-                        workflow.draft.steps,
-                        path,
-                        conn.method
-                      )
+                      config ||
+                        webhook_config_for(
+                          workflow.draft.steps,
+                          path,
+                          conn.method
+                        )
 
                     handle_trigger(conn, workflow, scope, config, :preview, true)
 
@@ -93,16 +99,18 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
 
             true ->
               if Scope.can_view_workflow?(scope, workflow) do
-                # Preload triggers to find the right one
-                workflow = Repo.preload(workflow, :published_version)
-
+                # If we didn't get config from registry (e.g. legacy ID lookup), fetch it now
                 config =
-                  webhook_config_for(
-                    workflow.published_version.triggers,
-                    workflow.published_version.steps,
-                    path,
-                    conn.method
-                  )
+                  config ||
+                    (
+                      workflow = Repo.preload(workflow, :published_version)
+
+                      webhook_config_for(
+                        workflow.published_version.steps,
+                        path,
+                        conn.method
+                      )
+                    )
 
                 handle_trigger(conn, workflow, scope, config, :production)
               else
@@ -113,44 +121,22 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
     end
   end
 
-  defp webhook_config_for(triggers, steps, path, method) do
+  defp webhook_config_for(steps, path, method) do
     normalized_path = normalize_path(path)
     normalized_method = normalize_method(method)
 
-    trigger =
-      Enum.find(triggers || [], fn trigger ->
-        type = Map.get(trigger, :type) || Map.get(trigger, "type")
-        config = Map.get(trigger, :config) || Map.get(trigger, "config") || %{}
-        config_path = normalize_path(Map.get(config, "path") || Map.get(config, :path))
-
-        config_method =
-          normalize_method(Map.get(config, "http_method") || Map.get(config, :http_method))
-
-        type in [:webhook, "webhook"] &&
-          config_path == normalized_path &&
-          config_method == normalized_method
+    step =
+      Enum.find(steps || [], fn step ->
+        step.type_id == "webhook_trigger" &&
+          normalize_path(Map.get(step.config, "path") || Map.get(step.config, :path) || step.id) ==
+            normalized_path &&
+          normalize_method(
+            Map.get(step.config, "http_method") || Map.get(step.config, :http_method)
+          ) ==
+            normalized_method
       end)
 
-    cond do
-      trigger ->
-        Map.get(trigger, :config) || Map.get(trigger, "config") || %{}
-
-      true ->
-        step =
-          Enum.find(steps || [], fn step ->
-            step.type_id == "webhook_trigger" &&
-              normalize_path(
-                Map.get(step.config, "path") || Map.get(step.config, :path) || step.id
-              ) ==
-                normalized_path &&
-              normalize_method(
-                Map.get(step.config, "http_method") || Map.get(step.config, :http_method)
-              ) ==
-                normalized_method
-          end)
-
-        if step, do: step.config || %{}, else: %{}
-    end
+    if step, do: step.config || %{}, else: %{}
   end
 
   defp handle_trigger(conn, workflow, scope, config, execution_type, test_webhook? \\ false) do

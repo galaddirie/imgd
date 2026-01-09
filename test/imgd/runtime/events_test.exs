@@ -21,8 +21,7 @@ defmodule Imgd.Runtime.EventsTest do
     # Create and publish a version
     draft_attrs = %{
       steps: [%{id: "step1", type_id: "input", name: "Input Step", config: %{}}],
-      connections: [],
-      triggers: [%{type: :manual, config: %{}}]
+      connections: []
     }
 
     {:ok, _draft} = Workflows.update_workflow_draft(scope, workflow, draft_attrs)

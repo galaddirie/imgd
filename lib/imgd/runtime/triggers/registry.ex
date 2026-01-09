@@ -10,10 +10,12 @@ defmodule Imgd.Runtime.Triggers.Registry do
   require Logger
 
   alias Imgd.Workflows
+  alias Imgd.Workflows.Workflow
   alias Imgd.Repo
 
   @type state :: %{
           active_workflows: MapSet.t(),
+          webhook_routes: %{String.t() => %{workflow_id: Ecto.UUID.t(), config: map()}}
         }
 
   # ============================================================================
@@ -29,8 +31,8 @@ defmodule Imgd.Runtime.Triggers.Registry do
   Registers a workflow for trigger activation.
   Usually called when a workflow is published or toggled to 'active'.
   """
-  def register(workflow_id, name \\ __MODULE__) do
-    GenServer.cast(name, {:register, workflow_id})
+  def register(workflow_id, opts \\ [], name \\ __MODULE__) do
+    GenServer.cast(name, {:register, workflow_id, opts})
   end
 
   @doc """
@@ -47,6 +49,14 @@ defmodule Imgd.Runtime.Triggers.Registry do
     GenServer.call(name, {:is_active, workflow_id})
   end
 
+  @doc """
+  Looks up a webhook route in the registry.
+  Returns {:ok, %{workflow_id: id, config: config}} or :error.
+  """
+  def lookup_webhook(path, method, name \\ __MODULE__) do
+    GenServer.call(name, {:lookup_webhook, path, method})
+  end
+
   # ============================================================================
   # Callbacks
   # ============================================================================
@@ -55,7 +65,8 @@ defmodule Imgd.Runtime.Triggers.Registry do
   def init(_opts) do
     Logger.info("Initializing Trigger Registry")
 
-    {:ok, %{active_workflows: MapSet.new()}, {:continue, :load_active_workflows}}
+    {:ok, %{active_workflows: MapSet.new(), webhook_routes: %{}},
+     {:continue, :load_active_workflows}}
   end
 
   @impl true
@@ -69,19 +80,67 @@ defmodule Imgd.Runtime.Triggers.Registry do
 
     Logger.info("Trigger Registry: Loaded #{MapSet.size(active_ids)} active workflows")
 
+    # Activate all loaded workflows
+    active_ids
+    |> Enum.each(fn id ->
+      case Repo.get(Workflow, id) do
+        nil -> :ok
+        workflow -> Imgd.Runtime.Triggers.Activator.activate(workflow)
+      end
+    end)
+
     {:noreply, %{state | active_workflows: active_ids}}
   end
 
   @impl true
-  def handle_cast({:register, workflow_id}, state) do
+  def handle_cast({:register, workflow_id, opts}, state) do
     Logger.info("Registering triggers for workflow: #{workflow_id}")
-    {:noreply, %{state | active_workflows: MapSet.put(state.active_workflows, workflow_id)}}
+
+    # Update active workflows
+    active_workflows = MapSet.put(state.active_workflows, workflow_id)
+
+    # Update webhook routes if provided
+    webhook_routes =
+      case Keyword.get(opts, :webhooks) do
+        nil ->
+          state.webhook_routes
+
+        webhooks ->
+          # First remove any old routes for this workflow (to avoid stale routes if config changed)
+          cleaned_routes =
+            state.webhook_routes
+            |> Enum.reject(fn {_key, val} -> val.workflow_id == workflow_id end)
+            |> Enum.into(%{})
+
+          # Add new routes
+          Enum.reduce(webhooks, cleaned_routes, fn %{path: path, method: method, config: config},
+                                                   acc ->
+            key = "#{method}:#{path}"
+            Map.put(acc, key, %{workflow_id: workflow_id, config: config})
+          end)
+      end
+
+    {:noreply, %{state | active_workflows: active_workflows, webhook_routes: webhook_routes}}
   end
 
   @impl true
   def handle_cast({:unregister, workflow_id}, state) do
     Logger.info("Unregistering triggers for workflow: #{workflow_id}")
-    {:noreply, %{state | active_workflows: MapSet.delete(state.active_workflows, workflow_id)}}
+
+    active_workflows = MapSet.delete(state.active_workflows, workflow_id)
+
+    webhook_routes =
+      state.webhook_routes
+      |> Enum.reject(fn {_key, val} -> val.workflow_id == workflow_id end)
+      |> Enum.into(%{})
+
+    {:noreply, %{state | active_workflows: active_workflows, webhook_routes: webhook_routes}}
+  end
+
+  @impl true
+  def handle_call({:lookup_webhook, path, method}, _from, state) do
+    key = "#{String.upcase(method)}:#{path}"
+    {:reply, Map.fetch(state.webhook_routes, key), state}
   end
 
   @impl true

@@ -1,46 +1,14 @@
 defmodule Imgd.Workflows.Workflow do
   @moduledoc """
-  Workflow definition schema.
-
-  Stores the design-time workflow configuration including
-  steps, connections, and trigger configuration.
-
-  This is the mutable "draft" state. When published, an immutable
-  `WorkflowVersion` snapshot is created.
-
-  The actual graph definition (steps, connections, triggers) is stored in
-  `Imgd.Workflows.WorkflowDraft`, which is kept private to the owner.
+  Workflow schema.
   """
   use Imgd.Schema
+  import Ecto.Changeset
+  alias Imgd.Workflows.{WorkflowDraft, WorkflowVersion, WorkflowShare}
 
-  alias Imgd.Workflows.WorkflowVersion
-  alias Imgd.Workflows.WorkflowShare
-  alias Imgd.Executions.Execution
-  alias Imgd.Accounts.User
-
-  @type status :: :draft | :active | :archived
-  @type trigger_type :: :manual | :webhook | :schedule | :event
-
-  @typedoc "Runtime configuration applied to workflow executions"
-  @type settings :: %{
-          optional(:timeout_ms) => pos_integer(),
-          optional(:max_retries) => non_neg_integer(),
-          optional(atom() | String.t()) => any()
-        }
-
-  @type t :: %__MODULE__{
-          id: Ecto.UUID.t(),
-          name: String.t(),
-          description: String.t() | nil,
-          status: status(),
-          public: boolean(),
-          current_version_tag: String.t() | nil,
-          published_version_id: Ecto.UUID.t() | nil,
-          user_id: Ecto.UUID.t(),
-          shares: [WorkflowShare.t()] | Ecto.Association.NotLoaded.t(),
-          inserted_at: DateTime.t(),
-          updated_at: DateTime.t()
-        }
+  defimpl LiveVue.Encoder, for: Ecto.Association.NotLoaded do
+    def encode(_struct, _opts), do: nil
+  end
 
   @derive {Jason.Encoder,
            only: [
@@ -67,30 +35,30 @@ defmodule Imgd.Workflows.Workflow do
              :user_id,
              :inserted_at,
              :updated_at,
-             :draft
+             :draft,
+             :user,
+             :published_version
            ]}
+
   schema "workflows" do
     field :name, :string
     field :description, :string
     field :status, Ecto.Enum, values: [:draft, :active, :archived], default: :draft
     field :public, :boolean, default: false
-
-    # What you're calling the current draft version (e.g., "1.3.0-dev", "next")
     field :current_version_tag, :string
 
-    # Pointer to currently published immutable version
     belongs_to :published_version, WorkflowVersion
-
-    has_one :draft, Imgd.Workflows.WorkflowDraft
+    belongs_to :user, Imgd.Accounts.User
+    has_one :draft, WorkflowDraft
     has_many :versions, WorkflowVersion
-    has_many :executions, Execution
     has_many :shares, WorkflowShare
-
-    belongs_to :user, User
 
     timestamps()
   end
 
+  @doc """
+  Builds a changeset for creating/updating a workflow.
+  """
   def changeset(workflow, attrs) do
     workflow
     |> cast(attrs, [
@@ -102,31 +70,42 @@ defmodule Imgd.Workflows.Workflow do
       :published_version_id,
       :user_id
     ])
-    |> validate_required([:name, :user_id, :status])
-    |> validate_length(:name, max: 200)
+    |> validate_required([:name, :user_id])
   end
 
   # ============================================================================
   # Convenience Functions
   # ============================================================================
 
-  @doc "Returns the primary trigger for the workflow, if any."
+  @doc "Returns the primary trigger step for the workflow, if any."
   def primary_trigger(%__MODULE__{} = workflow) do
     workflow = Imgd.Repo.preload(workflow, :draft)
 
     case workflow.draft do
       nil -> nil
-      draft -> List.first(draft.triggers || [])
+      draft -> Enum.find(draft.steps || [], &is_trigger_step?/1)
     end
   end
 
+  # TODO: SUPPORT MULTIPLE TRIGGERS
   @doc "Checks if the workflow has a specific trigger type."
   def has_trigger_type?(%__MODULE__{} = workflow, type) do
     workflow = Imgd.Repo.preload(workflow, :draft)
+    trigger_type_id = trigger_type_to_step_type_id(type)
 
     case workflow.draft do
       nil -> false
-      draft -> Enum.any?(draft.triggers || [], &(&1.type == type))
+      draft -> Enum.any?(draft.steps || [], &(&1.type_id == trigger_type_id))
     end
   end
+
+  defp is_trigger_step?(%{type_id: type_id}) do
+    type_id in ["webhook_trigger", "schedule_trigger", "manual_input", "event_trigger"]
+  end
+
+  defp trigger_type_to_step_type_id(:webhook), do: "webhook_trigger"
+  defp trigger_type_to_step_type_id(:schedule), do: "schedule_trigger"
+  defp trigger_type_to_step_type_id(:manual), do: "manual_input"
+  defp trigger_type_to_step_type_id(:event), do: "event_trigger"
+  defp trigger_type_to_step_type_id(type) when is_binary(type), do: type
 end
