@@ -109,6 +109,18 @@ defmodule Imgd.Collaboration.EditSession.Server do
     end
   end
 
+  @doc "Broadcast that a test webhook execution was created for the session."
+  def notify_webhook_test_execution(workflow_id, execution_id) do
+    case lookup_session_pid(workflow_id) do
+      {:ok, pid} ->
+        GenServer.cast(pid, {:webhook_test_execution, execution_id})
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
   # =============================================================================
   # Server Callbacks
   # =============================================================================
@@ -217,6 +229,11 @@ defmodule Imgd.Collaboration.EditSession.Server do
   def handle_cast(:persist, state) do
     {_result, new_state} = persist_state(state)
     {:noreply, new_state}
+  end
+
+  def handle_cast({:webhook_test_execution, execution_id}, state) do
+    PubSub.broadcast_webhook_test_execution(state.workflow_id, execution_id)
+    {:noreply, state}
   end
 
   @impl true

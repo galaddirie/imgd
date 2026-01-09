@@ -184,6 +184,7 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
         # Pass handler PID as ephemeral option
         case Executions.create_execution(scope, attrs) do
           {:ok, execution} ->
+            _ = maybe_notify_webhook_test_execution(test_webhook?, workflow.id, execution.id)
             _ = maybe_disable_test_webhook(test_webhook?, workflow.id)
 
             # Start execution directly (do not use run_sync as it blocks)
@@ -210,6 +211,7 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
       "on_completion" ->
         case Executions.create_execution(scope, attrs) do
           {:ok, execution} ->
+            _ = maybe_notify_webhook_test_execution(test_webhook?, workflow.id, execution.id)
             _ = maybe_disable_test_webhook(test_webhook?, workflow.id)
             ExecutionWorker.run_sync(execution.id)
             # Re-fetch to get output
@@ -227,6 +229,7 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
         # "immediate" or default
         case Executions.create_execution(scope, attrs) do
           {:ok, execution} ->
+            _ = maybe_notify_webhook_test_execution(test_webhook?, workflow.id, execution.id)
             _ = maybe_disable_test_webhook(test_webhook?, workflow.id)
             ExecutionWorker.enqueue(execution.id)
 
@@ -252,6 +255,13 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
   end
 
   defp maybe_disable_test_webhook(false, _workflow_id), do: :ok
+
+  defp maybe_notify_webhook_test_execution(true, workflow_id, execution_id) do
+    _ = EditSessionServer.notify_webhook_test_execution(workflow_id, execution_id)
+    :ok
+  end
+
+  defp maybe_notify_webhook_test_execution(false, _workflow_id, _execution_id), do: :ok
 
   defp normalize_path(nil), do: nil
 

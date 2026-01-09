@@ -526,6 +526,17 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_info({:webhook_test_execution, %{execution_id: execution_id}}, socket) do
+    case Executions.get_execution(socket.assigns.current_scope, execution_id) do
+      {:ok, execution} ->
+        {:noreply, switch_to_execution(socket, execution)}
+
+      {:error, _} ->
+        {:noreply, socket}
+    end
+  end
+
   # Handle Phoenix.Presence diff broadcasts
   # This is the standard format from Phoenix.Presence
   @impl true

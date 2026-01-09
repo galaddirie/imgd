@@ -16,6 +16,7 @@ defmodule Imgd.Collaboration.EditSession.PubSub do
   Operations:
   - `{:operation_applied, operation}` - An edit operation was applied
   - `{:sync_state, state}` - Full state sync for reconnection
+  - `{:webhook_test_execution, %{execution_id: execution_id}}` - Test webhook execution created
 
   Presence:
   - `{:presence_diff, diff}` - Phoenix.Presence diff
@@ -223,6 +224,18 @@ defmodule Imgd.Collaboration.EditSession.PubSub do
       @pubsub,
       session_topic(workflow_id),
       {:editor_state_updated, editor_state}
+    )
+  end
+
+  @doc """
+  Broadcast that a test webhook execution was created.
+  """
+  @spec broadcast_webhook_test_execution(String.t(), String.t()) :: :ok
+  def broadcast_webhook_test_execution(workflow_id, execution_id) do
+    Phoenix.PubSub.broadcast(
+      @pubsub,
+      session_topic(workflow_id),
+      {:webhook_test_execution, %{execution_id: execution_id}}
     )
   end
 end
