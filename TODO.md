@@ -80,7 +80,7 @@ BUGS
 - [ ] investigate how n8n secures its webhook endpoints
 
 
-
+- step names from node library should not be uuids - they should be step name + <index if multiple of same type>
 
 webhook test system
 
@@ -88,6 +88,5 @@ webhook test system
 - for example if manually run the other triggers should be marked as skipped
 - if a webhook triggers a run, the manual trigger should be marked as skipped
 
-- maybe all webhooks have a built in hook/:id/health endpoint
 
 - determine risk of api key exposure in webhook trigger outputs
