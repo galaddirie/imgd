@@ -5,7 +5,8 @@ defimpl LiveVue.Encoder, for: Imgd.Collaboration.EditorState do
       pinned_outputs: state.pinned_outputs,
       disabled_steps: MapSet.to_list(state.disabled_steps),
       disabled_mode: state.disabled_mode,
-      step_locks: state.step_locks
+      step_locks: state.step_locks,
+      webhook_test: state.webhook_test
     }
 
     LiveVue.Encoder.encode(data, opts)

@@ -17,7 +17,9 @@ defmodule Imgd.Collaboration.EditorState do
     # %{step_id => user_id} - soft locks
     step_locks: %{},
     # %{step_id => DateTime} - for timeout
-    lock_timestamps: %{}
+    lock_timestamps: %{},
+    # %{path: string, method: string, step_id: string, enabled_by: string}
+    webhook_test: nil
   ]
 
   # 30 seconds
@@ -45,6 +47,14 @@ defmodule Imgd.Collaboration.EditorState do
       | disabled_steps: MapSet.delete(state.disabled_steps, step_id),
         disabled_mode: Map.delete(state.disabled_mode, step_id)
     }
+  end
+
+  def enable_webhook_test(state, webhook_test) when is_map(webhook_test) do
+    %{state | webhook_test: webhook_test}
+  end
+
+  def disable_webhook_test(state) do
+    %{state | webhook_test: nil}
   end
 
   def acquire_lock(state, step_id, user_id) do

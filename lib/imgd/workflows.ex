@@ -153,8 +153,40 @@ defmodule Imgd.Workflows do
         where: w.status == :active,
         where:
           fragment(
-            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS t WHERE t->>'type' = 'webhook' AND t->'config'->>'path' = ? AND (t->'config'->>'http_method' = ? OR (t->'config'->>'http_method' IS NULL AND ? = 'POST')))",
+            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS t WHERE t->>'type' = 'webhook' AND t->'config'->>'path' = ? AND (t->'config'->>'http_method' = ? OR (t->'config'->>'http_method' IS NULL AND ? = 'POST'))) OR EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
             v.triggers,
+            ^path,
+            ^method,
+            ^method,
+            v.steps,
+            ^path,
+            ^method,
+            ^method
+          ),
+        limit: 1
+
+    Repo.one(query)
+  end
+
+  @doc """
+  Finds a workflow by its DRAFT webhook path and method.
+  Ignores status (allows drafts).
+  """
+  @spec get_workflow_by_webhook_draft_path(String.t(), String.t()) :: Workflow.t() | nil
+  def get_workflow_by_webhook_draft_path(path, method) do
+    method = String.upcase(method)
+
+    query =
+      from w in Workflow,
+        join: d in assoc(w, :draft),
+        where:
+          fragment(
+            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS t WHERE t->>'type' = 'webhook' AND t->'config'->>'path' = ? AND (t->'config'->>'http_method' = ? OR (t->'config'->>'http_method' IS NULL AND ? = 'POST'))) OR EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
+            d.triggers,
+            ^path,
+            ^method,
+            ^method,
+            d.steps,
             ^path,
             ^method,
             ^method

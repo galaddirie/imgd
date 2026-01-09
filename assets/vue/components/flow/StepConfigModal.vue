@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { watchDebounced } from '@vueuse/core'
 import ExpressionPreviewError from './ExpressionPreviewError.vue'
+import type { EditorState } from '../../types/workflow'
 import {
   ArrowRightOnRectangleIcon,
   BoltIcon,
@@ -31,10 +32,11 @@ interface Props {
   execution?: any
   stepExecutions?: any[]
   expressionPreviews?: Record<string, any>
+  editorState?: EditorState
 }
 
 const props = defineProps<Props>()
-const emit = defineEmits(['close', 'save', 'preview_expression'])
+const emit = defineEmits(['close', 'save', 'preview_expression', 'toggle_webhook_test'])
 
 const activeTab = ref<'config' | 'output' | 'pinned'>('config')
 const fieldModes = ref<Record<string, 'literal' | 'expression'>>({})
@@ -176,6 +178,73 @@ const previewValueFor = (fieldKey: string) => {
   if (!key) return undefined
   return props.expressionPreviews?.[key]
 }
+
+// Webhook Logic
+const webhookMode = ref<'test' | 'production'>('test')
+const isWebhookTrigger = computed(() => {
+  const typeId = props.node?.data?.type_id
+  return typeId === 'webhook_trigger' || typeId === 'webhook'
+})
+
+const webhookPath = computed(() => {
+  if (!props.node) return ''
+  const rawPath = props.node.data?.config?.path
+  const path = typeof rawPath === 'string' ? rawPath.trim() : ''
+  return path.length > 0 ? path : props.node.id
+})
+
+const webhookMethod = computed(() => {
+  const rawMethod = props.node?.data?.config?.http_method
+  if (typeof rawMethod === 'string' && rawMethod.trim().length > 0) {
+    return rawMethod.trim().toUpperCase()
+  }
+  return 'POST'
+})
+
+const webhookTestState = computed(() => props.editorState?.webhook_test || null)
+const isWebhookListening = computed(() => {
+  if (!props.node || !webhookTestState.value) return false
+  if (webhookTestState.value.step_id) {
+    return webhookTestState.value.step_id === props.node.id
+  }
+  return webhookTestState.value.path === webhookPath.value
+})
+
+const isWebhookListeningElsewhere = computed(() => {
+  if (!props.node || !webhookTestState.value) return false
+  return webhookTestState.value.step_id
+    ? webhookTestState.value.step_id !== props.node.id
+    : webhookTestState.value.path !== webhookPath.value
+})
+
+const webhookUrl = computed(() => {
+  if (!props.node) return ''
+  const path = webhookPath.value
+  const baseUrl = window.location.origin
+  // TODO: Use actual configured path from node config if available
+  // For now assuming the path is part of the URL structure we defined in backend
+  
+  if (webhookMode.value === 'test') {
+    return `${baseUrl}/api/hook-test/${path}` // Draft/Test URL
+  } else {
+    return `${baseUrl}/api/hooks/${path}` // Production URL
+  }
+})
+
+const copyWebhookUrl = () => {
+  navigator.clipboard.writeText(webhookUrl.value)
+  // detailed toast could go here
+}
+
+const toggleWebhookListening = () => {
+  if (!props.node || isWebhookListeningElsewhere.value) return
+  emit('toggle_webhook_test', {
+    action: isWebhookListening.value ? 'stop' : 'start',
+    step_id: props.node.id,
+    path: webhookPath.value,
+    method: webhookMethod.value,
+  })
+}
 </script>
 
 <template>
@@ -286,6 +355,60 @@ const previewValueFor = (fieldKey: string) => {
             <div class="space-y-1">
               <h3 class="text-lg font-semibold text-base-content tracking-tight">Step Configuration</h3>
               <p class="text-xs text-base-content/50 font-medium">Configure the parameters for this operation.</p>
+            </div>
+
+            <!-- Webhook Specific UI -->
+            <div v-if="isWebhookTrigger" class="bg-base-100 border border-base-300 rounded-2xl p-5 space-y-4 shadow-sm">
+              <div class="flex items-center justify-between">
+                 <h4 class="text-sm font-bold text-base-content flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  Webhook URLs
+                 </h4>
+                 <div class="join bg-base-200/50 p-1 rounded-lg">
+                   <button class="join-item btn btn-xs px-3" :class="webhookMode === 'test' ? 'btn-primary' : 'btn-ghost'" @click="webhookMode = 'test'">Test URL</button>
+                   <button class="join-item btn btn-xs px-3" :class="webhookMode === 'production' ? 'btn-neutral' : 'btn-ghost'" @click="webhookMode = 'production'">Production URL</button>
+                 </div>
+              </div>
+
+              <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <span class="badge badge-sm font-mono text-[10px]" :class="webhookMode === 'test' ? 'badge-primary' : 'badge-neutral'">{{ webhookMethod }}</span>
+                </div>
+                <input type="text" readonly :value="webhookUrl" class="input input-sm w-full pl-16 font-mono text-xs bg-base-200/30 border-base-300 text-base-content/70 selection:bg-primary/20" @click="$event.target.select()" />
+                <div class="absolute inset-y-0 right-0 pr-1 flex items-center">
+                   <button class="btn btn-xs btn-ghost btn-square" @click="copyWebhookUrl">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                   </button>
+                </div>
+              </div>
+
+              <div v-if="webhookMode === 'test'" class="space-y-3 pt-2">
+                <div class="flex items-center gap-4">
+                  <button class="btn btn-sm w-full gap-2 shadow-lg"
+                    :class="isWebhookListening ? 'btn-error shadow-error/20' : 'btn-primary shadow-primary/20'"
+                    :disabled="isWebhookListeningElsewhere"
+                    @click="toggleWebhookListening">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" :class="isWebhookListening ? '' : 'animate-pulse'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z" />
+                    </svg>
+                    {{ isWebhookListening ? 'Stop listening' : 'Listen for test event' }}
+                  </button>
+                  <p class="text-[10px] text-base-content/50 leading-tight flex-1">
+                    {{ isWebhookListening ? 'Listening for a test request. Send it to the URL to capture payloads.' : 'Enable a temporary test listener while editing this draft.' }}
+                  </p>
+                </div>
+
+                <div v-if="isWebhookListening" class="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-[11px] text-base-content/70">
+                  Listening for test event. Send a {{ webhookMethod }} request to the Test URL.
+                </div>
+                <div v-else-if="isWebhookListeningElsewhere" class="rounded-xl border border-warning/20 bg-warning/5 px-4 py-3 text-[11px] text-base-content/70">
+                  Another webhook trigger is already listening. Stop it to enable this one.
+                </div>
+              </div>
             </div>
 
             <div class="space-y-6">

@@ -20,6 +20,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
   @idle_timeout :timer.minutes(30)
   @persist_interval :timer.seconds(5)
   @max_op_buffer 1000
+  @webhook_test_timeout :timer.minutes(10)
 
   defmodule State do
     @moduledoc false
@@ -32,7 +33,8 @@ defmodule Imgd.Collaboration.EditSession.Server do
       :applied_ops,
       :dirty,
       :persist_timer,
-      :idle_timer
+      :idle_timer,
+      :webhook_test_timer
     ]
   end
 
@@ -82,6 +84,29 @@ defmodule Imgd.Collaboration.EditSession.Server do
   @doc "Force a persistence of current state and wait for completion."
   def persist_sync(workflow_id) do
     GenServer.call(via_tuple(workflow_id), :persist_sync)
+  end
+
+  @doc "Enable a temporary test webhook listener for a workflow."
+  def enable_test_webhook(workflow_id, attrs) do
+    with {:ok, pid} <- lookup_session_pid(workflow_id) do
+      GenServer.call(pid, {:enable_test_webhook, attrs})
+    end
+  end
+
+  @doc "Disable the active test webhook listener for a workflow."
+  def disable_test_webhook(workflow_id, step_id \\ nil) do
+    with {:ok, pid} <- lookup_session_pid(workflow_id) do
+      GenServer.call(pid, {:disable_test_webhook, step_id})
+    end
+  end
+
+  @doc "Check if a test webhook listener is active for a path and method."
+  def test_webhook_enabled?(workflow_id, path, method) do
+    with {:ok, pid} <- lookup_session_pid(workflow_id) do
+      GenServer.call(pid, {:test_webhook_enabled?, path, method})
+    else
+      _ -> {:error, :not_listening}
+    end
   end
 
   # =============================================================================
@@ -140,6 +165,42 @@ defmodule Imgd.Collaboration.EditSession.Server do
     {:reply, {:ok, state.editor_state}, state}
   end
 
+  def handle_call({:enable_test_webhook, attrs}, _from, state) do
+    case resolve_webhook_test(state.draft, attrs) do
+      {:ok, webhook_test} ->
+        editor_state = EditorState.enable_webhook_test(state.editor_state, webhook_test)
+
+        state =
+          state
+          |> cancel_webhook_test_timer()
+          |> schedule_webhook_test_timer(webhook_test)
+          |> Map.put(:editor_state, editor_state)
+
+        broadcast_editor_state_update(state.workflow_id, editor_state)
+        {:reply, {:ok, webhook_test}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:disable_test_webhook, step_id}, _from, state) do
+    {state, editor_state_changed} = maybe_disable_webhook_test(state, step_id)
+
+    if editor_state_changed do
+      broadcast_editor_state_update(state.workflow_id, state.editor_state)
+    end
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:test_webhook_enabled?, path, method}, _from, state) do
+    case webhook_test_matches?(state.editor_state.webhook_test, path, method) do
+      {:ok, webhook_test} -> {:reply, {:ok, webhook_test}, state}
+      :error -> {:reply, {:error, :not_listening}, state}
+    end
+  end
+
   def handle_call(:persist_sync, _from, state) do
     {result, new_state} = persist_state(state)
     {:reply, result, new_state}
@@ -163,6 +224,16 @@ defmodule Imgd.Collaboration.EditSession.Server do
     {_result, new_state} = persist_state(state)
     persist_timer = Process.send_after(self(), :persist, @persist_interval)
     {:noreply, %{new_state | persist_timer: persist_timer}}
+  end
+
+  def handle_info({:webhook_test_timeout, key}, state) do
+    {state, editor_state_changed} = maybe_disable_webhook_test(state, key)
+
+    if editor_state_changed do
+      broadcast_editor_state_update(state.workflow_id, state.editor_state)
+    end
+
+    {:noreply, state}
   end
 
   def handle_info(:idle_timeout, state) do
@@ -352,6 +423,218 @@ defmodule Imgd.Collaboration.EditSession.Server do
     end
   end
 
+  defp lookup_session_pid(workflow_id) do
+    case Registry.lookup(Imgd.Collaboration.EditSession.Registry, workflow_id) do
+      [{pid, _}] -> {:ok, pid}
+      [] -> {:error, :not_found}
+    end
+  end
+
+  defp resolve_webhook_test(draft, attrs) do
+    step_id = Map.get(attrs, :step_id) || Map.get(attrs, "step_id")
+    path = Map.get(attrs, :path) || Map.get(attrs, "path")
+    method = Map.get(attrs, :method) || Map.get(attrs, "method")
+    user_id = Map.get(attrs, :user_id) || Map.get(attrs, "user_id")
+
+    case find_webhook_step(draft, step_id, path) do
+      {:ok, step, path_from_step} ->
+        method =
+          normalize_method(
+            Map.get(step.config, "http_method") || Map.get(step.config, :http_method) || method
+          )
+
+        {:ok,
+         %{
+           step_id: step.id,
+           path: path_from_step,
+           method: method,
+           enabled_by: user_id
+         }}
+
+      :error ->
+        normalized_path = normalize_path(path)
+        normalized_method = normalize_method(method)
+
+        if webhook_trigger_exists?(draft, normalized_path, normalized_method) do
+          {:ok,
+           %{
+             step_id: step_id,
+             path: normalized_path,
+             method: normalized_method,
+             enabled_by: user_id
+           }}
+        else
+          {:error, :webhook_not_found}
+        end
+    end
+  end
+
+  defp find_webhook_step(_draft, nil, nil), do: :error
+
+  defp find_webhook_step(draft, step_id, path) do
+    step =
+      Enum.find(draft.steps, fn step ->
+        step.id == step_id && step.type_id == "webhook_trigger"
+      end)
+
+    cond do
+      step ->
+        {:ok, step,
+         normalize_path(Map.get(step.config, "path") || Map.get(step.config, :path) || step.id)}
+
+      true ->
+        normalized_path = normalize_path(path)
+
+        step_by_path =
+          Enum.find(draft.steps, fn step ->
+            step.type_id == "webhook_trigger" &&
+              normalize_path(
+                Map.get(step.config, "path") || Map.get(step.config, :path) || step.id
+              ) ==
+                normalized_path
+          end)
+
+        if step_by_path do
+          {:ok, step_by_path,
+           normalize_path(
+             Map.get(step_by_path.config, "path") || Map.get(step_by_path.config, :path) ||
+               step_by_path.id
+           )}
+        else
+          :error
+        end
+    end
+  end
+
+  defp webhook_trigger_exists?(_draft, nil, _method), do: false
+
+  defp webhook_trigger_exists?(draft, path, method) do
+    trigger_match? =
+      Enum.any?(draft.triggers || [], fn trigger ->
+        trigger_type = Map.get(trigger, :type) || Map.get(trigger, "type")
+        config = Map.get(trigger, :config) || Map.get(trigger, "config") || %{}
+
+        trigger_type in [:webhook, "webhook"] &&
+          normalize_path(Map.get(config, "path") || Map.get(config, :path)) == path &&
+          normalize_method(Map.get(config, "http_method") || Map.get(config, :http_method)) ==
+            method
+      end)
+
+    step_match? =
+      Enum.any?(draft.steps || [], fn step ->
+        step.type_id == "webhook_trigger" &&
+          normalize_path(Map.get(step.config, "path") || step.id) == path &&
+          normalize_method(Map.get(step.config, "http_method")) == method
+      end)
+
+    trigger_match? || step_match?
+  end
+
+  defp webhook_test_matches?(nil, _path, _method), do: :error
+
+  defp webhook_test_matches?(webhook_test, path, method) do
+    normalized_path = normalize_path(path)
+    normalized_method = normalize_method(method)
+
+    if webhook_test.path == normalized_path &&
+         normalize_method(webhook_test.method) == normalized_method do
+      {:ok, webhook_test}
+    else
+      :error
+    end
+  end
+
+  defp normalize_path(nil), do: nil
+
+  defp normalize_path(path) when is_binary(path) do
+    path
+    |> String.trim()
+    |> String.trim_leading("/")
+    |> String.trim_trailing("/")
+    |> case do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_method(nil), do: "POST"
+
+  defp normalize_method(method) when is_binary(method) do
+    method
+    |> String.trim()
+    |> case do
+      "" -> "POST"
+      trimmed -> String.upcase(trimmed)
+    end
+  end
+
+  defp schedule_webhook_test_timer(state, webhook_test) do
+    key = webhook_test_key(webhook_test)
+    timer = Process.send_after(self(), {:webhook_test_timeout, key}, @webhook_test_timeout)
+    %{state | webhook_test_timer: timer}
+  end
+
+  defp cancel_webhook_test_timer(state) do
+    if state.webhook_test_timer do
+      Process.cancel_timer(state.webhook_test_timer)
+    end
+
+    %{state | webhook_test_timer: nil}
+  end
+
+  defp webhook_test_key(%{step_id: step_id}) when is_binary(step_id), do: {:step, step_id}
+  defp webhook_test_key(%{path: path}) when is_binary(path), do: {:path, path}
+  defp webhook_test_key(_), do: :unknown
+
+  defp maybe_disable_webhook_test(state, nil) do
+    do_disable_webhook_test(state, state.editor_state.webhook_test)
+  end
+
+  defp maybe_disable_webhook_test(state, {:step, step_id}) do
+    current = state.editor_state.webhook_test
+
+    if current && current.step_id == step_id do
+      do_disable_webhook_test(state, current)
+    else
+      {state, false}
+    end
+  end
+
+  defp maybe_disable_webhook_test(state, {:path, path}) do
+    current = state.editor_state.webhook_test
+
+    if current && current.path == path do
+      do_disable_webhook_test(state, current)
+    else
+      {state, false}
+    end
+  end
+
+  defp maybe_disable_webhook_test(state, step_id) when is_binary(step_id) do
+    current = state.editor_state.webhook_test
+
+    if current && current.step_id == step_id do
+      do_disable_webhook_test(state, current)
+    else
+      {state, false}
+    end
+  end
+
+  defp maybe_disable_webhook_test(state, _step_id), do: {state, false}
+
+  defp do_disable_webhook_test(state, nil), do: {cancel_webhook_test_timer(state), false}
+
+  defp do_disable_webhook_test(state, _current) do
+    editor_state = EditorState.disable_webhook_test(state.editor_state)
+
+    state =
+      state
+      |> cancel_webhook_test_timer()
+      |> Map.put(:editor_state, editor_state)
+
+    {state, true}
+  end
+
   defp broadcast_editor_state_update(workflow_id, editor_state) do
     PubSub.broadcast_editor_state_updated(workflow_id, editor_state)
   end
@@ -400,7 +683,8 @@ defmodule Imgd.Collaboration.EditSession.Server do
       pinned_outputs: editor_state.pinned_outputs,
       disabled_steps: MapSet.to_list(editor_state.disabled_steps),
       disabled_mode: editor_state.disabled_mode,
-      step_locks: editor_state.step_locks
+      step_locks: editor_state.step_locks,
+      webhook_test: editor_state.webhook_test
     }
   end
 

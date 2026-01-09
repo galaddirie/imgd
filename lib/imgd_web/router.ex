@@ -28,6 +28,7 @@ defmodule ImgdWeb.Router do
     pipe_through :api
 
     match :*, "/hooks/*path", Plugs.WebhookHandler, :handle
+    match :*, "/hook-test/*path", Plugs.WebhookHandler, :handle
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

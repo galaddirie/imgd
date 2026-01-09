@@ -97,6 +97,7 @@ const emit = defineEmits<{
   (e: 'mouse_move', payload: { x: number; y: number; dragging_steps?: Record<string, XYPosition> | null }): void
   (e: 'selection_changed', payload: { step_ids: string[] }): void
   (e: 'preview_expression', payload: { step_id: string; field_key: string; expression: string }): void
+  (e: 'toggle_webhook_test', payload: { step_id: string; action: 'start' | 'stop'; path?: string; method?: string }): void
 }>()
 
 // =============================================================================
@@ -780,8 +781,10 @@ const requestNodeRemoval = (nodeId: string) => {
 
       <StepConfigModal :is-open="store.isConfigModalOpen" :node="selectedNode" :step-type="selectedStepType"
         :execution="execution" :step-executions="stepExecutions" :expression-previews="expressionPreviews"
+        :editor-state="editorState"
         @close="store.closeConfigModal" @save="handleSaveConfig" @delete="handleDeleteStep"
-        @preview_expression="(payload: { step_id: string; field_key: string; expression: string }) => emit('preview_expression', payload)" />
+        @preview_expression="(payload: { step_id: string; field_key: string; expression: string }) => emit('preview_expression', payload)"
+        @toggle_webhook_test="(payload: { step_id: string; action: 'start' | 'stop'; path?: string; method?: string }) => emit('toggle_webhook_test', payload)" />
 
       <ContextMenu :show="store.contextMenu.show" :x="store.contextMenu.x" :y="store.contextMenu.y"
         :items="contextMenuItems" @select="handleContextMenuSelect" @close="closeContextMenu" />

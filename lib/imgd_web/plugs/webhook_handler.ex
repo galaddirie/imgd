@@ -12,66 +12,150 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
   alias Imgd.Executions
   alias Imgd.Workers.ExecutionWorker
   alias Imgd.Accounts.Scope
+  alias Imgd.Collaboration.EditSession.Server, as: EditSessionServer
 
   def init(opts), do: opts
 
   def call(conn, _opts) do
     path_segments = conn.params["path"] || []
+    is_test = conn.request_path =~ ~r{/hook-test/}
     path = Enum.join(path_segments, "/")
     scope = conn.assigns[:current_scope]
 
-    # 1. Try lookup by path first (new way)
-    workflow = Imgd.Workflows.get_active_workflow_by_webhook(path, conn.method)
-
-    # 2. Try lookup by ID if first segment is a UUID (legacy way)
-    workflow =
-      if is_nil(workflow) do
-        case List.first(path_segments) do
-          nil ->
-            nil
-
-          id ->
-            case Ecto.UUID.cast(id) do
-              {:ok, uuid} ->
-                Repo.get(Workflow, uuid)
-
-              _ ->
-                nil
-            end
-        end
-      else
-        workflow
-      end
-
-    case workflow do
-      nil ->
-        send_error(conn, 404, "Workflow not found")
-
-      %Workflow{status: status} when status != :active ->
-        send_error(conn, 403, "Workflow is not active")
-
-      %Workflow{published_version_id: nil} ->
-        send_error(conn, 400, "Workflow is not published")
-
-      %Workflow{status: :active, published_version_id: _pub_id} = workflow ->
-        if Scope.can_view_workflow?(scope, workflow) do
-          # Preload triggers to find the right one
-          workflow = Repo.preload(workflow, :published_version)
-          trigger = find_webhook_trigger(workflow.published_version.triggers)
-          handle_trigger(conn, workflow, scope, trigger)
+    if is_test and not Scope.authenticated?(scope) do
+      send_error(conn, 401, "API key required")
+    else
+      # 1. Try lookup by path first (new way)
+      workflow =
+        if is_test do
+          Imgd.Workflows.get_workflow_by_webhook_draft_path(path, conn.method)
         else
-          send_error(conn, 404, "Workflow not found")
+          Imgd.Workflows.get_active_workflow_by_webhook(path, conn.method)
         end
+
+      # 2. Try lookup by ID if first segment is a UUID (legacy way)
+      workflow =
+        if is_nil(workflow) do
+          case List.first(path_segments) do
+            nil ->
+              nil
+
+            id ->
+              case Ecto.UUID.cast(id) do
+                {:ok, uuid} ->
+                  Repo.get(Workflow, uuid)
+
+                _ ->
+                  nil
+              end
+          end
+        else
+          workflow
+        end
+
+      case workflow do
+        nil ->
+          send_error(conn, 404, "Workflow not found")
+
+        workflow ->
+          cond do
+            # Test mode: triggered from /hook-test/
+            # We implicitly trust the token/path for test webhooks since it comes from the draft config
+            is_test ->
+              workflow = Repo.preload(workflow, :draft)
+
+              if Scope.can_edit_workflow?(scope, workflow) do
+                case EditSessionServer.test_webhook_enabled?(workflow.id, path, conn.method) do
+                  {:ok, _webhook_test} ->
+                    config =
+                      webhook_config_for(
+                        workflow.draft.triggers,
+                        workflow.draft.steps,
+                        path,
+                        conn.method
+                      )
+
+                    handle_trigger(conn, workflow, scope, config, :preview, true)
+
+                  {:error, _reason} ->
+                    send_error(conn, 404, "Test webhook is not enabled")
+                end
+              else
+                send_error(conn, 403, "Access denied")
+              end
+
+            # Production mode checks
+            workflow.status != :active ->
+              send_error(conn, 403, "Workflow is not active")
+
+            is_nil(workflow.published_version_id) ->
+              send_error(conn, 400, "Workflow is not published")
+
+            true ->
+              if Scope.can_view_workflow?(scope, workflow) do
+                # Preload triggers to find the right one
+                workflow = Repo.preload(workflow, :published_version)
+
+                config =
+                  webhook_config_for(
+                    workflow.published_version.triggers,
+                    workflow.published_version.steps,
+                    path,
+                    conn.method
+                  )
+
+                handle_trigger(conn, workflow, scope, config, :production)
+              else
+                send_error(conn, 404, "Workflow not found")
+              end
+          end
+      end
     end
   end
 
-  defp find_webhook_trigger(triggers) do
-    Enum.find(triggers, fn t -> t.type == :webhook end)
+  defp webhook_config_for(triggers, steps, path, method) do
+    normalized_path = normalize_path(path)
+    normalized_method = normalize_method(method)
+
+    trigger =
+      Enum.find(triggers || [], fn trigger ->
+        type = Map.get(trigger, :type) || Map.get(trigger, "type")
+        config = Map.get(trigger, :config) || Map.get(trigger, "config") || %{}
+        config_path = normalize_path(Map.get(config, "path") || Map.get(config, :path))
+
+        config_method =
+          normalize_method(Map.get(config, "http_method") || Map.get(config, :http_method))
+
+        type in [:webhook, "webhook"] &&
+          config_path == normalized_path &&
+          config_method == normalized_method
+      end)
+
+    cond do
+      trigger ->
+        Map.get(trigger, :config) || Map.get(trigger, "config") || %{}
+
+      true ->
+        step =
+          Enum.find(steps || [], fn step ->
+            step.type_id == "webhook_trigger" &&
+              normalize_path(
+                Map.get(step.config, "path") || Map.get(step.config, :path) || step.id
+              ) ==
+                normalized_path &&
+              normalize_method(
+                Map.get(step.config, "http_method") || Map.get(step.config, :http_method)
+              ) ==
+                normalized_method
+          end)
+
+        if step, do: step.config || %{}, else: %{}
+    end
   end
 
-  defp handle_trigger(conn, workflow, scope, trigger) do
-    config = (trigger && trigger.config) || %{}
-    response_mode = Map.get(config, "response_mode", "immediate")
+  defp handle_trigger(conn, workflow, scope, config, execution_type, test_webhook? \\ false) do
+    response_mode =
+      Map.get(config, "response_mode") || Map.get(config, :response_mode) || "immediate"
 
     # 1. Extract payload
     payload = %{
@@ -84,7 +168,7 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
     # 2. Create execution record base attributes
     attrs = %{
       workflow_id: workflow.id,
-      execution_type: :production,
+      execution_type: execution_type,
       trigger: %{
         "type" => "webhook",
         "data" => payload
@@ -100,6 +184,8 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
         # Pass handler PID as ephemeral option
         case Executions.create_execution(scope, attrs) do
           {:ok, execution} ->
+            _ = maybe_disable_test_webhook(test_webhook?, workflow.id)
+
             # Start execution directly (do not use run_sync as it blocks)
             # Pass webhook_handler_pid to Server via Supervisor
             case Imgd.Runtime.Execution.Supervisor.start_execution(execution.id,
@@ -124,6 +210,7 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
       "on_completion" ->
         case Executions.create_execution(scope, attrs) do
           {:ok, execution} ->
+            _ = maybe_disable_test_webhook(test_webhook?, workflow.id)
             ExecutionWorker.run_sync(execution.id)
             # Re-fetch to get output
             execution = Repo.get!(Imgd.Executions.Execution, execution.id)
@@ -140,6 +227,7 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
         # "immediate" or default
         case Executions.create_execution(scope, attrs) do
           {:ok, execution} ->
+            _ = maybe_disable_test_webhook(test_webhook?, workflow.id)
             ExecutionWorker.enqueue(execution.id)
 
             conn
@@ -156,6 +244,45 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
             handle_creation_error(conn, reason)
         end
     end
+  end
+
+  defp maybe_disable_test_webhook(true, workflow_id) do
+    _ = EditSessionServer.disable_test_webhook(workflow_id)
+    :ok
+  end
+
+  defp maybe_disable_test_webhook(false, _workflow_id), do: :ok
+
+  defp normalize_path(nil), do: nil
+
+  defp normalize_path(path) when is_binary(path) do
+    path
+    |> String.trim()
+    |> String.trim_leading("/")
+    |> String.trim_trailing("/")
+    |> case do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_method(nil), do: "POST"
+
+  defp normalize_method(method) when is_binary(method) do
+    method
+    |> String.trim()
+    |> case do
+      "" -> "POST"
+      trimmed -> String.upcase(trimmed)
+    end
+  end
+
+  defp handle_creation_error(conn, :access_denied) do
+    send_error(conn, 403, "Access denied")
+  end
+
+  defp handle_creation_error(conn, :workflow_not_published) do
+    send_error(conn, 400, "Workflow is not published")
   end
 
   defp handle_creation_error(conn, reason) do

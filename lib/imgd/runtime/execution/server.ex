@@ -132,7 +132,7 @@ defmodule Imgd.Runtime.Execution.Server do
     if execution, do: {:ok, execution}, else: {:error, :not_found}
   end
 
-  defp build_runic_workflow(execution, runtime_opts \\ []) do
+  defp build_runic_workflow(execution, runtime_opts) do
     # Hydrate Runic Workflow (from snapshot or build from draft)
     runic_wrk =
       cond do

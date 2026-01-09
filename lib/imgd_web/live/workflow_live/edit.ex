@@ -42,6 +42,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               |> assign(:step_executions, [])
               |> assign(:execution_id, nil)
               |> assign(:expression_previews, %{})
+              |> assign(:webhook_execution_subscribed, false)
 
             # Only set up collaboration when WebSocket is connected
             socket =
@@ -132,6 +133,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     |> assign(:execution, execution)
     |> assign(:execution_id, if(execution, do: execution.id, else: nil))
     |> assign(:step_executions, step_executions)
+    |> maybe_toggle_webhook_subscription(editor_state)
   end
 
   @impl true
@@ -167,6 +169,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:run_test={JS.push("run_test")}
           v-on:cancel_execution={JS.push("cancel_execution")}
           v-on:preview_expression={JS.push("preview_expression")}
+          v-on:toggle_webhook_test={JS.push("toggle_webhook_test")}
           expressionPreviews={@expression_previews}
         />
       </div>
@@ -321,6 +324,45 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   @impl true
+  def handle_event(
+        "toggle_webhook_test",
+        %{"action" => action, "step_id" => step_id} = params,
+        socket
+      ) do
+    workflow_id = socket.assigns.workflow.id
+
+    case action do
+      "start" ->
+        attrs = %{
+          step_id: step_id,
+          path: Map.get(params, "path"),
+          method: Map.get(params, "method"),
+          user_id: socket.assigns.current_user_id
+        }
+
+        case Server.enable_test_webhook(workflow_id, attrs) do
+          {:ok, _} ->
+            {:noreply, socket}
+
+          {:error, reason} ->
+            {:noreply,
+             put_flash(
+               socket,
+               :error,
+               "Unable to enable test webhook: #{format_test_webhook_error(reason)}"
+             )}
+        end
+
+      "stop" ->
+        _ = Server.disable_test_webhook(workflow_id, step_id)
+        {:noreply, socket}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_event("cancel_execution", _params, socket) do
     case socket.assigns.execution do
       %Execution{} = execution ->
@@ -434,6 +476,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   @impl true
   def terminate(_reason, socket) do
     _ = unsubscribe_execution(socket)
+
+    if socket.assigns.webhook_execution_subscribed do
+      ExecutionPubSub.unsubscribe_workflow_executions(socket.assigns.workflow.id)
+    end
+
     :ok
   end
 
@@ -471,7 +518,12 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # Handle editor state updates (pins, disabled steps, locks)
   @impl true
   def handle_info({:editor_state_updated, new_editor_state}, socket) do
-    {:noreply, assign(socket, :editor_state, new_editor_state)}
+    socket =
+      socket
+      |> assign(:editor_state, new_editor_state)
+      |> maybe_toggle_webhook_subscription(new_editor_state)
+
+    {:noreply, socket}
   end
 
   # Handle Phoenix.Presence diff broadcasts
@@ -505,13 +557,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # Handle sync state (for reconnection)
   @impl true
   def handle_info({:sync_state, state}, socket) do
+    editor_state = deserialize_editor_state(state.editor_state, socket.assigns.workflow.id)
+
     socket =
       socket
       |> assign(:workflow, %{socket.assigns.workflow | draft: state.draft})
-      |> assign(
-        :editor_state,
-        deserialize_editor_state(state.editor_state, socket.assigns.workflow.id)
-      )
+      |> assign(:editor_state, editor_state)
+      |> maybe_toggle_webhook_subscription(editor_state)
 
     {:noreply, socket}
   end
@@ -520,6 +572,20 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_info({:execution_event, %{execution_id: execution_id} = event}, socket) do
     if execution_id == socket.assigns.execution_id do
       {:noreply, refresh_execution_from_event(socket, event)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_info(
+        {:execution_started,
+         %Execution{execution_type: :preview, trigger: %Execution.Trigger{type: :webhook}} =
+           execution},
+        socket
+      ) do
+    if webhook_listening?(socket) do
+      {:noreply, switch_to_execution(socket, execution)}
     else
       {:noreply, socket}
     end
@@ -591,6 +657,54 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       {:ok, workflow} -> assign(socket, :workflow, workflow)
       {:error, _} -> socket
     end
+  end
+
+  defp webhook_listening?(socket) do
+    case socket.assigns.editor_state do
+      %EditorState{webhook_test: webhook_test} when not is_nil(webhook_test) -> true
+      _ -> false
+    end
+  end
+
+  defp maybe_toggle_webhook_subscription(socket, %EditorState{} = editor_state) do
+    listening? = not is_nil(editor_state.webhook_test)
+    subscribed? = socket.assigns.webhook_execution_subscribed
+
+    cond do
+      listening? and not subscribed? ->
+        case ExecutionPubSub.subscribe_workflow_executions(
+               socket.assigns.current_scope,
+               socket.assigns.workflow.id
+             ) do
+          :ok -> assign(socket, :webhook_execution_subscribed, true)
+          {:error, _} -> socket
+        end
+
+      not listening? and subscribed? ->
+        ExecutionPubSub.unsubscribe_workflow_executions(socket.assigns.workflow.id)
+        assign(socket, :webhook_execution_subscribed, false)
+
+      true ->
+        socket
+    end
+  end
+
+  defp switch_to_execution(socket, %Execution{} = execution) do
+    socket = unsubscribe_execution(socket)
+    _ = subscribe_execution(socket.assigns.current_scope, execution.id)
+
+    steps =
+      case socket.assigns.workflow.draft do
+        nil -> []
+        draft -> draft.steps || []
+      end
+
+    step_executions = build_initial_step_executions(execution.id, steps)
+
+    socket
+    |> assign(:execution, execution)
+    |> assign(:execution_id, execution.id)
+    |> assign(:step_executions, step_executions)
   end
 
   defp start_preview_execution(socket) do
@@ -845,6 +959,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
+  defp format_test_webhook_error(:webhook_not_found), do: "webhook trigger not found"
+  defp format_test_webhook_error(:not_found), do: "edit session not running"
+  defp format_test_webhook_error(reason), do: inspect(reason)
+
   defp format_execution_error(:access_denied), do: "access denied"
   defp format_execution_error(:workflow_not_found), do: "workflow not found"
   defp format_execution_error(:workflow_not_published), do: "workflow not published"
@@ -940,7 +1058,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       pinned_outputs: state[:pinned_outputs] || state["pinned_outputs"] || %{},
       disabled_steps: MapSet.new(state[:disabled_steps] || state["disabled_steps"] || []),
       disabled_mode: state[:disabled_mode] || state["disabled_mode"] || %{},
-      step_locks: state[:step_locks] || state["step_locks"] || %{}
+      step_locks: state[:step_locks] || state["step_locks"] || %{},
+      webhook_test: state[:webhook_test] || state["webhook_test"]
     }
   end
 end

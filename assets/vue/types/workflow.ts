@@ -198,6 +198,14 @@ export interface EditorState {
     disabled_steps?: string[]
     disabled_mode?: Record<string, 'skip' | 'exclude'>
     step_locks?: Record<string, string>
+    webhook_test?: WebhookTestState | null
+}
+
+export interface WebhookTestState {
+    step_id?: string
+    path: string
+    method?: string
+    enabled_by?: string
 }
 
 // =============================================================================

@@ -142,14 +142,10 @@ defmodule Imgd.Executions do
         {:error, :workflow_not_found}
 
       workflow ->
-        can_view = Scope.can_view_workflow?(scope, workflow)
-        can_edit = Scope.can_edit_workflow?(scope, workflow)
+        can_create = Scope.can_create_execution?(scope, workflow, execution_type)
 
         cond do
-          execution_type in [:preview, :partial] and not can_edit ->
-            {:error, :access_denied}
-
-          not can_view ->
+          not can_create ->
             {:error, :access_denied}
 
           true ->
