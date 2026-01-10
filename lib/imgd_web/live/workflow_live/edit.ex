@@ -624,7 +624,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_info({event, payload}, socket)
-      when event in [:step_started, :step_completed, :step_failed] do
+      when event in [:step_started, :step_completed, :step_failed, :step_skipped] do
     {:noreply, update_step_executions(socket, event, payload)}
   end
 
@@ -952,6 +952,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   defp default_step_status(:step_started), do: :running
   defp default_step_status(:step_failed), do: :failed
   defp default_step_status(:step_completed), do: :completed
+  defp default_step_status(:step_skipped), do: :skipped
   defp default_step_status(_event), do: :pending
 
   defp upsert_step_execution(step_executions, step_execution) do

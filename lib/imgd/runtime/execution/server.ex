@@ -181,6 +181,7 @@ defmodule Imgd.Runtime.Execution.Server do
           execution_id: execution.id,
           variables: Map.get(execution.metadata, "variables", %{}),
           trigger_data: execution.trigger.data || %{},
+          trigger_type: execution.trigger.type,
           metadata: metadata
         ]
 

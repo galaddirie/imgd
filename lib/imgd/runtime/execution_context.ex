@@ -25,6 +25,7 @@ defmodule Imgd.Runtime.ExecutionContext do
           metadata: map(),
           input: term(),
           trigger: term(),
+          trigger_type: atom() | nil,
           request: map()
         }
 
@@ -37,6 +38,7 @@ defmodule Imgd.Runtime.ExecutionContext do
     metadata: %{},
     input: nil,
     trigger: nil,
+    trigger_type: nil,
     request: %{}
   ]
 
@@ -58,6 +60,7 @@ defmodule Imgd.Runtime.ExecutionContext do
       metadata: Map.get(opts, :metadata, %{}),
       input: Map.get(opts, :input),
       trigger: Map.get(opts, :trigger),
+      trigger_type: Map.get(opts, :trigger_type),
       request: Map.get(opts, :request, %{})
     }
   end

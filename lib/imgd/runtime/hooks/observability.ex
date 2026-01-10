@@ -200,6 +200,10 @@ defmodule Imgd.Runtime.Hooks.Observability do
     duration_us = if start_time, do: System.monotonic_time() - start_time, else: 0
     duration_us = System.convert_time_unit(duration_us, :native, :microsecond)
 
+    # Check if step was skipped via process flag
+    skipped? = Process.get(:imgd_step_skipped, false)
+    Process.delete(:imgd_step_skipped)
+
     # Count output items - splitter steps can produce multiple items
     output_item_count = do_count_output_items(result_fact.value)
 
@@ -214,23 +218,28 @@ defmodule Imgd.Runtime.Hooks.Observability do
         step_name: step_name,
         execution_id: execution_id,
         result_type: get_result_type(result_fact.value),
-        output_item_count: output_item_count
+        output_item_count: output_item_count,
+        skipped: skipped?
       }
     )
 
     completed_at = DateTime.utc_now()
 
     update_result =
-      case get_step_execution_id(workflow, step_name) do
-        nil ->
-          Executions.record_step_execution_completed_by_step(
-            execution_id,
-            step_name,
-            result_fact.value
-          )
+      if skipped? do
+        Executions.record_step_execution_skipped_by_step(execution_id, step_name)
+      else
+        case get_step_execution_id(workflow, step_name) do
+          nil ->
+            Executions.record_step_execution_completed_by_step(
+              execution_id,
+              step_name,
+              result_fact.value
+            )
 
-        step_execution_id ->
-          Executions.record_step_execution_completed_by_id(step_execution_id, result_fact.value)
+          step_execution_id ->
+            Executions.record_step_execution_completed_by_id(step_execution_id, result_fact.value)
+        end
       end
 
     completed_at =
@@ -253,7 +262,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
       %{
         execution_id: execution_id,
         step_id: step_name,
-        status: :completed,
+        status: if(skipped?, do: :skipped, else: :completed),
         output_data: sanitize_for_broadcast(result_fact.value),
         output_item_count: output_item_count,
         duration_us: duration_us,
@@ -262,7 +271,13 @@ defmodule Imgd.Runtime.Hooks.Observability do
       |> maybe_put_step_type(step_type_id)
 
     Logger.debug("Broadcasting step_completed", payload: payload)
-    Imgd.Executions.PubSub.broadcast_step(:step_completed, execution_id, nil, payload)
+
+    Imgd.Executions.PubSub.broadcast_step(
+      if(skipped?, do: :step_skipped, else: :step_completed),
+      execution_id,
+      nil,
+      payload
+    )
 
     workflow
   end

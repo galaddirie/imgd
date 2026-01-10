@@ -654,15 +654,15 @@ defmodule ImgdWeb.ExecutionLive.Show do
         :completed_at,
         :expires_at,
         :metadata,
-        :runic_log,
+        # :runic_log,
         :triggered_by_user_id,
         :inserted_at,
         :updated_at
       ])
 
     Map.merge(base, %{
-      runic_snapshot_base64: encode_snapshot(runic_snapshot),
-      runic_snapshot_bytes: snapshot_size(runic_snapshot)
+      # runic_snapshot_base64: encode_snapshot(runic_snapshot),
+      # runic_snapshot_bytes: snapshot_size(runic_snapshot)
     })
   end
 

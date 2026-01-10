@@ -76,7 +76,7 @@ defmodule Imgd.Workflows.Workflow do
   # ============================================================================
   # Convenience Functions
   # ============================================================================
-
+  # todo: primary trigger doesnt make sense for multiple triggers
   @doc "Returns the primary trigger step for the workflow, if any."
   def primary_trigger(%__MODULE__{} = workflow) do
     workflow = Imgd.Repo.preload(workflow, :draft)

@@ -516,8 +516,31 @@ defmodule Imgd.Executions do
   end
 
   @doc false
+  @spec record_step_execution_skipped_by_step(Ecto.UUID.t(), String.t()) ::
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | term()}
+  def record_step_execution_skipped_by_step(execution_id, step_id) do
+    case fetch_latest_active_step_execution(execution_id, step_id) do
+      nil ->
+        {:error, :not_found}
+
+      %StepExecution{} = step_execution ->
+        updates = %{
+          status: :skipped,
+          completed_at: DateTime.utc_now()
+        }
+
+        safe_repo(fn ->
+          step_execution
+          |> StepExecution.changeset(updates)
+          |> Repo.update()
+        end)
+    end
+  end
+
+  @doc false
   @spec update_step_execution_metadata(Ecto.UUID.t(), String.t(), map()) ::
           {:ok, StepExecution.t()} | {:error, term()}
+
   def update_step_execution_metadata(execution_id, step_id, metadata) do
     case fetch_latest_active_step_execution(execution_id, step_id) do
       nil ->

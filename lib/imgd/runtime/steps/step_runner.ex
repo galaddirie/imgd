@@ -29,7 +29,8 @@ defmodule Imgd.Runtime.Steps.StepRunner do
           variables: map(),
           metadata: map(),
           step_outputs: map(),
-          trigger_data: map()
+          trigger_data: map(),
+          trigger_type: atom()
         ]
 
   @doc """
@@ -96,6 +97,14 @@ defmodule Imgd.Runtime.Steps.StepRunner do
     end
   end
 
+  # Mapping of trigger step types to their corresponding trigger_type atoms
+  @trigger_type_mapping %{
+    "manual_input" => :manual,
+    "webhook_trigger" => :webhook,
+    "schedule_trigger" => :schedule,
+    "event_trigger" => :event
+  }
+
   @doc """
   Executes a step with full context building and expression evaluation.
 
@@ -110,6 +119,25 @@ defmodule Imgd.Runtime.Steps.StepRunner do
     # Build context from options and input
     ctx = build_context(step, input, opts)
 
+    # Check if this is a non-active trigger that should be skipped
+    if should_skip_trigger?(step.type_id, ctx.trigger_type) do
+      Process.put(:imgd_step_skipped, true)
+      # Pass through the input unchanged
+      input
+    else
+      do_execute(step, input, ctx)
+    end
+  end
+
+  defp should_skip_trigger?(step_type_id, current_trigger_type) do
+    case Map.get(@trigger_type_mapping, step_type_id) do
+      # Not a trigger step, don't skip
+      nil -> false
+      expected_type -> expected_type != current_trigger_type
+    end
+  end
+
+  defp do_execute(step, input, ctx) do
     evaluated_config =
       case evaluate_config(step.config, ctx) do
         {:ok, config} ->
@@ -137,6 +165,8 @@ defmodule Imgd.Runtime.Steps.StepRunner do
         throw({:step_error, step.id, reason})
 
       {:skip, _reason} ->
+        # Signal observability hook that this step was skipped
+        Process.put(:imgd_step_skipped, true)
         # Skip produces nil, which Runic will handle appropriately
         nil
     end
@@ -155,7 +185,8 @@ defmodule Imgd.Runtime.Steps.StepRunner do
       metadata: Keyword.get(opts, :metadata, %{}),
       input: input,
       step_outputs: Keyword.get(opts, :step_outputs, %{}),
-      trigger: Keyword.get(opts, :trigger_data, %{})
+      trigger: Keyword.get(opts, :trigger_data, %{}),
+      trigger_type: Keyword.get(opts, :trigger_type)
     )
   end
 
