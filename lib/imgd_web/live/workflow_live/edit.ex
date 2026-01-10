@@ -778,7 +778,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         execution_id: execution.id,
         metadata: metadata,
         step_outputs: pinned_outputs,
-        trigger_data: execution.trigger.data || %{}
+        trigger_data: execution.trigger.data || %{},
+        trigger_type: execution.trigger.type
       )
 
     snapshot = :erlang.term_to_binary(runic_workflow)
