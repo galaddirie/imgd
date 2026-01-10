@@ -82,11 +82,8 @@ BUGS
 
 - step names from node library should not be uuids - they should be step name + <index if multiple of same type>
 
+- data not being passed between steps correctly ( ex expressions )
+
 webhook test system
-
-- triggers are being marked completed even when they werent the source of the event. 
-- for example if manually run the other triggers should be marked as skipped
-- if a webhook triggers a run, the manual trigger should be marked as skipped
-
 
 - determine risk of api key exposure in webhook trigger outputs
