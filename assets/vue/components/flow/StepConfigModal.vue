@@ -236,6 +236,30 @@ const copyWebhookUrl = () => {
   // detailed toast could go here
 }
 
+const getExpressionFor = (sectionId: string, key: string) => {
+  switch (sectionId) {
+    case 'json':
+      return `{{ json.${key} }}`
+    case 'trigger':
+      return `{{ trigger.${key} }}`
+    case 'variables':
+      return `{{ variables.${key} }}`
+    case 'request':
+      return `{{ request.${key} }}`
+    case 'steps':
+      // For steps, the key is the step_id, and we want to access the json output
+      return `{{ steps["${key}"].json }}`
+    default:
+      return `{{ ${sectionId}.${key} }}`
+  }
+}
+
+const copyExpression = (sectionId: string, key: string) => {
+  const expression = getExpressionFor(sectionId, key)
+  navigator.clipboard.writeText(expression)
+  // Could add toast notification here
+}
+
 const toggleWebhookListening = () => {
   if (!props.node || isWebhookListeningElsewhere.value) return
   emit('toggle_webhook_test', {
@@ -330,10 +354,17 @@ const toggleWebhookListening = () => {
               </button>
               <div v-if="expandedSections[section.id]" class="mt-1 ml-4 pl-2 border-l border-base-200 py-1 space-y-1">
                 <template v-if="Object.keys(section.data || {}).length > 0">
-                  <div v-for="(val, key) in section.data" :key="key" 
+                  <div v-for="(val, key) in section.data" :key="key"
                     class="p-1.5 rounded-lg hover:bg-base-200 group cursor-pointer transition-all">
                     <div class="flex items-center justify-between">
                       <span class="text-[11px] font-mono text-base-content">{{ key }}</span>
+                      <button @click.stop="copyExpression(section.id, key)"
+                        class="opacity-0 group-hover:opacity-100 btn btn-xs btn-ghost btn-square h-4 w-4 transition-opacity"
+                        :title="'Copy expression: ' + getExpressionFor(section.id, key)">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                        </svg>
+                      </button>
                     </div>
                     <div class="text-[10px] text-base-content/40 truncate mt-0.5">{{ JSON.stringify(val) }}</div>
                   </div>
