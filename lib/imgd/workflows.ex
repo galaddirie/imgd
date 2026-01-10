@@ -525,6 +525,66 @@ defmodule Imgd.Workflows do
   end
 
   # ============================================================================
+  # Trigger Functions
+  # ============================================================================
+
+  @trigger_type_ids ["webhook_trigger", "schedule_trigger", "manual_input", "event_trigger"]
+
+  @doc "Returns all trigger steps for the workflow."
+  @spec triggers(Workflow.t()) :: [map()]
+  def triggers(%Workflow{} = workflow) do
+    workflow = Repo.preload(workflow, :draft)
+
+    case workflow.draft do
+      nil -> []
+      draft -> Enum.filter(draft.steps || [], &is_trigger_step?/1)
+    end
+  end
+
+  @doc "Returns all trigger steps of a specific type."
+  @spec triggers_of_type(Workflow.t(), atom() | String.t()) :: [map()]
+  def triggers_of_type(%Workflow{} = workflow, type) do
+    workflow = Repo.preload(workflow, :draft)
+    trigger_type_id = trigger_type_to_step_type_id(type)
+
+    case workflow.draft do
+      nil -> []
+      draft -> Enum.filter(draft.steps || [], &(&1.type_id == trigger_type_id))
+    end
+  end
+
+  @doc "Checks if the workflow has at least one trigger of a specific type."
+  @spec has_trigger_type?(Workflow.t(), atom() | String.t()) :: boolean()
+  def has_trigger_type?(%Workflow{} = workflow, type) do
+    workflow = Repo.preload(workflow, :draft)
+    trigger_type_id = trigger_type_to_step_type_id(type)
+
+    case workflow.draft do
+      nil -> false
+      draft -> Enum.any?(draft.steps || [], &(&1.type_id == trigger_type_id))
+    end
+  end
+
+  @doc "Returns a count of triggers grouped by type."
+  @spec trigger_counts(Workflow.t()) :: %{String.t() => non_neg_integer()}
+  def trigger_counts(%Workflow{} = workflow) do
+    workflow
+    |> triggers()
+    |> Enum.group_by(& &1.type_id)
+    |> Map.new(fn {type_id, steps} -> {type_id, length(steps)} end)
+  end
+
+  defp is_trigger_step?(%{type_id: type_id}) do
+    type_id in @trigger_type_ids
+  end
+
+  defp trigger_type_to_step_type_id(:webhook), do: "webhook_trigger"
+  defp trigger_type_to_step_type_id(:schedule), do: "schedule_trigger"
+  defp trigger_type_to_step_type_id(:manual), do: "manual_input"
+  defp trigger_type_to_step_type_id(:event), do: "event_trigger"
+  defp trigger_type_to_step_type_id(type) when is_binary(type), do: type
+
+  # ============================================================================
   # Private Helpers
   # ============================================================================
 

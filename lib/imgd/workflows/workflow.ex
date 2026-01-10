@@ -72,40 +72,4 @@ defmodule Imgd.Workflows.Workflow do
     ])
     |> validate_required([:name, :user_id])
   end
-
-  # ============================================================================
-  # Convenience Functions
-  # ============================================================================
-  # todo: primary trigger doesnt make sense for multiple triggers
-  @doc "Returns the primary trigger step for the workflow, if any."
-  def primary_trigger(%__MODULE__{} = workflow) do
-    workflow = Imgd.Repo.preload(workflow, :draft)
-
-    case workflow.draft do
-      nil -> nil
-      draft -> Enum.find(draft.steps || [], &is_trigger_step?/1)
-    end
-  end
-
-  # TODO: SUPPORT MULTIPLE TRIGGERS
-  @doc "Checks if the workflow has a specific trigger type."
-  def has_trigger_type?(%__MODULE__{} = workflow, type) do
-    workflow = Imgd.Repo.preload(workflow, :draft)
-    trigger_type_id = trigger_type_to_step_type_id(type)
-
-    case workflow.draft do
-      nil -> false
-      draft -> Enum.any?(draft.steps || [], &(&1.type_id == trigger_type_id))
-    end
-  end
-
-  defp is_trigger_step?(%{type_id: type_id}) do
-    type_id in ["webhook_trigger", "schedule_trigger", "manual_input", "event_trigger"]
-  end
-
-  defp trigger_type_to_step_type_id(:webhook), do: "webhook_trigger"
-  defp trigger_type_to_step_type_id(:schedule), do: "schedule_trigger"
-  defp trigger_type_to_step_type_id(:manual), do: "manual_input"
-  defp trigger_type_to_step_type_id(:event), do: "event_trigger"
-  defp trigger_type_to_step_type_id(type) when is_binary(type), do: type
 end
