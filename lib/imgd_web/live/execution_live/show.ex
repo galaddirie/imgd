@@ -660,10 +660,13 @@ defmodule ImgdWeb.ExecutionLive.Show do
         :updated_at
       ])
 
-    Map.merge(base, %{
-      # runic_snapshot_base64: encode_snapshot(runic_snapshot),
-      # runic_snapshot_bytes: snapshot_size(runic_snapshot)
-    })
+    Map.merge(
+      base,
+      %{
+        # runic_snapshot_base64: encode_snapshot(runic_snapshot),
+        # runic_snapshot_bytes: snapshot_size(runic_snapshot)
+      }
+    )
   end
 
   defp step_execution_raw(step_execution) do
@@ -675,6 +678,7 @@ defmodule ImgdWeb.ExecutionLive.Show do
       :status,
       :input_data,
       :output_data,
+      :output_item_count,
       :error,
       :attempt,
       :retry_of_id,

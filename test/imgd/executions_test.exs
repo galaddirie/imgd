@@ -341,12 +341,35 @@ defmodule Imgd.ExecutionsTest do
 
       assert {:ok, completed} =
                Executions.update_step_execution_status(scope, running, :completed,
-                 output_data: output_data
+                 output_data: output_data,
+                 output_item_count: 5
                )
 
       assert completed.status == :completed
       assert completed.completed_at != nil
       assert completed.output_data == output_data
+      assert completed.output_item_count == 5
+    end
+
+    test "update_step_execution_status/4 persists output_item_count", %{
+      scope: scope,
+      execution: execution
+    } do
+      step_attrs = %{execution_id: execution.id, step_id: "step1", step_type_id: "input_step"}
+      {:ok, step_execution} = Executions.create_step_execution(scope, step_attrs)
+      {:ok, running} = Executions.update_step_execution_status(scope, step_execution, :running)
+
+      # complete with item count
+      {:ok, completed} =
+        Executions.update_step_execution_status(scope, running, :completed,
+          output_data: %{},
+          output_item_count: 10
+        )
+
+      assert completed.output_item_count == 10
+
+      # verify DB
+      assert Repo.get(Executions.StepExecution, step_execution.id).output_item_count == 10
     end
 
     test "update_step_execution_status/4 handles failed status with error", %{

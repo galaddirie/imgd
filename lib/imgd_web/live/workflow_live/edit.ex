@@ -937,6 +937,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         status: fetch_payload_value(payload, :status) || default_step_status(event),
         input_data: fetch_payload_value(payload, :input_data),
         output_data: fetch_payload_value(payload, :output_data),
+        output_item_count: fetch_payload_value(payload, :output_item_count),
         error: fetch_payload_value(payload, :error),
         attempt: fetch_payload_value(payload, :attempt) || 1,
         queued_at: fetch_payload_value(payload, :queued_at),

@@ -15,6 +15,7 @@ defmodule Imgd.Executions.StepExecution do
              :status,
              :input_data,
              :output_data,
+             :output_item_count,
              :error,
              :attempt,
              :retry_of_id,
@@ -76,6 +77,7 @@ defmodule Imgd.Executions.StepExecution do
     # Data flowing through this step
     field :input_data, :map
     field :output_data, :map
+    field :output_item_count, :integer
     field :error, :map
 
     # Extensible metadata (retry backoff info, queue details, etc.)
@@ -102,6 +104,7 @@ defmodule Imgd.Executions.StepExecution do
       :status,
       :input_data,
       :output_data,
+      :output_item_count,
       :error,
       :metadata,
       :queued_at,

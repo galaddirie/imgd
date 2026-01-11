@@ -432,6 +432,14 @@ defmodule Imgd.Executions do
           updates
         end
 
+      # Add output_item_count if provided
+      updates =
+        if count = Keyword.get(opts, :output_item_count) do
+          Map.put(updates, :output_item_count, count)
+        else
+          updates
+        end
+
       step_execution
       |> StepExecution.changeset(updates)
       |> Repo.update()
@@ -491,7 +499,7 @@ defmodule Imgd.Executions do
   @doc false
   @spec record_step_execution_completed_by_id(Ecto.UUID.t(), term()) ::
           {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | term()}
-  def record_step_execution_completed_by_id(step_execution_id, output_data) do
+  def record_step_execution_completed_by_id(step_execution_id, output_data, opts \\ []) do
     case Repo.get(StepExecution, step_execution_id) do
       nil ->
         {:error, :not_found}
@@ -500,6 +508,7 @@ defmodule Imgd.Executions do
         updates = %{
           status: :completed,
           output_data: Serializer.wrap_for_db(output_data),
+          output_item_count: Keyword.get(opts, :output_item_count),
           completed_at: DateTime.utc_now()
         }
 
@@ -512,9 +521,9 @@ defmodule Imgd.Executions do
   end
 
   @doc false
-  @spec record_step_execution_completed_by_step(Ecto.UUID.t(), String.t(), term()) ::
+  @spec record_step_execution_completed_by_step(Ecto.UUID.t(), String.t(), term(), keyword()) ::
           {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | term()}
-  def record_step_execution_completed_by_step(execution_id, step_id, output_data) do
+  def record_step_execution_completed_by_step(execution_id, step_id, output_data, opts \\ []) do
     case fetch_latest_active_step_execution(execution_id, step_id) do
       nil ->
         {:error, :not_found}
@@ -523,6 +532,7 @@ defmodule Imgd.Executions do
         updates = %{
           status: :completed,
           output_data: Serializer.wrap_for_db(output_data),
+          output_item_count: Keyword.get(opts, :output_item_count),
           completed_at: DateTime.utc_now()
         }
 

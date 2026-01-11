@@ -89,7 +89,7 @@ const outputCount = computed(() => sourceStats.value?.out)
 // Format stats for display
 const statsText = computed(() => {
     const count = outputCount.value
-    if (count === undefined) return ''
+    if (count === undefined || count === null || count === 0 || count === 'undefined' || count === 'null') return null
     return `${count} ${count === 1 ? 'item' : 'items'}`
 })
 
@@ -123,6 +123,10 @@ const textPosition = computed(() => {
         <!-- main stroke -->
         <path :d="path[0]" fill="none" :stroke="`url(#${gradientId})`" stroke-width="2" stroke-linecap="round"
             :marker-end="`url(#arrow-${props.id})`" class="vue-flow__edge-interaction" />
+
+        <!-- Stats text background -->
+        <rect v-if="statsText" :x="textPosition.x - 20" :y="textPosition.y - 6" width="40" height="12"
+            fill="var(--color-base-300)" stroke="none" rx="3" />
 
         <!-- Stats text -->
         <text v-if="statsText" :x="textPosition.x" :y="textPosition.y" text-anchor="middle" dominant-baseline="middle"

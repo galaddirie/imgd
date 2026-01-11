@@ -259,7 +259,7 @@ const nodes = computed<Node<StepNodeData>[]>(() => {
         category: stepType?.category,
         step_kind: stepType?.step_kind,
         status: stepExecution?.status,
-        stats: stepExecution ? { duration_us: stepExecution.duration_us } : undefined,
+        stats: stepExecution ? { duration_us: stepExecution.duration_us, out: stepExecution.output_item_count } : undefined,
         hasInput: stepType?.step_kind !== 'trigger',
         hasOutput: true,
         disabled: isDisabled,

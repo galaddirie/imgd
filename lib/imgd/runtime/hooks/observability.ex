@@ -253,7 +253,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
       step_type_id: step_type_id,
       duration_us: duration_us,
       started_at: started_at,
-      completed_at: DateTime.utc_now()
+      completed_at: DateTime.utc_now(),
+      output_item_count: output_item_count
     ]
 
     state =
@@ -277,11 +278,14 @@ defmodule Imgd.Runtime.Hooks.Observability do
           Executions.record_step_execution_completed_by_step(
             execution_id,
             original_step_id,
-            result_fact.value
+            result_fact.value,
+            output_item_count: output_item_count
           )
 
         step_execution_id ->
-          Executions.record_step_execution_completed_by_id(step_execution_id, result_fact.value)
+          Executions.record_step_execution_completed_by_id(step_execution_id, result_fact.value,
+            output_item_count: output_item_count
+          )
       end
     end
 

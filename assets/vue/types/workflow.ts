@@ -93,6 +93,7 @@ export interface StepNodeData {
     stats?: {
         duration_us?: number
         bytes?: number
+        out?: number
     }
     hasInput: boolean
     hasOutput: boolean
@@ -164,6 +165,7 @@ export interface StepExecution {
     status: StepExecutionStatus
     input_data?: Record<string, unknown>
     output_data?: Record<string, unknown>
+    output_item_count?: number
     error?: string
     attempt: number
     retry_of_id?: string
