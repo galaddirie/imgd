@@ -367,6 +367,8 @@ const selectedStepType = computed<StepType | null>(() => {
 const selectedCount = computed(() => getSelectedNodes.value.length)
 const tidyLabel = computed(() => selectedCount.value > 1 ? 'Tidy Up Selection' : 'Tidy Up Workflow')
 
+const isExecutionFailed = computed(() => props.execution?.status === 'failed')
+
 // Filter out current user from presences for cursor display
 const otherUserPresences = computed(() => {
   return props.presences.filter(p => p.user.id !== props.currentUserId)
@@ -763,6 +765,13 @@ const requestNodeRemoval = (nodeId: string) => {
             <Controls position="bottom-right" />
             <MiniMap position="bottom-left" />
           </VueFlow>
+
+          <!-- Execution Failure Overlay -->
+          <div
+            v-if="isExecutionFailed"
+            class="absolute inset-0 pointer-events-none z-40 transition-opacity duration-1000 ease-out opacity-100"
+            style="background: radial-gradient(ellipse at center, transparent 70%, rgba(239, 68, 68, 0.04) 90%, rgba(239, 68, 68, 0.06) 100%);"
+          ></div>
 
           <!-- Collaborative Cursors - rendered in overlay with viewport transform -->
           <!-- We move it back to manual sync because direct nesting in VueFlow slots can break in LiveVue SSR -->
