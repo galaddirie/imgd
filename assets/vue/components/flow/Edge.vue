@@ -42,7 +42,7 @@ const path = computed<string[]>(() => getBezierPath(props) as string[])
 const sourceNode = computed(() => nodes.value.find((n) => n.id === props.source))
 const isSelected = computed(() => props.selected || sourceNode.value?.selected)
 
-const statusConfig = computed(() => ({
+const statusConfig = computed<Record<NodeStatus, { color: string }>>(() => ({
     pending: { color: oklchToHex(colorMap.pending) },
     queued: { color: oklchToHex(colorMap.queued) },
     running: { color: oklchToHex(colorMap.running) },
@@ -50,6 +50,7 @@ const statusConfig = computed(() => ({
     failed: { color: oklchToHex(colorMap.failed) },
     skipped: { color: oklchToHex(colorMap.skipped) },
     pinned: { color: oklchToHex(colorMap.pinned) },
+    cancelled: { color: oklchToHex(colorMap.cancelled) },
 }))
 
 const effectiveStatus = computed<NodeStatus>(() => {
