@@ -967,7 +967,17 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
       index ->
         existing = Enum.at(step_executions, index)
-        updated = Map.merge(existing, step_execution)
+
+        # Merge but preserve existing values if new ones are nil
+        updated =
+          Enum.reduce(step_execution, existing, fn {k, v}, acc ->
+            if is_nil(v) do
+              acc
+            else
+              Map.put(acc, k, v)
+            end
+          end)
+
         List.replace_at(step_executions, index, updated)
     end
   end

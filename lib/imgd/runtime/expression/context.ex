@@ -248,12 +248,20 @@ defmodule Imgd.Runtime.Expression.Context do
     |> normalize_map()
   end
 
+  def normalize_value(%{"value" => v}) when map_size(%{"value" => v}) == 1 do
+    normalize_value(v)
+  end
+
   def normalize_value(value) when is_map(value) do
     normalize_map(value)
   end
 
   def normalize_value(value) when is_list(value) do
-    Enum.map(value, &normalize_value/1)
+    # Filter nils and collapse if only one result exists (common in joins)
+    case Enum.reject(value, &is_nil/1) do
+      [single] -> normalize_value(single)
+      filtered -> Enum.map(filtered, &normalize_value/1)
+    end
   end
 
   def normalize_value(value)

@@ -37,6 +37,14 @@ defmodule Imgd.Runtime.Serializer do
     %{"value" => sanitize(value, :preserve_boolean_and_nil)}
   end
 
+  @doc """
+  Sanitizes a value for PubSub broadcasting.
+  Uses the same wrapping logic as wrap_for_db to ensure UI consistency.
+  """
+  def sanitize_for_broadcast(value) do
+    wrap_for_db(value)
+  end
+
   defp do_sanitize(value, atom_mode) when is_atom(value) do
     case atom_mode do
       :string ->

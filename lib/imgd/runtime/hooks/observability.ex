@@ -22,6 +22,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
   require Logger
   alias Runic.Workflow
   alias Imgd.Executions
+  alias Imgd.Runtime.StepExecutionState
 
   @type hook_opts :: [execution_id: String.t(), workflow_id: String.t()]
 
@@ -125,11 +126,16 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp before_step_telemetry(step, workflow, fact, execution_id) do
     step_name = get_step_name(step)
     start_time = System.monotonic_time()
+    started_at = DateTime.utc_now()
     step_type_id = get_step_type_id(step, workflow)
     persisted_step_type_id = step_type_id || "unknown"
 
-    # Store start time for duration calculation
-    workflow = put_step_start_time(workflow, step_name, start_time)
+    # Store start time and input for duration and complete payloads
+    workflow =
+      workflow
+      |> put_step_start_time(step_name, start_time)
+      |> put_step_started_at(step_name, started_at)
+      |> put_step_input_data(step_name, fact.value)
 
     workflow =
       case Executions.record_step_execution_started(
@@ -160,17 +166,13 @@ defmodule Imgd.Runtime.Hooks.Observability do
       }
     )
 
-    payload =
-      %{
-        execution_id: execution_id,
-        step_id: step_name,
-        status: :running,
-        input_data: sanitize_for_broadcast(fact.value),
-        started_at: DateTime.utc_now()
-      }
-      |> maybe_put_step_type(step_type_id)
+    state =
+      StepExecutionState.started(execution_id, step_name, fact.value,
+        step_type_id: step_type_id,
+        started_at: started_at
+      )
 
-    Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, payload)
+    Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, state)
 
     workflow
   end
@@ -223,60 +225,72 @@ defmodule Imgd.Runtime.Hooks.Observability do
       }
     )
 
-    completed_at = DateTime.utc_now()
+    # Retrieve input data if possible (though we should have it from Runic fact)
+    # Runic fact in after_hook is the RESULT of the step, not the input.
+    # We need the input data which was used to start the step.
+    # In Runic, the input to a step is available in the workflow data or the before_hook.
+    # However, our observability hook doesn't easily store the input.
+    # Let's see if we can get it from the workflow metadata where we might have stored it.
 
-    update_result =
+    # Actually, Runic's after_hook receives (step, workflow, result_fact).
+    # The input data is not directly in the after_hook.
+    # We should have stored it in the before_hook if we wanted it here.
+    # Wait, Runic fact.value in before_hook is the input.
+    # In after_hook, result_fact.value is the output.
+
+    # However, our StepExecutionState.completed needs both.
+    # Since we can't easily get input here without storing it in metadata,
+    # let's modify before_step_telemetry to store input in workflow metadata.
+
+    input_data = get_step_input_data(workflow, step_name)
+
+    started_at = get_step_started_at(workflow, step_name)
+
+    state_opts = [
+      step_type_id: step_type_id,
+      duration_us: duration_us,
+      started_at: started_at,
+      completed_at: DateTime.utc_now()
+    ]
+
+    state =
       if skipped? do
-        Executions.record_step_execution_skipped_by_step(execution_id, step_name)
+        StepExecutionState.skipped(execution_id, step_name, input_data, state_opts)
       else
-        case get_step_execution_id(workflow, step_name) do
-          nil ->
-            Executions.record_step_execution_completed_by_step(
-              execution_id,
-              step_name,
-              result_fact.value
-            )
-
-          step_execution_id ->
-            Executions.record_step_execution_completed_by_id(step_execution_id, result_fact.value)
-        end
+        StepExecutionState.completed(
+          execution_id,
+          step_name,
+          input_data,
+          result_fact.value,
+          state_opts
+        )
       end
 
-    completed_at =
-      case update_result do
-        {:ok, step_execution} ->
-          step_execution.completed_at || completed_at
-
-        {:error, reason} ->
-          Logger.warning("Failed to persist step execution completion",
-            execution_id: execution_id,
-            step_id: step_name,
-            reason: inspect(reason)
+    if skipped? do
+      Executions.record_step_execution_skipped_by_step(execution_id, step_name)
+    else
+      case get_step_execution_id(workflow, step_name) do
+        nil ->
+          Executions.record_step_execution_completed_by_step(
+            execution_id,
+            step_name,
+            result_fact.value
           )
 
-          completed_at
+        step_execution_id ->
+          Executions.record_step_execution_completed_by_id(step_execution_id, result_fact.value)
       end
+    end
 
-    # Broadcast event for real-time updates using the standardized PubSub
-    payload =
-      %{
-        execution_id: execution_id,
-        step_id: step_name,
-        status: if(skipped?, do: :skipped, else: :completed),
-        output_data: sanitize_for_broadcast(result_fact.value),
-        output_item_count: output_item_count,
-        duration_us: duration_us,
-        completed_at: completed_at
-      }
-      |> maybe_put_step_type(step_type_id)
-
-    Logger.debug("Broadcasting step_completed", payload: payload)
+    Logger.debug("Broadcasting #{if skipped?, do: "step_skipped", else: "step_completed"}",
+      payload: state
+    )
 
     Imgd.Executions.PubSub.broadcast_step(
       if(skipped?, do: :step_skipped, else: :step_completed),
       execution_id,
       nil,
-      payload
+      state
     )
 
     workflow
@@ -297,11 +311,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
     |> Map.get(:__step_types__, %{})
     |> Map.get(step_name)
   end
-
-  defp maybe_put_step_type(payload, nil), do: payload
-
-  defp maybe_put_step_type(payload, step_type_id),
-    do: Map.put(payload, :step_type_id, step_type_id)
 
   defp preview_value(value) when is_binary(value) do
     if String.length(value) > 100 do
@@ -328,12 +337,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp do_count_output_items([]), do: 0
   defp do_count_output_items(value) when is_list(value), do: length(value)
   defp do_count_output_items(_), do: 1
-
-  defp sanitize_for_broadcast(value) do
-    Imgd.Runtime.Serializer.sanitize(value)
-  rescue
-    _ -> inspect(value)
-  end
 
   # Workflow metadata helpers
   defp put_hook_context(workflow, execution_id, workflow_id) do
@@ -366,6 +369,28 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp get_step_execution_id(workflow, step_name) do
     workflow
     |> Map.get(:__step_exec_ids__, %{})
+    |> Map.get(step_name)
+  end
+
+  defp put_step_started_at(workflow, step_name, time) do
+    times = Map.get(workflow, :__step_started_ats__, %{})
+    Map.put(workflow, :__step_started_ats__, Map.put(times, step_name, time))
+  end
+
+  defp get_step_started_at(workflow, step_name) do
+    workflow
+    |> Map.get(:__step_started_ats__, %{})
+    |> Map.get(step_name)
+  end
+
+  defp put_step_input_data(workflow, step_name, data) do
+    inputs = Map.get(workflow, :__step_inputs__, %{})
+    Map.put(workflow, :__step_inputs__, Map.put(inputs, step_name, data))
+  end
+
+  defp get_step_input_data(workflow, step_name) do
+    workflow
+    |> Map.get(:__step_inputs__, %{})
     |> Map.get(step_name)
   end
 end

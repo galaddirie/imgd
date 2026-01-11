@@ -122,8 +122,8 @@ defmodule Imgd.Runtime.Steps.StepRunner do
     # Check if this is a non-active trigger that should be skipped
     if should_skip_trigger?(step.type_id, ctx.trigger_type) do
       Process.put(:imgd_step_skipped, true)
-      # Pass through the input unchanged
-      input
+      # Return nil to avoid propagating input from skipped triggers (prevents duplicates in joins)
+      nil
     else
       do_execute(step, input, ctx)
     end
@@ -200,8 +200,11 @@ defmodule Imgd.Runtime.Steps.StepRunner do
   defp evaluate_config(config, _ctx), do: {:ok, config}
 
   defp build_expression_vars(ctx) do
+    normalized_input = Expression.Context.normalize_value(ctx.input)
+
     %{
-      "json" => ctx.input,
+      "json" => normalized_input,
+      "input" => normalized_input,
       "steps" => build_steps_var(ctx.step_outputs),
       "execution" => %{
         "id" => ctx.execution_id

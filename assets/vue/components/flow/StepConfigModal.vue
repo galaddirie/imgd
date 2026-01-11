@@ -10,6 +10,7 @@ import {
   VariableIcon,
   GlobeAltIcon,
 } from '@heroicons/vue/24/outline'
+import { unwrapData, formatDataForDisplay } from '../../lib/dataUtils'
 
 interface NodeData {
   id: string
@@ -143,12 +144,12 @@ const evaluatedConfig = computed(() => {
 const contextData = computed(() => {
   if (!props.execution) return {}
   return {
-    json: activeStepExecution.value?.input_data || {},
+    json: unwrapData(activeStepExecution.value?.input_data) || {},
     trigger: props.execution?.trigger?.data || {},
     variables: props.execution?.metadata?.variables || {},
     request: props.execution?.metadata?.extras?.request || {},
     steps: props.stepExecutions?.reduce((acc: any, se: any) => {
-      acc[se.step_id] = { json: se.output_data }
+      acc[se.step_id] = { json: unwrapData(se.output_data) }
       return acc
     }, {}) || {}
   }
@@ -156,12 +157,19 @@ const contextData = computed(() => {
 
 const explorerData = computed(() => {
   const data = contextData.value
+  
+  const wrapPrimitive = (val: any, key: string) => {
+    if (val === null || val === undefined) return val
+    if (typeof val === 'object' && !Array.isArray(val)) return val
+    return { [key]: val }
+  }
+
   return [
-    { id: 'json', label: 'Current Input', icon: ArrowRightOnRectangleIcon, data: data.json },
-    { id: 'trigger', label: 'Trigger Data', icon: BoltIcon, data: data.trigger },
+    { id: 'json', label: 'Current Input', icon: ArrowRightOnRectangleIcon, data: wrapPrimitive(data.json, 'json') },
+    { id: 'trigger', label: 'Trigger Data', icon: BoltIcon, data: wrapPrimitive(data.trigger, 'trigger') },
     { id: 'steps', label: 'Upstream Steps', icon: CpuChipIcon, data: data.steps },
-    { id: 'variables', label: 'Workflow Variables', icon: VariableIcon, data: data.variables },
-    { id: 'request', label: 'Request Metadata', icon: GlobeAltIcon, data: data.request },
+    { id: 'variables', label: 'Workflow Variables', icon: VariableIcon, data: wrapPrimitive(data.variables, 'variables') },
+    { id: 'request', label: 'Request Metadata', icon: GlobeAltIcon, data: wrapPrimitive(data.request, 'request') },
   ]
 })
 
@@ -236,25 +244,32 @@ const copyWebhookUrl = () => {
   // detailed toast could go here
 }
 
-const getExpressionFor = (sectionId: string, key: string) => {
+const getExpressionFor = (sectionId: string, key?: string) => {
+  if (key === sectionId && sectionId !== 'steps') return `{{ ${sectionId} }}`
+
+  const isNumeric = (val: string) => /^\d+$/.test(val)
+  const formatKey = (k: string) => isNumeric(k) ? `[${k}]` : `.${k}`
+  const path = key ? formatKey(key) : ''
+
   switch (sectionId) {
     case 'json':
-      return `{{ json.${key} }}`
+      return `{{ json${path} }}`
     case 'trigger':
-      return `{{ trigger.${key} }}`
+      return `{{ trigger${path} }}`
     case 'variables':
-      return `{{ variables.${key} }}`
+      return `{{ variables${path} }}`
     case 'request':
-      return `{{ request.${key} }}`
+      return `{{ request${path} }}`
     case 'steps':
-      // For steps, the key is the step_id, and we want to access the json output
+      if (!key) return `{{ steps }}`
+      // If we have a key but it's the root of a step, e.g. steps["StepName"]
       return `{{ steps["${key}"].json }}`
     default:
-      return `{{ ${sectionId}.${key} }}`
+      return `{{ ${sectionId}${path} }}`
   }
 }
 
-const copyExpression = (sectionId: string, key: string) => {
+const copyExpression = (sectionId: string, key?: string) => {
   const expression = getExpressionFor(sectionId, key)
   navigator.clipboard.writeText(expression)
   // Could add toast notification here
@@ -352,23 +367,35 @@ const toggleWebhookListening = () => {
                   <path d="M9 5l7 7-7 7" stroke-width="2" />
                 </svg>
               </button>
-              <div v-if="expandedSections[section.id]" class="mt-1 ml-4 pl-2 border-l border-base-200 py-1 space-y-1">
-                <template v-if="Object.keys(section.data || {}).length > 0">
+              <div v-if="expandedSections[section.id]" class="mt-1 ml-4 pl-2 border-l border-base-200 py-1 space-y-1 text-wrap">
+                <template v-if="section.data && typeof section.data === 'object' && Object.keys(section.data).length > 0">
                   <div v-for="(val, key) in section.data" :key="key"
                     class="p-1.5 rounded-lg hover:bg-base-200 group cursor-pointer transition-all">
                     <div class="flex items-center justify-between">
                       <span class="text-[11px] font-mono text-base-content">{{ key }}</span>
-                      <button @click.stop="copyExpression(section.id, key)"
+                      <button @click.stop="copyExpression(section.id, String(key))"
                         class="opacity-0 group-hover:opacity-100 btn btn-xs btn-ghost btn-square h-4 w-4 transition-opacity"
-                        :title="'Copy expression: ' + getExpressionFor(section.id, key)">
+                        :title="'Copy expression: ' + getExpressionFor(section.id, String(key))">
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
                         </svg>
                       </button>
                     </div>
                     <div class="text-[10px] text-base-content/40 truncate mt-0.5">{{ JSON.stringify(val) }}</div>
                   </div>
                 </template>
+                <div v-else-if="section.data !== undefined && section.data !== null" class="p-1.5 rounded-lg bg-base-300/10 group">
+                   <div class="flex items-center justify-between gap-2">
+                     <div class="text-[10px] text-base-content/60 font-mono truncate flex-1">{{ formatDataForDisplay(section.data) }}</div>
+                     <button @click.stop="copyExpression(section.id)"
+                        class="opacity-0 group-hover:opacity-100 btn btn-xs btn-ghost btn-square h-4 w-4 transition-opacity"
+                        :title="'Copy expression: ' + getExpressionFor(section.id)">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                        </svg>
+                      </button>
+                   </div>
+                </div>
                 <div v-else class="p-2 text-[10px] text-base-content/40 italic">No variables available</div>
               </div>
             </div>
@@ -411,7 +438,7 @@ const toggleWebhookListening = () => {
                 <div class="absolute inset-y-0 right-0 pr-1 flex items-center">
                    <button class="btn btn-xs btn-ghost btn-square" @click="copyWebhookUrl">
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
                     </svg>
                    </button>
                 </div>
@@ -524,19 +551,35 @@ const toggleWebhookListening = () => {
           <div v-else-if="activeTab === 'output'" class="max-w-4xl mx-auto p-4 space-y-8 h-full custom-scrollbar">
             <div v-if="activeStepExecution" class="space-y-8 pb-20">
               <section>
-                <h4 class="text-xs font-bold uppercase tracking-widest text-base-content/40 mb-3">Input Data</h4>
+                <div class="flex items-center justify-between mb-3">
+                  <h4 class="text-xs font-bold uppercase tracking-widest text-base-content/40">Input Data</h4>
+                  <button @click.stop="copyExpression('json')" class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                    Copy Expression
+                  </button>
+                </div>
                 <div class="bg-base-300/30 rounded-2xl p-4 font-mono text-xs overflow-x-auto whitespace-pre">
-                  {{ JSON.stringify(activeStepExecution.input_data, null, 2) }}
+                  {{ formatDataForDisplay(activeStepExecution.input_data) }}
                 </div>
               </section>
 
               <section>
                 <div class="flex items-center justify-between mb-3">
                   <h4 class="text-xs font-bold uppercase tracking-widest text-base-content/40">Output Data</h4>
-                  <span v-if="activeStepExecution.status === 'completed'" class="badge badge-success badge-sm">Success</span>
+                  <div class="flex items-center gap-2">
+                    <button @click.stop="copyExpression('steps', node?.id)" class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                      Copy Expression
+                    </button>
+                    <span v-if="activeStepExecution.status === 'completed'" class="badge badge-success badge-sm">Success</span>
+                  </div>
                 </div>
                 <div class="bg-base-300/30 rounded-2xl p-4 font-mono text-xs overflow-x-auto whitespace-pre border-2 border-success/10">
-                  {{ JSON.stringify(activeStepExecution.output_data, null, 2) }}
+                  {{ formatDataForDisplay(activeStepExecution.output_data) }}
                 </div>
               </section>
 
