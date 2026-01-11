@@ -81,7 +81,7 @@ How would this work in a zero trust environment?
 
 
 
-
+- remove the modal when we click run test 
 
 
 
@@ -97,3 +97,7 @@ merge node will also act as a edit fields node
 webhook test system
 
 - determine risk of api key exposure in webhook trigger outputs
+
+
+
+- when we click on a node, then click on the canvas, then click on the node again, the node opens its step config modal even though we didnt double click on the node or click on it while its selected
