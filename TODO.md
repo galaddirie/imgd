@@ -3,9 +3,7 @@
 ### Core / Platform
 - [ ] build workflow node groups ( basically a sub workflow that can be used as a node in a larger workflow) but without registering it as a workflow in the database. the execution context will be local and nodes in the workflow outside the group will not be able to access the context of the group. except for the final output of the group which will be available to the parent workflow.
 - [ ] Credentials system
-- [x] API keys management
 - [ ] Sub-workflows
-- [x] Add request metadata to expression context ( user id, request id, headers, body, etc)
 - [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)
     - [ ] Add variable trigger nodes (ex. variable changed)
 ### Editor UX
@@ -13,8 +11,6 @@
 - [ ] Add **Publish** button
 - [ ] Unsaved changes indicator + autosave
 - [ ] Undo/redo (unsaved changes remain in session local storage)
-- [x] Add error highlighting to Expression UI
-- [x] Fix edit operations (remove client-side UUID)
 
 
 - [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
@@ -73,8 +69,6 @@ How would this work in a zero trust environment?
 - [ ] Lightweight deployments + easy installs (run full system on a Raspberry Pi)
 
 
-BUGS
-- [x] When initially loading a edit session with previous preview execution data present, we arent able to update the expression preview unless we reun a new execution. the  step config modal shows Resolved Result instead of Live Preview
 
 
 - [ ] investigate how n8n secures its webhook endpoints
@@ -82,7 +76,26 @@ BUGS
 
 - step names from node library should not be uuids - they should be step name + <index if multiple of same type>
 
-- data not being passed between steps correctly ( ex expressions )
+
+- failed executions keeps nodes status as running 
+another example of bad streaming is this output panel section
+
+
+
+
+
+
+
+
+
+- lets test join mechanics 
+
+diamond shape workflow where left side has a wait node + debug node while right side only has debug node before the join at the end with a debug node
+
+
+add merge node - unlike n8n we arent limited to two paths merging and cleaner merge ui and options 
+
+merge node will also act as a edit fields node 
 
 webhook test system
 
