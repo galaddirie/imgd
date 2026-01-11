@@ -38,6 +38,7 @@ import {
     CircleStackIcon,
     VariableIcon,
     PencilIcon,
+    XCircleIcon,
 } from '@heroicons/vue/24/outline'
 
 const props = defineProps<NodeProps<StepNodeData>>()
@@ -90,6 +91,7 @@ const statusIconMap = {
     completed: CheckIcon,
     failed: ExclamationCircleIcon,
     skipped: ForwardIcon,
+    cancelled: XCircleIcon,
     pinned: BookmarkIcon,
 } as const
 
@@ -137,6 +139,11 @@ const statusConfig = computed(() => {
             bg: adjust(colorMap.pinned, isDark ? 20 : 5),
             border: adjust(colorMap.pinned, isDark ? 20 : 5) + 'C0',
             text: isDark ? oklchToHex(lightenColor(colorMap.pinned, 30)) : oklchToHex(darkenColor(colorMap.pinned, 45)),
+        },
+        cancelled: {
+            bg: adjust(colorMap.cancelled, isDark ? 15 : 5),
+            border: adjust(colorMap.cancelled, isDark ? 15 : 5) + 'C0',
+            text: isDark ? oklchToHex(lightenColor(colorMap.cancelled, 20)) : oklchToHex(darkenColor(colorMap.cancelled, 35)),
         },
     }
 })

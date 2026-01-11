@@ -489,6 +489,63 @@ defmodule Imgd.ExecutionsTest do
 
       assert {:error, :not_found} = Executions.get_step_execution(other_scope, step_execution.id)
     end
+
+    test "cancel_active_step_executions/1 cancels all non-terminal steps and broadcasts", %{
+      scope: scope,
+      execution: execution
+    } do
+      # Subscribe to broadcasts
+      Imgd.Executions.PubSub.subscribe_execution(scope, execution.id)
+
+      # Create steps in various states
+      {:ok, running} =
+        Executions.create_step_execution(scope, %{
+          execution_id: execution.id,
+          step_id: "step1",
+          step_type_id: "type1",
+          status: :running
+        })
+
+      {:ok, queued} =
+        Executions.create_step_execution(scope, %{
+          execution_id: execution.id,
+          step_id: "step2",
+          step_type_id: "type1",
+          status: :queued
+        })
+
+      {:ok, pending} =
+        Executions.create_step_execution(scope, %{
+          execution_id: execution.id,
+          step_id: "step3",
+          step_type_id: "type1",
+          status: :pending
+        })
+
+      # Create a terminal step that should NOT be touched
+      {:ok, completed} =
+        Executions.create_step_execution(scope, %{
+          execution_id: execution.id,
+          step_id: "terminal",
+          step_type_id: "type1",
+          status: :completed
+        })
+
+      # Run cancellation
+      assert {3, nil} = Executions.cancel_active_step_executions(execution.id)
+
+      # Verify database state (need to refresh or get from DB)
+      assert Repo.get(Executions.StepExecution, running.id).status == :cancelled
+      assert Repo.get(Executions.StepExecution, queued.id).status == :cancelled
+      assert Repo.get(Executions.StepExecution, pending.id).status == :cancelled
+      assert Repo.get(Executions.StepExecution, completed.id).status == :completed
+
+      # Verify broadcasts
+      assert_receive {:step_cancelled, %{step_id: "step1", status: :cancelled}}
+      assert_receive {:step_cancelled, %{step_id: "step2", status: :cancelled}}
+      assert_receive {:step_cancelled, %{step_id: "step3", status: :cancelled}}
+      refute_receive {:step_cancelled, %{step_id: "terminal"}}
+    end
   end
 
   describe "execution listing and analytics" do

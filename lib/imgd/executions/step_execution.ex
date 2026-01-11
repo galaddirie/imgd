@@ -31,17 +31,18 @@ defmodule Imgd.Executions.StepExecution do
   alias Ecto.Changeset
   alias Imgd.Executions.Execution
 
-  @type status :: :pending | :queued | :running | :completed | :failed | :skipped
+  @type status :: :pending | :queued | :running | :completed | :failed | :skipped | :cancelled
 
-  @statuses [:pending, :queued, :running, :completed, :failed, :skipped]
+  @statuses [:pending, :queued, :running, :completed, :failed, :skipped, :cancelled]
 
   @allowed_transitions %{
-    pending: [:queued, :running, :completed, :failed, :skipped],
-    queued: [:running, :completed, :failed, :skipped],
-    running: [:completed, :failed, :skipped],
+    pending: [:queued, :running, :completed, :failed, :skipped, :cancelled],
+    queued: [:running, :completed, :failed, :skipped, :cancelled],
+    running: [:completed, :failed, :skipped, :cancelled],
     completed: [],
     failed: [],
-    skipped: []
+    skipped: [],
+    cancelled: []
   }
 
   @type t :: %__MODULE__{
@@ -121,8 +122,9 @@ defmodule Imgd.Executions.StepExecution do
   # Convenience functions
 
   @doc "Checks if the step execution is in a terminal state."
-  def terminal?(%__MODULE__{status: status}) when status in [:completed, :failed, :skipped],
-    do: true
+  def terminal?(%__MODULE__{status: status})
+      when status in [:completed, :failed, :skipped, :cancelled],
+      do: true
 
   def terminal?(%__MODULE__{}), do: false
 

@@ -129,6 +129,7 @@ export type StepExecutionStatus =
     | 'completed'
     | 'failed'
     | 'skipped'
+    | 'cancelled'
 
 export interface Execution {
     id: string

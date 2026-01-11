@@ -271,6 +271,50 @@ defmodule Imgd.Executions do
   end
 
   @doc """
+  Cancels all active step executions for an execution.
+
+  An active step is one with status :pending, :queued, or :running.
+  All matched steps will be transitioned to :cancelled.
+  """
+  @spec cancel_active_step_executions(Ecto.UUID.t()) :: {integer(), nil | [term()]}
+  def cancel_active_step_executions(execution_id) do
+    now = DateTime.utc_now()
+
+    query =
+      from se in StepExecution,
+        where: se.execution_id == ^execution_id and se.status in ^@active_step_statuses
+
+    # We use update_all for efficiency, but we need to broadcast events.
+    # In a high-scale system, we might just broadcast one "execution_cancelled" event
+    # and let the UI handle it, but for granularity, we'll fetch and broadcast.
+    active_steps = Repo.all(query)
+
+    result =
+      Repo.update_all(query,
+        set: [
+          status: :cancelled,
+          completed_at: now,
+          updated_at: now
+        ]
+      )
+
+    # Broadcast for each step
+    Enum.each(active_steps, fn step ->
+      payload = %{
+        execution_id: execution_id,
+        step_id: step.step_id,
+        status: :cancelled,
+        completed_at: now,
+        step_type_id: step.step_type_id
+      }
+
+      Imgd.Executions.PubSub.broadcast_step(:step_cancelled, execution_id, nil, payload)
+    end)
+
+    result
+  end
+
+  @doc """
   Lists step executions for an execution.
 
   Returns step executions ordered by insertion time.

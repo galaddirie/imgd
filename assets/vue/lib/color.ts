@@ -60,7 +60,7 @@ export const darkenColor = (oklchColor: string, percent: number): string => {
 };
 
 // Matches Imgd.Executions.StepExecution @statuses
-export type NodeStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'skipped' | 'pinned'
+export type NodeStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'skipped' | 'pinned' | 'cancelled'
 
 // OKLCH colors inspired by Apache Airflow status colors
 export const colorMap: Record<NodeStatus, string> = {
@@ -71,6 +71,7 @@ export const colorMap: Record<NodeStatus, string> = {
   failed: 'oklch(65% 0.300 15)',        // Bright red - execution failed
   skipped: 'oklch(70% 0.120 270)',      // Bright gray - intentionally skipped
   pinned: 'oklch(62.7% 0.5525 293.477)', // Bright purple - pinned/important node
+  cancelled: 'oklch(75% 0.100 0)',      // Gray - cancelled
 };
 
 // Human-readable labels for UI display
@@ -82,4 +83,5 @@ export const statusLabels: Record<NodeStatus, string> = {
   failed: 'Failed',
   skipped: 'Skipped',
   pinned: 'Pinned',
+  cancelled: 'Cancelled',
 };
