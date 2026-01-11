@@ -5,6 +5,7 @@ import type { NodeProps } from '@vue-flow/core'
 import Handle from './Handle.vue'
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '../../lib/color'
 import { useThemeStore } from '../../stores/theme'
+import { useClientStore } from '../../store/clientStore'
 import type { StepNodeData, StepKind } from '../../types/workflow'
 import {
     GlobeAltIcon,
@@ -36,10 +37,12 @@ import {
     BoltIcon,
     CircleStackIcon,
     VariableIcon,
+    PencilIcon,
 } from '@heroicons/vue/24/outline'
 
 const props = defineProps<NodeProps<StepNodeData>>()
 const themeStore = useThemeStore()
+const clientStore = useClientStore()
 
 // Compute effective status (pinned takes precedence for display)
 const effectiveStatus = computed<NodeStatus>(() => {
@@ -257,6 +260,13 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false)
                             <EyeSlashIcon class="size-4 text-base-content/40" />
                         </div>
 
+                        <!-- Edit button -->
+                        <button class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-label="Edit step"
+                            @click.stop="clientStore.openConfigModal(props.id)">
+                            <PencilIcon class="size-4 text-base-content/60" />
+                        </button>
+
                         <!-- Actions menu -->
                         <button class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity"
                             aria-label="Step actions">
@@ -291,9 +301,9 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false)
                     <template v-if="showStats">
                         <ClockIcon class="size-3.5" />
                         <span>{{ formatDuration(data.stats?.duration_us) }}</span>
-                        <template v-if="formatBytes(data.stats?.bytes)">
+                        <template v-if="(data.stats as any)?.bytes">
                             <span class="mx-0.5 text-base-content/40">•</span>
-                            <span>{{ formatBytes(data.stats?.bytes) }}</span>
+                            <span>{{ formatBytes((data.stats as any)?.bytes) }}</span>
                         </template>
                     </template>
                     <!-- Invisible placeholder to maintain consistent height -->

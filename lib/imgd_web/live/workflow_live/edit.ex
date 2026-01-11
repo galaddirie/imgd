@@ -189,10 +189,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         _ -> "Step"
       end
 
+    steps = socket.assigns.workflow.draft.steps || []
+    unique_name = Imgd.Workflows.generate_unique_step_name(steps, step_type_name)
+
     step = %{
       id: UUID.generate(),
       type_id: type_id,
-      name: step_type_name,
+      name: unique_name,
       config: %{},
       position: pos,
       notes: nil
@@ -395,14 +398,15 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
     # Reconstruct context
     steps = socket.assigns.workflow.draft.steps
-    step_id_to_name = Map.new(steps, fn s -> {s.id, s.name} end)
+    step_id_to_slug = Map.new(steps, fn s -> {s.id, Imgd.Workflows.slugify_step_name(s.name)} end)
 
     step_outputs =
       Enum.reduce(step_executions, %{}, fn se, acc ->
+        # Keep both UUID and slug for maximum compatibility during preview
         acc = Map.put(acc, se.step_id, se.output_data)
 
-        if name = step_id_to_name[se.step_id] do
-          Map.put(acc, name, se.output_data)
+        if slug = step_id_to_slug[se.step_id] do
+          Map.put(acc, slug, se.output_data)
         else
           acc
         end
@@ -439,11 +443,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               so =
                 Map.new(full_execution.step_executions, fn se -> {se.step_id, se.output_data} end)
 
-              # Also add name mappings
+              # Also add slug mappings
               so =
                 Enum.reduce(full_execution.step_executions, so, fn se, acc ->
-                  if name = step_id_to_name[se.step_id],
-                    do: Map.put(acc, name, se.output_data),
+                  if slug = step_id_to_slug[se.step_id],
+                    do: Map.put(acc, slug, se.output_data),
                     else: acc
                 end)
 

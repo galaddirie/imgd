@@ -9,6 +9,7 @@ import {
   CpuChipIcon,
   VariableIcon,
   GlobeAltIcon,
+  PencilIcon,
 } from '@heroicons/vue/24/outline'
 import { unwrapData, formatDataForDisplay } from '../../lib/dataUtils'
 
@@ -43,6 +44,8 @@ const activeTab = ref<'config' | 'output' | 'pinned'>('config')
 const fieldModes = ref<Record<string, 'literal' | 'expression'>>({})
 const fieldValues = ref<Record<string, any>>({})
 const searchQuery = ref('')
+const isEditingName = ref(false)
+const editName = ref('')
 
 // Initialize field state when node changes
 watch([() => props.node, () => props.isOpen], ([newNode, open]) => {
@@ -59,6 +62,8 @@ watch([() => props.node, () => props.isOpen], ([newNode, open]) => {
 
     fieldModes.value = modes
     fieldValues.value = values
+    editName.value = newNode.data.name || ''
+    isEditingName.value = false
   }
 }, { immediate: true })
 
@@ -82,6 +87,7 @@ const closeModal = () => emit('close')
 const saveConfig = () => {
   emit('save', {
     id: props.node?.id,
+    name: editName.value,
     config: { ...fieldValues.value }
   })
   closeModal()
@@ -243,6 +249,14 @@ const copyWebhookUrl = () => {
   navigator.clipboard.writeText(webhookUrl.value)
   // detailed toast could go here
 }
+const slugify = (text: string) => {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .trim()
+}
 
 const getExpressionFor = (sectionId: string, key?: string) => {
   if (key === sectionId && sectionId !== 'steps') return `{{ ${sectionId} }}`
@@ -262,8 +276,10 @@ const getExpressionFor = (sectionId: string, key?: string) => {
       return `{{ request${path} }}`
     case 'steps':
       if (!key) return `{{ steps }}`
-      // If we have a key but it's the root of a step, e.g. steps["StepName"]
-      return `{{ steps["${key}"].json }}`
+      // If we are referring to a step, use its slugified name
+      // If it's the current node, we use the potentially updated editName
+      const stepName = key === props.node?.id ? editName.value : (props.node?.data.name || '')
+      return `{{ steps["${slugify(stepName)}"].json }}`
     default:
       return `{{ ${sectionId}${path} }}`
   }
@@ -305,7 +321,25 @@ const toggleWebhookListening = () => {
           </div>
           <div>
             <div class="flex items-center gap-2">
-              <h2 class="text-lg font-bold text-base-content leading-none">{{ node?.data.name }}</h2>
+              <div v-if="isEditingName" class="flex items-center gap-2">
+                <input
+                  v-model="editName"
+                  type="text"
+                  class="input input-sm input-primary bg-base-100 border-base-300 font-bold text-lg"
+                  @keyup.enter="isEditingName = false"
+                  @blur="isEditingName = false"
+                  auto-focus
+                />
+              </div>
+              <h2 v-else class="text-lg font-bold text-base-content leading-none group/name flex items-center gap-2">
+                {{ editName }}
+                <button
+                  class="btn btn-ghost btn-xs btn-circle opacity-0 group-hover/name:opacity-100 transition-opacity"
+                  @click="isEditingName = true"
+                >
+                  <PencilIcon class="size-3.5 text-base-content/40" />
+                </button>
+              </h2>
               <span class="badge badge-primary badge-sm font-mono opacity-80">{{ node?.id.slice(0, 8) }}</span>
             </div>
             <p class="text-xs text-base-content/50 mt-1 font-medium flex items-center gap-1.5">
@@ -434,7 +468,7 @@ const toggleWebhookListening = () => {
                 <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <span class="badge badge-sm font-mono text-[10px]" :class="webhookMode === 'test' ? 'badge-primary' : 'badge-neutral'">{{ webhookMethod }}</span>
                 </div>
-                <input type="text" readonly :value="webhookUrl" class="input input-sm w-full pl-16 font-mono text-xs bg-base-200/30 border-base-300 text-base-content/70 selection:bg-primary/20" @click="$event.target.select()" />
+                <input type="text" readonly :value="webhookUrl" class="input input-sm w-full pl-16 font-mono text-xs bg-base-200/30 border-base-300 text-base-content/70 selection:bg-primary/20" @click="($event.target as HTMLInputElement).select()" />
                 <div class="absolute inset-y-0 right-0 pr-1 flex items-center">
                    <button class="btn btn-xs btn-ghost btn-square" @click="copyWebhookUrl">
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">

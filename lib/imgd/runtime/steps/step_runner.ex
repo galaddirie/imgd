@@ -76,7 +76,7 @@ defmodule Imgd.Runtime.Steps.StepRunner do
               throw({:step_error, step.id, {:compute_error, reason}})
           end
         end,
-        name: step.id
+        name: Imgd.Workflows.slugify_step_name(step.name)
       )
 
     # Ensure unique hash for programmatic steps to avoid graph vertex collisions

@@ -92,6 +92,7 @@ export interface StepNodeData {
     status?: StepExecutionStatus
     stats?: {
         duration_us?: number
+        bytes?: number
     }
     hasInput: boolean
     hasOutput: boolean

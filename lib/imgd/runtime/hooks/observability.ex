@@ -130,6 +130,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
     step_type_id = get_step_type_id(step, workflow)
     persisted_step_type_id = step_type_id || "unknown"
 
+    original_step_id = get_original_step_id(step, workflow)
+
     # Store start time and input for duration and complete payloads
     workflow =
       workflow
@@ -140,7 +142,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
     workflow =
       case Executions.record_step_execution_started(
              execution_id,
-             step_name,
+             original_step_id,
              persisted_step_type_id,
              fact.value
            ) do
@@ -167,7 +169,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
     )
 
     state =
-      StepExecutionState.started(execution_id, step_name, fact.value,
+      StepExecutionState.started(execution_id, original_step_id, fact.value,
         step_type_id: step_type_id,
         started_at: started_at
       )
@@ -196,6 +198,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp after_step_telemetry(step, workflow, result_fact, execution_id) do
     step_name = get_step_name(step)
     step_type_id = get_step_type_id(step, workflow)
+    original_step_id = get_original_step_id(step, workflow)
 
     # Calculate duration
     start_time = get_step_start_time(workflow, step_name)
@@ -255,11 +258,11 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
     state =
       if skipped? do
-        StepExecutionState.skipped(execution_id, step_name, input_data, state_opts)
+        StepExecutionState.skipped(execution_id, original_step_id, input_data, state_opts)
       else
         StepExecutionState.completed(
           execution_id,
-          step_name,
+          original_step_id,
           input_data,
           result_fact.value,
           state_opts
@@ -267,13 +270,13 @@ defmodule Imgd.Runtime.Hooks.Observability do
       end
 
     if skipped? do
-      Executions.record_step_execution_skipped_by_step(execution_id, step_name)
+      Executions.record_step_execution_skipped_by_step(execution_id, original_step_id)
     else
       case get_step_execution_id(workflow, step_name) do
         nil ->
           Executions.record_step_execution_completed_by_step(
             execution_id,
-            step_name,
+            original_step_id,
             result_fact.value
           )
 
@@ -304,12 +307,22 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp get_step_name(%{name: name}) when is_atom(name), do: Atom.to_string(name)
   defp get_step_name(_), do: "unknown"
 
-  defp get_step_type_id(step, workflow) do
+  defp get_step_metadata(step, workflow) do
     step_name = get_step_name(step)
 
     workflow
-    |> Map.get(:__step_types__, %{})
-    |> Map.get(step_name)
+    # LiveView snapshot hack
+    |> Map.get(:__changed__, %{})
+    |> Map.get(:__step_metadata__, workflow |> Map.get(:__step_metadata__, %{}))
+    |> Map.get(step_name, %{})
+  end
+
+  defp get_step_type_id(step, workflow) do
+    get_step_metadata(step, workflow)[:type_id]
+  end
+
+  defp get_original_step_id(step, workflow) do
+    get_step_metadata(step, workflow)[:step_id] || get_step_name(step)
   end
 
   defp preview_value(value) when is_binary(value) do

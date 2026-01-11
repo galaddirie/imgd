@@ -74,11 +74,8 @@ How would this work in a zero trust environment?
 - [ ] investigate how n8n secures its webhook endpoints
 
 
-- step names from node library should not be uuids - they should be step name + <index if multiple of same type>
 
-
-- failed executions keeps nodes status as running 
-another example of bad streaming is this output panel section
+- failed executions keeps nodes status as running which can be confusing 
 
 
 

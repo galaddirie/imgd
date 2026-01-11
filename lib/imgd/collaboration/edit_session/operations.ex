@@ -226,6 +226,18 @@ defmodule Imgd.Collaboration.EditSession.Operations do
     step_id = field(payload, :step_id)
     changes = field(payload, :changes)
 
+    # Handle name uniqueness if it's changing
+    changes =
+      case Map.get(changes, "name") || Map.get(changes, :name) do
+        nil ->
+          changes
+
+        new_name ->
+          other_steps = Enum.reject(draft.steps || [], &(&1.id == step_id))
+          unique_name = Imgd.Workflows.generate_unique_step_name(other_steps, new_name)
+          Map.put(changes, :name, unique_name)
+      end
+
     update_step(draft, step_id, fn step ->
       step
       |> maybe_update(:name, changes)

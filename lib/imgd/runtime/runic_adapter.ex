@@ -79,16 +79,20 @@ defmodule Imgd.Runtime.RunicAdapter do
     # Build lookup for parent relationships
     parent_lookup = build_parent_lookup(source.connections)
 
+    # Build lookup for step_id to slug
+    step_id_to_slug =
+      Map.new(source.steps, fn s -> {s.id, Imgd.Workflows.slugify_step_name(s.name)} end)
+
     # Sort steps topologically to ensure parents are added before children
     sorted_steps = topological_sort_steps(source.steps, source.connections)
 
     # Add each step as a Runic component
     wrk =
       Enum.reduce(sorted_steps, wrk, fn step, acc ->
-        add_step_to_workflow(step, acc, parent_lookup, step_opts)
+        add_step_to_workflow(step, acc, parent_lookup, step_id_to_slug, step_opts)
       end)
 
-    put_step_types(wrk, source.steps)
+    put_step_metadata(wrk, source.steps, step_id_to_slug)
   end
 
   @doc """
@@ -96,23 +100,24 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   Dispatches to the appropriate Runic primitive based on step type.
   """
-  @spec create_component(Imgd.Workflows.Embeds.Step.t(), build_opts()) :: term()
-  def create_component(step, opts \\ []) do
+  @spec create_component(Imgd.Workflows.Embeds.Step.t(), String.t(), build_opts()) :: term()
+  def create_component(step, slug, opts \\ []) do
     case step.type_id do
       "splitter" ->
-        create_splitter(step, opts)
+        create_splitter(step, slug)
 
       "aggregator" ->
-        create_aggregator(step, opts)
+        create_aggregator(step, slug)
 
       "condition" ->
-        create_condition(step, opts)
+        create_condition(step, slug, opts)
 
       "switch" ->
-        create_switch(step, opts)
+        create_switch(step, slug, opts)
 
       _ ->
         # Default: create a Runic step via StepRunner
+        # Ensure we pass the explicit slug to StepRunner if it doesn't already handle it
         StepRunner.create(step, opts)
     end
   end
@@ -121,8 +126,9 @@ defmodule Imgd.Runtime.RunicAdapter do
   # Private: Workflow Building
   # ===========================================================================
 
-  defp add_step_to_workflow(step, workflow, parent_lookup, step_opts) do
-    component = create_component(step, step_opts)
+  defp add_step_to_workflow(step, workflow, parent_lookup, step_id_to_slug, step_opts) do
+    slug = Map.fetch!(step_id_to_slug, step.id)
+    component = create_component(step, slug, step_opts)
 
     parent_ids =
       parent_lookup
@@ -135,10 +141,12 @@ defmodule Imgd.Runtime.RunicAdapter do
         Workflow.add(workflow, component)
 
       [parent_id] ->
-        Workflow.add(workflow, component, to: parent_id)
+        parent_slug = Map.fetch!(step_id_to_slug, parent_id)
+        Workflow.add(workflow, component, to: parent_slug)
 
       _ ->
-        {workflow, join} = ensure_join(workflow, parent_ids)
+        parent_slugs = Enum.map(parent_ids, &Map.fetch!(step_id_to_slug, &1))
+        {workflow, join} = ensure_join(workflow, parent_slugs)
         Workflow.add(workflow, component, to: join)
     end
   end
@@ -202,42 +210,36 @@ defmodule Imgd.Runtime.RunicAdapter do
     end
   end
 
-  defp put_step_types(workflow, steps) when is_list(steps) do
-    step_types =
+  defp put_step_metadata(workflow, steps, step_id_to_slug) when is_list(steps) do
+    step_metadata =
       Enum.reduce(steps, %{}, fn step, acc ->
-        step_id = Map.get(step, :id)
-        step_type_id = Map.get(step, :type_id)
-
-        if step_id && step_type_id do
-          Map.put(acc, step_id, step_type_id)
-        else
-          acc
-        end
+        slug = Map.fetch!(step_id_to_slug, step.id)
+        Map.put(acc, slug, %{type_id: step.type_id, step_id: step.id})
       end)
 
-    Map.put(workflow, :__step_types__, step_types)
+    Map.put(workflow, :__step_metadata__, step_metadata)
   end
 
-  defp put_step_types(workflow, _steps), do: workflow
+  defp put_step_metadata(workflow, _steps, _), do: workflow
 
   # ===========================================================================
   # Private: Component Creation
   # ===========================================================================
 
-  defp create_splitter(step, _opts) do
+  defp create_splitter(step, slug) do
     # Splitter creates a Runic.map that iterates over the input collection
     # The inner step passes each item through unchanged (for downstream processing)
     Runic.map(
       fn item -> item end,
-      name: step.id
+      name: slug
     )
   end
 
-  defp create_aggregator(step, _opts) do
+  defp create_aggregator(step, slug) do
     # Aggregator creates a Runic.reduce
     # Note: Runic.reduce is a macro that requires inline anonymous functions
     operation = Map.get(step.config, "operation", "collect")
-    name = step.id
+    name = slug
 
     case operation do
       "sum" ->
@@ -288,18 +290,18 @@ defmodule Imgd.Runtime.RunicAdapter do
     end
   end
 
-  defp create_condition(step, opts) do
+  defp create_condition(step, slug, opts) do
     # Condition creates a Runic.rule
     condition_expr = Map.get(step.config, "condition", "true")
 
     Runic.rule(
-      name: step.id,
+      name: slug,
       if: fn input -> evaluate_condition(condition_expr, input, opts) end,
       do: fn input -> input end
     )
   end
 
-  defp create_switch(step, opts) do
+  defp create_switch(step, slug, opts) do
     # Switch creates multiple rules, but for now we create a step that
     # outputs a tagged tuple for routing
     StepRunner.create(step, opts)

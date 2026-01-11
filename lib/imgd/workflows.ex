@@ -585,6 +585,42 @@ defmodule Imgd.Workflows do
   defp trigger_type_to_step_type_id(type) when is_binary(type), do: type
 
   # ============================================================================
+  # Naming Logic
+  # ============================================================================
+
+  @doc """
+  Generates a unique display name for a step in a workflow.
+  Handles "Name", "Name 2", "Name 3" etc.
+  """
+  @spec generate_unique_step_name([map()], String.t()) :: String.t()
+  def generate_unique_step_name(existing_steps, base_name) do
+    existing_names =
+      existing_steps
+      |> Enum.map(& &1.name)
+      |> MapSet.new()
+
+    do_generate_unique_name(existing_names, base_name, 1)
+  end
+
+  defp do_generate_unique_name(existing_names, name, index) do
+    candidate = if index == 1, do: name, else: "#{name} #{index}"
+
+    if MapSet.member?(existing_names, candidate) do
+      do_generate_unique_name(existing_names, name, index + 1)
+    else
+      candidate
+    end
+  end
+
+  @doc """
+  Converts a display name into a slug for use as an execution key.
+  """
+  @spec slugify_step_name(String.t()) :: String.t()
+  def slugify_step_name(name) do
+    Imgd.Runtime.Expression.Filters.slugify(name)
+  end
+
+  # ============================================================================
   # Private Helpers
   # ============================================================================
 
