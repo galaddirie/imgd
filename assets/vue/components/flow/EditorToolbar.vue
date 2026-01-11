@@ -152,13 +152,6 @@ const hasErrors = computed(() => props.validationErrors.length > 0)
         {{ isSaving ? 'Saving...' : 'Save' }}
       </button>
 
-      <!-- Run Test Button -->
-      <button
-        class="btn btn-sm btn-primary rounded-xl px-6 flex gap-2 font-semibold shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95 text-sm"
-        @click="emit('run-test')">
-        <PlayCircleIcon class="h-5 w-5" />
-        Run Test
-      </button>
     </div>
   </header>
 </template>

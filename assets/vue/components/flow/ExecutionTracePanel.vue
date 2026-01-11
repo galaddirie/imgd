@@ -208,15 +208,8 @@ const selectStep = (stepId: string) => {
             <StopIcon class="w-4 h-4" />
             Cancel
           </button>
-          <button v-else class="btn btn-ghost btn-xs gap-1" @click="emit('runTest')">
-            <PlayIcon class="w-4 h-4" />
-            Run Test
-          </button>
         </div>
 
-        <button class="btn btn-ghost btn-xs btn-circle hover:bg-error/10 hover:text-error" @click.stop="emit('close')">
-          <XMarkIcon class="h-4 w-4" />
-        </button>
       </div>
     </div>
 

@@ -773,6 +773,18 @@ const requestNodeRemoval = (nodeId: string) => {
           </div>
         </div>
 
+        <!-- Execute Workflow Button Overlay -->
+        <div
+          class="absolute left-1/2 transform -translate-x-1/2 z-50 pointer-events-auto transition-all duration-300 ease-in-out"
+          :class="store.isTracePanelExpanded ? 'bottom-96' : 'bottom-16'">
+          <button
+            class="btn btn-primary rounded-xl px-8 py-3 flex gap-2 font-semibold shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95 text-base"
+            @click="handleRunTest">
+            <PlayIcon class="h-6 w-6" />
+            Execute Workflow
+          </button>
+        </div>
+
         <ExecutionTracePanel :execution="execution" :step-executions="stepExecutions"
           :is-expanded="store.isTracePanelExpanded" @toggle="store.toggleTracePanel"
           @close="store.isTracePanelExpanded = false" @select-step="selectTraceStep" @run-test="handleRunTest"
