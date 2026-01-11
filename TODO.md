@@ -81,8 +81,7 @@ How would this work in a zero trust environment?
 
 
 
-- remove the modal when we click run test 
-
+- we should throw a error tool tip on workflow/step error 
 
 
 - lets test join mechanics 
@@ -100,4 +99,24 @@ webhook test system
 
 
 
-- when we click on a node, then click on the canvas, then click on the node again, the node opens its step config modal even though we didnt double click on the node or click on it while its selected
+
+
+- when we click on a node, then click on the canvas to deselect it, then click on the node again, the node opens its step config modal even though we didnt double click on the node or click on it while its selected
+
+
+- workflow execution fails are not being broadcasted to the editor ( remains running ) 
+- a node is failing but the execution is also being marked as a fail so the fail is being overrriden as a cancelled step 
+
+for example i purposly have a malformated expression to fail a test 
+
+Template
+Hey "{{ json[.body.name }}" at {{ json.body.timestamp}}
+Live Preview
+Draft
+Template Error
+Hey "{{ json[.body.name }}" at {{ json.body.timestamp}}
+            ^
+Argument access expected
+1: Hey "{{ json[.body.name }}" at {{ json.body.timestamp}}
+               ^
+
