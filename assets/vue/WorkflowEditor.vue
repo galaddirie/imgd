@@ -204,6 +204,8 @@ onNodeDrag(handleNodeDrag)
 // Track selection changes and emit to server
 const handleSelectionChange = ({ nodes }: { nodes: Node<StepNodeData>[] }) => {
   const selectedIds = nodes.map(n => n.id)
+  // Update local store selection to match VueFlow's selection
+  store.selectNode(selectedIds.length === 1 ? selectedIds[0] : null)
   emit('selection_changed', { step_ids: selectedIds })
 }
 
@@ -495,11 +497,7 @@ const handleNodeClick = (event: { node: Node<StepNodeData> }) => {
   }
 
   clickTimer.value = setTimeout(() => {
-    if (store.selectedNodeId === node.id) {
-      store.isConfigModalOpen = true
-    } else {
-      store.selectNode(node.id)
-    }
+    store.selectNode(node.id)
     clickTimer.value = null
   }, 250)
 }
