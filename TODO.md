@@ -107,24 +107,6 @@ webhook test system
 - when we click on a node, then click on the canvas to deselect it, then click on the node again, the node opens its step config modal even though we didnt double click on the node or click on it while its selected
 
 
-- workflow execution fails are not being broadcasted to the editor ( status shows running ) 
-
-
-When a node is failing, the execution is also being marked as a fail but then the step status is overrriden as a cancelled status instead of a failed status 
-
-for example i purposly have a malformated expression to fail a test 
-
-Template
-Hey "{{ json[.body.name }}" at {{ json.body.timestamp}}
-Live Preview
-Draft
-Template Error
-Hey "{{ json[.body.name }}" at {{ json.body.timestamp}}
-            ^
-Argument access expected
-1: Hey "{{ json[.body.name }}" at {{ json.body.timestamp}}
-               ^
-
 - i cant right click tooltip on multi selected nodes blue overlay
 
 - update the execute workflow button to show diffrent status ( running, failed, success )
