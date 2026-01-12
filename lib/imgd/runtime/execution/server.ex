@@ -248,9 +248,6 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp handle_failure(state, step_id, reason) do
-    # Cancel any other steps that might be running/pending
-    Executions.cancel_active_step_executions(state.execution_id)
-
     error_map = Execution.format_error({:step_failed, step_id, reason})
     completed_at = DateTime.utc_now()
 
@@ -268,6 +265,9 @@ defmodule Imgd.Runtime.Execution.Server do
 
           nil
       end
+
+    # Cancel any other steps that might be running/pending
+    Executions.cancel_active_step_executions(state.execution_id)
 
     payload =
       %{
