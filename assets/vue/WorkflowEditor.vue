@@ -862,7 +862,7 @@ const requestNodeRemoval = (nodeId: string) => {
 
           <!-- Execute Workflow Button Overlay -->
           <div
-            class="absolute left-1/2 bottom-16 transform -translate-x-1/2 z-50 pointer-events-auto transition-all duration-300 ease-in-out">
+            class="absolute left-1/2 bottom-16 transform -translate-x-1/2 z-[1100] pointer-events-auto transition-all duration-300 ease-in-out">
             <button
               class="btn btn-primary rounded-xl px-8 py-3 flex items-center gap-3 font-semibold shadow-lg shadow-primary/20 transition-all text-base"
               :class="[
