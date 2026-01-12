@@ -6,12 +6,15 @@
 - [ ] Sub-workflows
 - [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)
     - [ ] Add variable trigger nodes (ex. variable changed)
+
+- [ ] 
 ### Editor UX
 - [ ] Add **Save** button
 - [ ] Add **Publish** button
 - [ ] Unsaved changes indicator + autosave
 - [ ] Undo/redo (unsaved changes remain in session local storage)
-
+- [ ] we should show the resources used by a execution ( total memory, cpu, etc)
+- [ ] we should show the resources used by a collabrative edit session  ( total memory, cpu, etc)
 
 - [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
 
@@ -104,8 +107,10 @@ webhook test system
 - when we click on a node, then click on the canvas to deselect it, then click on the node again, the node opens its step config modal even though we didnt double click on the node or click on it while its selected
 
 
-- workflow execution fails are not being broadcasted to the editor ( remains running ) 
-- a node is failing but the execution is also being marked as a fail so the fail is being overrriden as a cancelled step 
+- workflow execution fails are not being broadcasted to the editor ( status shows running ) 
+
+
+When a node is failing, the execution is also being marked as a fail but then the step status is overrriden as a cancelled status instead of a failed status 
 
 for example i purposly have a malformated expression to fail a test 
 
@@ -120,3 +125,11 @@ Argument access expected
 1: Hey "{{ json[.body.name }}" at {{ json.body.timestamp}}
                ^
 
+- i cant right click tooltip on multi selected nodes blue overlay
+
+- update the execute workflow button to show diffrent status ( running, failed, success )
+
+
+- update tidy workflow to account for edge labels and node width 
+
+-  sometimes nodes can be diffrent widths, instead of aliigning with the start of the node, align with the end of the node when tidying workflow. it looks nicer
