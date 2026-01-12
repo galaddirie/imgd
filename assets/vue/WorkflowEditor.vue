@@ -513,8 +513,9 @@ const handleNodeDoubleClick = (event: { node: Node<StepNodeData> }) => {
 type SelectionContextMenuEvent = { event: MouseEvent; nodes: GraphNode<StepNodeData>[] }
 
 const findNodeUnderCursor = (event: MouseEvent, nodes: GraphNode<StepNodeData>[]) => {
-  if (!vueFlowRef.value) return null
-  const { left, top } = vueFlowRef.value.getBoundingClientRect()
+  const flowElement = vueFlowRef.value?.vueFlowRef?.value ?? canvasRef.value
+  if (!flowElement) return null
+  const { left, top } = flowElement.getBoundingClientRect()
   const point = project({ x: event.clientX - left, y: event.clientY - top })
 
   return nodes.find(node => {
