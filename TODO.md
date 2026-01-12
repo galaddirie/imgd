@@ -78,18 +78,14 @@ How would this work in a zero trust environment?
 
 
 
-- failed executions keeps nodes status as running which can be confusing 
 
 
 
-
-
-- we should throw a error tool tip on workflow/step error 
 
 
 - lets test join mechanics 
 
-diamond shape workflow where left side has a wait node + debug node while right side only has debug node before the join at the end with a debug node
+diamond shape workflow where left side has a wait node + debug node while right side only has debug node before the join at the end with a debug node to ensure a wait for all behavior
 
 
 add merge node - unlike n8n we arent limited to two paths merging and cleaner merge ui and options 
