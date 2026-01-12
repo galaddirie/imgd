@@ -637,8 +637,6 @@ defmodule ImgdWeb.ExecutionLive.Show do
   end
 
   defp execution_raw(%Execution{} = execution) do
-    runic_snapshot = execution.runic_snapshot
-
     base =
       Map.take(execution, [
         :id,
@@ -660,13 +658,7 @@ defmodule ImgdWeb.ExecutionLive.Show do
         :updated_at
       ])
 
-    Map.merge(
-      base,
-      %{
-        # runic_snapshot_base64: encode_snapshot(runic_snapshot),
-        # runic_snapshot_bytes: snapshot_size(runic_snapshot)
-      }
-    )
+    base
   end
 
   defp step_execution_raw(step_execution) do
@@ -719,12 +711,4 @@ defmodule ImgdWeb.ExecutionLive.Show do
   end
 
   defp fetch_metadata_list(_extras, _key), do: []
-
-  defp encode_snapshot(nil), do: nil
-  defp encode_snapshot(snapshot) when is_binary(snapshot), do: Base.encode64(snapshot)
-  defp encode_snapshot(_snapshot), do: nil
-
-  defp snapshot_size(nil), do: 0
-  defp snapshot_size(snapshot) when is_binary(snapshot), do: byte_size(snapshot)
-  defp snapshot_size(_snapshot), do: 0
 end

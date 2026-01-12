@@ -226,7 +226,7 @@ defmodule Imgd.Runtime.RunicAdapter do
   # Private: Component Creation
   # ===========================================================================
 
-  defp create_splitter(step, slug) do
+  defp create_splitter(_step, slug) do
     # Splitter creates a Runic.map that iterates over the input collection
     # The inner step passes each item through unchanged (for downstream processing)
     Runic.map(
@@ -301,7 +301,7 @@ defmodule Imgd.Runtime.RunicAdapter do
     )
   end
 
-  defp create_switch(step, slug, opts) do
+  defp create_switch(step, _slug, opts) do
     # Switch creates multiple rules, but for now we create a step that
     # outputs a tagged tuple for routing
     StepRunner.create(step, opts)
