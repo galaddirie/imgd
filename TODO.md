@@ -100,14 +100,6 @@ webhook test system
 
 
 
-- when we click on a node, then click on the canvas to deselect it, then click on the node again, the node opens its step config modal even though we didnt double click on the node or click on it while its selected
+- fix inconsistency with step name and step id
+- clean up the seed workflows
 
-
-- i cant right click tooltip on multi selected nodes blue overlay
-
-- update the execute workflow button to show diffrent status ( running, failed, success )
-
-
-- update tidy workflow to account for edge labels and node width 
-
--  sometimes nodes can be diffrent widths, instead of aliigning with the start of the node, align with the end of the node when tidying workflow. it looks nicer
