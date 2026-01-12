@@ -290,6 +290,9 @@ defmodule Imgd.Runtime.Execution.Server do
     })
     |> Repo.update!()
 
+    # Emit execution failed event
+    Events.emit(:execution_failed, state.execution_id, %{status: :failed, error: error_map})
+
     Logger.error("Execution failed at step #{step_id}: #{inspect(reason)}")
   end
 
