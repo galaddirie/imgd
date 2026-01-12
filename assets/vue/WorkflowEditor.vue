@@ -443,20 +443,90 @@ type LayoutNode = {
   position: { x: number; y: number }
   targetPosition?: Position
   sourcePosition?: Position
+  dimensions?: { width: number; height: number }
+  data?: StepNodeData
 }
 
-const alignLayoutPositions = (originalNodes: LayoutNode[], layoutNodes: LayoutNode[]): LayoutNode[] => {
+type LayoutBounds = { minX: number; minY: number; maxX: number; maxY: number }
+type LayoutDirection = 'LR' | 'RL'
+
+const DEFAULT_NODE_DIMENSIONS = { width: 150, height: 50 }
+const EDGE_LABEL_DIMENSIONS = { width: 40, height: 12 }
+const EDGE_LABEL_PADDING = 6
+const EDGE_LABEL_POSITION = 0.6
+const EDGE_LABEL_HALF_WIDTH = EDGE_LABEL_DIMENSIONS.width / 2 + EDGE_LABEL_PADDING
+const EDGE_LABEL_HALF_HEIGHT = EDGE_LABEL_DIMENSIONS.height / 2 + EDGE_LABEL_PADDING
+const EDGE_LABEL_GAP = Math.ceil((EDGE_LABEL_HALF_WIDTH / (1 - EDGE_LABEL_POSITION)) * 2)
+
+const getNodeDimensions = (node: LayoutNode) => ({
+  width: node.dimensions?.width || DEFAULT_NODE_DIMENSIONS.width,
+  height: node.dimensions?.height || DEFAULT_NODE_DIMENSIONS.height,
+})
+
+const hasEdgeLabel = (node?: LayoutNode) => {
+  const count = node?.data?.stats?.out
+  return !(count === undefined || count === null || count === 0)
+}
+
+const updateBounds = (bounds: LayoutBounds, x: number, y: number) => {
+  bounds.minX = Math.min(bounds.minX, x)
+  bounds.minY = Math.min(bounds.minY, y)
+  bounds.maxX = Math.max(bounds.maxX, x)
+  bounds.maxY = Math.max(bounds.maxY, y)
+}
+
+const getLayoutBounds = (nodes: LayoutNode[], edges: Edge<EdgeData>[]): LayoutBounds => {
+  const bounds: LayoutBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+  const nodeLookup = new Map(nodes.map(node => [node.id, node]))
+
+  nodes.forEach(node => {
+    const { width, height } = getNodeDimensions(node)
+    updateBounds(bounds, node.position.x, node.position.y)
+    updateBounds(bounds, node.position.x + width, node.position.y + height)
+  })
+
+  edges.forEach(edge => {
+    const source = nodeLookup.get(edge.source)
+    const target = nodeLookup.get(edge.target)
+    if (!source || !target || !hasEdgeLabel(source)) return
+
+    const sourceSize = getNodeDimensions(source)
+    const targetSize = getNodeDimensions(target)
+    const sourceX = source.position.x + sourceSize.width
+    const sourceY = source.position.y + sourceSize.height / 2
+    const targetX = target.position.x
+    const targetY = target.position.y + targetSize.height / 2
+
+    const labelX = sourceX + (targetX - sourceX) * EDGE_LABEL_POSITION
+    const labelY = sourceY + (targetY - sourceY) * EDGE_LABEL_POSITION
+    const labelHalfWidth = EDGE_LABEL_DIMENSIONS.width / 2 + EDGE_LABEL_PADDING
+    const labelHalfHeight = EDGE_LABEL_DIMENSIONS.height / 2 + EDGE_LABEL_PADDING
+
+    updateBounds(bounds, labelX - labelHalfWidth, labelY - labelHalfHeight)
+    updateBounds(bounds, labelX + labelHalfWidth, labelY + labelHalfHeight)
+  })
+
+  return bounds
+}
+
+const alignLayoutPositions = (
+  originalNodes: LayoutNode[],
+  layoutNodes: LayoutNode[],
+  edges: Edge<EdgeData>[],
+  direction: LayoutDirection
+): LayoutNode[] => {
   if (!originalNodes.length || !layoutNodes.length) return layoutNodes
 
-  const originalMin = originalNodes.reduce(
-    (acc, node) => ({ x: Math.min(acc.x, node.position.x), y: Math.min(acc.y, node.position.y) }),
-    { x: Infinity, y: Infinity }
-  )
-  const layoutMin = layoutNodes.reduce(
-    (acc, node) => ({ x: Math.min(acc.x, node.position.x), y: Math.min(acc.y, node.position.y) }),
-    { x: Infinity, y: Infinity }
-  )
-  const offset = { x: originalMin.x - layoutMin.x, y: originalMin.y - layoutMin.y }
+  const originalBounds = getLayoutBounds(originalNodes, edges)
+  const layoutBounds = getLayoutBounds(layoutNodes, edges)
+  const offset = {
+    x: originalBounds.minX - layoutBounds.minX,
+    y: originalBounds.minY - layoutBounds.minY,
+  }
+
+  if (direction === 'LR') {
+    offset.x = originalBounds.maxX - layoutBounds.maxX
+  }
 
   return layoutNodes.map(node => ({
     ...node,
@@ -488,8 +558,13 @@ const handleLayout = () => {
     edge => nodeIds.has(edge.source) && nodeIds.has(edge.target)
   )
 
-  const layoutNodes = layout(nodesToLayout, edgesToLayout, previousDirection.value || 'LR') as LayoutNode[]
-  const normalizedLayout = alignLayoutPositions(nodesToLayout, layoutNodes)
+  const layoutDirection = (previousDirection.value === 'RL' ? 'RL' : 'LR') as LayoutDirection
+  const nodeLookup = new Map(nodesToLayout.map(node => [node.id, node]))
+  const hasEdgeLabels = edgesToLayout.some(edge => hasEdgeLabel(nodeLookup.get(edge.source)))
+  const layoutNodes = layout(nodesToLayout, edgesToLayout, layoutDirection, {
+    ranksep: hasEdgeLabels ? EDGE_LABEL_GAP : undefined,
+  }) as LayoutNode[]
+  const normalizedLayout = alignLayoutPositions(nodesToLayout, layoutNodes, edgesToLayout, layoutDirection)
   applyLayoutPositions(normalizedLayout)
 }
 

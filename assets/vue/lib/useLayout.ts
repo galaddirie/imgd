@@ -2,6 +2,8 @@ import dagre from '@dagrejs/dagre'
 import { Position, useVueFlow } from '@vue-flow/core'
 import { ref } from 'vue'
 
+type LayoutDirection = 'LR' | 'RL'
+
 /**
  * Composable to run the layout algorithm on the graph.
  * It uses the `dagre` library to calculate the layout of the nodes and edges.
@@ -13,7 +15,7 @@ export function useLayout() {
 
   const previousDirection = ref('LR')
 
-  function layout(nodes, edges, direction) {
+  function layout(nodes, edges, direction, options: { ranksep?: number; nodesep?: number } = {}) {
     // we create a new graph instance, in case some nodes/edges were removed, otherwise dagre would act as if they were still there
     const dagreGraph = new dagre.graphlib.Graph()
 
@@ -21,11 +23,15 @@ export function useLayout() {
 
     dagreGraph.setDefaultEdgeLabel(() => ({}))
 
-    const isHorizontal = direction === 'LR'
+    const normalizedDirection: LayoutDirection = direction === 'RL' ? 'RL' : 'LR'
+    const isHorizontal = normalizedDirection === 'LR' || normalizedDirection === 'RL'
 
-    dagreGraph.setGraph({ rankdir: direction })
+    const graphOptions: Record<string, number | string> = { rankdir: normalizedDirection }
+    if (options.ranksep !== undefined) graphOptions.ranksep = options.ranksep
+    if (options.nodesep !== undefined) graphOptions.nodesep = options.nodesep
+    dagreGraph.setGraph(graphOptions)
 
-    previousDirection.value = direction
+    previousDirection.value = normalizedDirection
 
     for (const node of nodes) {
       // if you need width+height of nodes for your layout, you can use the dimensions property of the internal node (`GraphNode` type)
@@ -43,12 +49,16 @@ export function useLayout() {
     // set nodes with updated positions
     return nodes.map((node) => {
       const nodeWithPosition = dagreGraph.node(node.id)
+      const nodeWidth = nodeWithPosition.width || 150
 
       return {
         ...node,
         targetPosition: isHorizontal ? Position.Left : Position.Top,
         sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
-        position: { x: nodeWithPosition.x, y: nodeWithPosition.y },
+        position: {
+          x: normalizedDirection === 'LR' ? nodeWithPosition.x - nodeWidth : nodeWithPosition.x,
+          y: nodeWithPosition.y,
+        },
       }
     })
   }
