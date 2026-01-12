@@ -586,6 +586,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   @impl true
   def handle_info({:execution_event, %{execution_id: execution_id} = event}, socket) do
     if execution_id == socket.assigns.execution_id do
+      socket =
+        if event.type == :execution_failed do
+          put_flash(socket, :error, "Execution failed: #{format_error_message(event.data)}")
+        else
+          socket
+        end
+
       {:noreply, refresh_execution_from_event(socket, event)}
     else
       {:noreply, socket}
@@ -622,13 +629,23 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   @impl true
-  def handle_info({:execution_failed, %Execution{} = execution, _error}, socket) do
+  def handle_info({:execution_failed, %Execution{} = execution, error}, socket) do
+    socket = put_flash(socket, :error, "Execution failed: #{format_execution_error(error)}")
     {:noreply, update_execution_assign(socket, execution)}
   end
 
   @impl true
   def handle_info({event, payload}, socket)
       when event in [:step_started, :step_completed, :step_failed, :step_skipped] do
+    socket =
+      if event == :step_failed do
+        step_id = payload[:step_id] || payload["step_id"]
+        error = payload[:error] || payload["error"]
+        put_flash(socket, :error, "Step #{step_id} failed: #{format_error_message(error)}")
+      else
+        socket
+      end
+
     {:noreply, update_step_executions(socket, event, payload)}
   end
 
@@ -1090,4 +1107,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       webhook_test: state[:webhook_test] || state["webhook_test"]
     }
   end
+
+  defp format_error_message(error) when is_binary(error), do: error
+  defp format_error_message(%{message: message}), do: message
+  defp format_error_message(%{"message" => message}), do: message
+  defp format_error_message(error), do: inspect(error)
 end
