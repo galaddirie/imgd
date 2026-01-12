@@ -371,6 +371,11 @@ const tidyLabel = computed(() => selectedCount.value > 1 ? 'Tidy Up Selection' :
 
 const isExecutionFailed = computed(() => props.execution?.status === 'failed')
 
+const isExecutionRunning = computed(() => {
+  const status = props.execution?.status
+  return status === 'running' || status === 'pending'
+})
+
 // Filter out current user from presences for cursor display
 const otherUserPresences = computed(() => {
   return props.presences.filter(p => p.user.id !== props.currentUserId)
@@ -779,18 +784,22 @@ const requestNodeRemoval = (nodeId: string) => {
                :style="{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`, transformOrigin: '0 0' }">
             <CollaborativeCursors :presences="otherUserPresences" :current-user-id="currentUserId" :zoom="viewport.zoom" />
           </div>
-        </div>
 
-        <!-- Execute Workflow Button Overlay -->
-        <div
-          class="absolute left-1/2 transform -translate-x-1/2 z-50 pointer-events-auto transition-all duration-300 ease-in-out"
-          :class="store.isTracePanelExpanded ? 'bottom-96' : 'bottom-16'">
-          <button
-            class="btn btn-primary rounded-xl px-8 py-3 flex gap-2 font-semibold shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95 text-base"
-            @click="handleRunTest">
-            <PlayIcon class="h-6 w-6" />
-            Execute Workflow
-          </button>
+          <!-- Execute Workflow Button Overlay -->
+          <div
+            class="absolute left-1/2 bottom-16 transform -translate-x-1/2 z-50 pointer-events-auto transition-all duration-300 ease-in-out">
+            <button
+              class="btn btn-primary rounded-xl px-8 py-3 flex items-center gap-3 font-semibold shadow-lg shadow-primary/20 transition-all text-base"
+              :class="[
+                isExecutionRunning ? 'cursor-wait opacity-90' : 'hover:scale-105 active:scale-95',
+              ]"
+              :disabled="isExecutionRunning"
+              @click="handleRunTest">
+              <ArrowPathIcon v-if="isExecutionRunning" class="h-6 w-6 animate-spin" />
+              <PlayIcon v-else class="h-6 w-6" />
+              <span class="text-base font-semibold">Execute Workflow</span>
+            </button>
+          </div>
         </div>
 
         <ExecutionTracePanel :execution="execution" :step-executions="stepExecutions"
