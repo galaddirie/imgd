@@ -181,6 +181,11 @@ defmodule Imgd.Executions.PubSub do
     broadcast_execution(:execution_completed, execution)
   end
 
+  @doc "Broadcast that an execution has been cancelled."
+  def broadcast_execution_cancelled(%Execution{} = execution) do
+    broadcast_execution(:execution_cancelled, execution)
+  end
+
   @doc "Broadcast that an execution failed."
   def broadcast_execution_failed(%Execution{} = execution, error \\ nil) do
     error = error || execution.error

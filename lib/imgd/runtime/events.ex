@@ -29,9 +29,11 @@ defmodule Imgd.Runtime.Events do
           :execution_started
           | :execution_completed
           | :execution_failed
+          | :execution_cancelled
           | :step_started
           | :step_completed
           | :step_failed
+          | :step_cancelled
 
   @type event :: %{
           type: event_type(),
@@ -166,10 +168,12 @@ defmodule Imgd.Runtime.Events do
 
   defp event_message(:execution_started), do: "Execution started"
   defp event_message(:execution_completed), do: "Execution completed"
+  defp event_message(:execution_cancelled), do: "Execution cancelled"
   defp event_message(:execution_failed), do: "Execution failed"
   defp event_message(:step_started), do: "Step started"
   defp event_message(:step_completed), do: "Step completed"
   defp event_message(:step_failed), do: "Step failed"
+  defp event_message(:step_cancelled), do: "Step cancelled"
   defp event_message(type), do: "Event: #{type}"
 
   defp sanitize_data(data) when is_map(data) do

@@ -871,19 +871,21 @@ const requestNodeRemoval = (nodeId: string) => {
             <CollaborativeCursors :presences="otherUserPresences" :current-user-id="currentUserId" :zoom="viewport.zoom" />
           </div>
 
-          <!-- Execute Workflow Button Overlay -->
           <div
             class="absolute left-1/2 bottom-16 transform -translate-x-1/2 z-[1100] pointer-events-auto transition-all duration-300 ease-in-out">
             <button
-              class="btn btn-primary rounded-xl px-8 py-3 flex items-center gap-3 font-semibold shadow-lg shadow-primary/20 transition-all text-base"
-              :class="[
-                isExecutionRunning ? 'cursor-wait opacity-90' : 'hover:scale-105 active:scale-95',
-              ]"
-              :disabled="isExecutionRunning"
+              v-if="!isExecutionRunning"
+              class="btn btn-primary rounded-xl px-8 py-3 flex items-center gap-3 font-semibold shadow-lg shadow-primary/20 transition-all text-base hover:scale-105 active:scale-95"
               @click="handleRunTest">
-              <ArrowPathIcon v-if="isExecutionRunning" class="h-6 w-6 animate-spin" />
-              <PlayIcon v-else class="h-6 w-6" />
+              <PlayIcon class="h-6 w-6" />
               <span class="text-base font-semibold">Execute Workflow</span>
+            </button>
+            <button
+              v-else
+              class="btn btn-warning rounded-xl px-8 py-3 flex items-center gap-3 font-semibold shadow-lg shadow-warning/20 transition-all text-base hover:scale-105 active:scale-95"
+              @click="handleCancelExecution">
+              <ArrowPathIcon class="h-6 w-6 animate-spin" />
+              <span class="text-base font-semibold">Stop Execution</span>
             </button>
           </div>
         </div>

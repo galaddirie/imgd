@@ -611,6 +611,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   @impl true
+  def handle_info({:execution_cancelled, %Execution{} = execution}, socket) do
+    {:noreply, update_execution_assign(socket, execution)}
+  end
+
+  @impl true
   def handle_info({:execution_failed, %Execution{} = execution, error}, socket) do
     socket = put_flash(socket, :error, "Execution failed: #{format_execution_error(error)}")
     {:noreply, update_execution_assign(socket, execution)}
@@ -618,7 +623,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_info({event, payload}, socket)
-      when event in [:step_started, :step_completed, :step_failed, :step_skipped] do
+      when event in [:step_started, :step_completed, :step_failed, :step_skipped, :step_cancelled] do
     socket =
       if event == :step_failed do
         step_id = payload[:step_id] || payload["step_id"]
@@ -973,6 +978,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   defp default_step_status(:step_failed), do: :failed
   defp default_step_status(:step_completed), do: :completed
   defp default_step_status(:step_skipped), do: :skipped
+  defp default_step_status(:step_cancelled), do: :cancelled
   defp default_step_status(_event), do: :pending
 
   defp upsert_step_execution(step_executions, step_execution) do

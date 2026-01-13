@@ -139,6 +139,7 @@ const stepStatusClass = (status: StepExecutionStatus): string => {
     completed: 'bg-success',
     failed: 'bg-error',
     skipped: 'bg-base-content/30',
+    cancelled: 'bg-base-content/40',
   }
   return map[status] || 'bg-base-content/20'
 }

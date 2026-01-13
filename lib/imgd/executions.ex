@@ -266,7 +266,22 @@ defmodule Imgd.Executions do
     if Execution.terminal?(execution) do
       {:error, :already_terminal}
     else
-      update_execution_status(scope, execution, :cancelled)
+      case update_execution_status(scope, execution, :cancelled) do
+        {:ok, updated_execution} ->
+          # Broadcast cancellation
+          Imgd.Executions.PubSub.broadcast_execution_cancelled(updated_execution)
+
+          # Emit execution cancelled event
+          Imgd.Runtime.Events.emit(:execution_cancelled, updated_execution.id)
+
+          # Cancel active steps
+          cancel_active_step_executions(updated_execution.id)
+
+          {:ok, updated_execution}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -309,6 +324,9 @@ defmodule Imgd.Executions do
       }
 
       Imgd.Executions.PubSub.broadcast_step(:step_cancelled, execution_id, nil, payload)
+
+      # Also emit via Runtime.Events for consistency
+      Imgd.Runtime.Events.emit(:step_cancelled, execution_id, payload)
     end)
 
     result
