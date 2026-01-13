@@ -91,6 +91,24 @@ defmodule Imgd.Steps.Registry do
   end
 
   @doc """
+  Returns the default configuration for a step type ID.
+  """
+  @spec get_default_config(String.t()) :: map()
+  def get_default_config(type_id) when is_binary(type_id) do
+    case Imgd.Steps.Executors.Behaviour.resolve(type_id) do
+      {:ok, module} ->
+        if function_exported?(module, :default_config, 0) do
+          module.default_config()
+        else
+          %{}
+        end
+
+      _ ->
+        %{}
+    end
+  end
+
+  @doc """
   Checks if a step type exists.
   """
   @spec exists?(String.t()) :: boolean()

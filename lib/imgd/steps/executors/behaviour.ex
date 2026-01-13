@@ -94,7 +94,15 @@ defmodule Imgd.Steps.Executors.Behaviour do
   """
   @callback validate_config(config :: map()) :: :ok | {:error, errors :: list()}
 
-  @optional_callbacks validate_config: 1
+  @doc """
+  Returns the default configuration for this step type.
+
+  This is called when a new step of this type is added to a workflow.
+  It can return a static map or generate dynamic values (like UUIDs).
+  """
+  @callback default_config() :: map()
+
+  @optional_callbacks validate_config: 1, default_config: 0
 
   # ============================================================================
   # Helper Functions

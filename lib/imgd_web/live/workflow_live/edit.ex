@@ -196,7 +196,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       id: step_id,
       type_id: type_id,
       name: unique_name,
-      config: %{},
+      config: StepRegistry.get_default_config(type_id),
       position: pos,
       notes: nil
     }

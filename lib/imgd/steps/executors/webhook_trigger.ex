@@ -47,6 +47,15 @@ defmodule Imgd.Steps.Executors.WebhookTrigger do
     }
   }
 
+  @impl true
+  def default_config do
+    %{
+      "path" => Ecto.UUID.generate(),
+      "http_method" => "POST",
+      "response_mode" => "immediate"
+    }
+  end
+
   @output_schema %{
     "type" => "object",
     "properties" => %{

@@ -241,8 +241,6 @@ const webhookUrl = computed(() => {
   if (!props.node) return ''
   const path = webhookPath.value
   const baseUrl = window.location.origin
-  // TODO: Use actual configured path from node config if available
-  // For now assuming the path is part of the URL structure we defined in backend
   
   if (webhookMode.value === 'test') {
     return `${baseUrl}/api/hook-test/${path}` // Draft/Test URL

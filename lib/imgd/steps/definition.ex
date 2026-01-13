@@ -50,6 +50,7 @@ defmodule Imgd.Steps.Definition do
   After `use`, you can define these module attributes:
 
   - `@config_schema` - JSON Schema for step configuration (what users fill in)
+  - `@default_config` - Default configuration map (optional)
   - `@input_schema` - JSON Schema describing expected input
   - `@output_schema` - JSON Schema describing output
 
@@ -93,11 +94,13 @@ defmodule Imgd.Steps.Definition do
 
       # Default schemas (can be overridden)
       @config_schema %{"type" => "object", "properties" => %{}}
+      @default_config %{}
       @input_schema %{"type" => "object"}
       @output_schema %{"type" => "object"}
 
       # Allow redefinition
       Module.register_attribute(__MODULE__, :config_schema, accumulate: false)
+      Module.register_attribute(__MODULE__, :default_config, accumulate: false)
       Module.register_attribute(__MODULE__, :input_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :output_schema, accumulate: false)
     end
@@ -129,6 +132,15 @@ defmodule Imgd.Steps.Definition do
       Returns the step type ID.
       """
       def __step_id__, do: @step_id
+
+      @doc """
+      Returns the default configuration for this step type.
+      """
+      def default_config do
+        @default_config
+      end
+
+      defoverridable default_config: 0
     end
   end
 end
