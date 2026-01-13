@@ -83,23 +83,12 @@ How would this work in a zero trust environment?
 
 
 
-- lets test join mechanics 
-
-diamond shape workflow where left side has a wait node + debug node while right side only has debug node before the join at the end with a debug node to ensure a wait for all behavior
-
 
 add merge node - unlike n8n we arent limited to two paths merging and cleaner merge ui and options 
 
 merge node will also act as a edit fields node 
 
-webhook test system
 
 - determine risk of api key exposure in webhook trigger outputs
 
-
-
-
-
-- fix inconsistency with step name and step id
-- clean up the seed workflows
 
