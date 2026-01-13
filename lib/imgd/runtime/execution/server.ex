@@ -43,37 +43,85 @@ defmodule Imgd.Runtime.Execution.Server do
     Logger.metadata(execution_id: execution_id)
     Logger.info("Initializing execution server")
 
-    case load_with_source(execution_id) do
-      {:ok, execution} ->
-        case build_runic_workflow(execution, runtime_opts) do
-          {:ok, runic_wrk} ->
-            state = %State{
-              execution_id: execution_id,
-              runic_workflow: runic_wrk,
-              status: execution.status,
-              metadata: execution.metadata,
-              runtime_opts: runtime_opts
-            }
+    try do
+      case load_with_source(execution_id) do
+        {:ok, execution} ->
+          case build_runic_workflow(execution, runtime_opts) do
+            {:ok, runic_wrk} ->
+              state = %State{
+                execution_id: execution_id,
+                runic_workflow: runic_wrk,
+                status: execution.status,
+                metadata: execution.metadata,
+                runtime_opts: runtime_opts
+              }
 
-            # Trigger execution if process was started for a pending/running execution
-            case execution.status do
-              s when s in [:pending, :running] ->
-                send(self(), :run)
+              # Trigger execution if process was started for a pending/running execution
+              case execution.status do
+                s when s in [:pending, :running] ->
+                  send(self(), :run)
 
-              _ ->
-                :ok
-            end
+                _ ->
+                  :ok
+              end
 
-            {:ok, state}
+              {:ok, state}
 
-          {:error, :missing_source} ->
-            Logger.error("Execution missing workflow source", execution_id: execution_id)
-            {:stop, :missing_source}
-        end
+            {:error, :missing_source} ->
+              handle_init_failure(execution_id, :missing_source)
+              {:stop, :missing_source}
+          end
 
-      {:error, :not_found} ->
-        {:stop, :not_found}
+        {:error, :not_found} ->
+          {:stop, :not_found}
+      end
+    rescue
+      e ->
+        Logger.error("Execution server failed to initialize: #{inspect(e)}",
+          stacktrace: __STACKTRACE__
+        )
+
+        handle_init_failure(execution_id, e)
+        {:stop, :init_failure}
     end
+  end
+
+  @impl true
+  def terminate(reason, state) do
+    # If the process is terminating abnormally and hasn't reached a terminal state
+    # We ignore :normal, :shutdown, and {:shutdown, :normal}
+    execution_id =
+      case state do
+        %State{execution_id: id} -> id
+        _ -> nil
+      end
+
+    if (execution_id && reason not in [:normal, :shutdown]) and not match?({:shutdown, _}, reason) do
+      case Repo.get(Execution, execution_id) do
+        %Execution{status: status} = execution
+        when status not in [:completed, :failed, :cancelled] ->
+          Logger.error("Execution server terminating unexpectedly: #{inspect(reason)}")
+          error_map = Execution.format_error(reason)
+
+          execution
+          |> Execution.changeset(%{
+            status: :failed,
+            error: error_map,
+            completed_at: DateTime.utc_now()
+          })
+          |> Repo.update()
+
+          Events.emit(:execution_failed, execution_id, %{status: :failed, error: error_map})
+
+          # Also cancel any active steps
+          Executions.cancel_active_step_executions(execution_id)
+
+        _ ->
+          :ok
+      end
+    end
+
+    :ok
   end
 
   @impl true
@@ -118,10 +166,6 @@ defmodule Imgd.Runtime.Execution.Server do
         {:stop, :normal, state}
     end
   end
-
-  # ============================================================================
-  # Internal Helpers
-  # ============================================================================
 
   defp load_with_source(id) do
     execution =
@@ -206,6 +250,21 @@ defmodule Imgd.Runtime.Execution.Server do
 
   defp get_source(%Execution{workflow: %{draft: draft}}), do: draft
   defp get_source(_), do: nil
+
+  defp handle_init_failure(execution_id, reason) do
+    error_map = Execution.format_error(reason)
+
+    Execution
+    |> Repo.get!(execution_id)
+    |> Execution.changeset(%{
+      status: :failed,
+      error: error_map,
+      completed_at: DateTime.utc_now()
+    })
+    |> Repo.update!()
+
+    Events.emit(:execution_failed, execution_id, %{status: :failed, error: error_map})
+  end
 
   defp fetch_trigger_data(id) do
     # In a real app, we'd load this from the 'trigger' field

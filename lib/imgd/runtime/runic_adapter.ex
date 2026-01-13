@@ -169,38 +169,53 @@ defmodule Imgd.Runtime.RunicAdapter do
   end
 
   defp topological_sort_steps(steps, connections) do
-    # Build a simple dependency graph and sort
-    step_map = Map.new(steps, &{&1.id, &1})
     step_ids = Enum.map(steps, & &1.id)
+    step_map = Map.new(steps, &{&1.id, &1})
 
-    # Build adjacency list (parent -> children)
+    # 1. Initialize in-degrees
+    in_degrees = Map.new(step_ids, &{&1, 0})
+
+    in_degrees =
+      Enum.reduce(connections, in_degrees, fn conn, acc ->
+        Map.update(acc, conn.target_step_id, 0, &(&1 + 1))
+      end)
+
+    # 2. Build adjacency list (parent -> [children])
     adjacency =
       Enum.reduce(connections, %{}, fn conn, acc ->
         Map.update(acc, conn.source_step_id, [conn.target_step_id], &[conn.target_step_id | &1])
       end)
 
-    # Find roots (steps with no incoming edges)
-    children_set = connections |> Enum.map(& &1.target_step_id) |> MapSet.new()
-    roots = Enum.filter(step_ids, &(not MapSet.member?(children_set, &1)))
+    # 3. Find initial roots (in-degree 0)
+    # We preserve the original relative order of steps when picking roots
+    roots = Enum.filter(step_ids, &(Map.get(in_degrees, &1) == 0))
 
-    # Simple BFS topological sort
-    sorted_ids = topo_sort_bfs(roots, adjacency, MapSet.new(), [])
+    # 4. Kahn's algorithm
+    sorted_ids = do_kahn_sort(roots, in_degrees, adjacency, [])
 
-    # Map back to steps, preserving order
+    # Map back to step structs
     Enum.map(sorted_ids, &Map.get(step_map, &1))
   end
 
-  defp topo_sort_bfs([], _adjacency, _visited, result), do: Enum.reverse(result)
+  defp do_kahn_sort([], _in_degrees, _adjacency, sorted), do: Enum.reverse(sorted)
 
-  defp topo_sort_bfs([id | rest], adjacency, visited, result) do
-    if MapSet.member?(visited, id) do
-      topo_sort_bfs(rest, adjacency, visited, result)
-    else
-      visited = MapSet.put(visited, id)
-      result = [id | result]
-      children = Map.get(adjacency, id, [])
-      topo_sort_bfs(rest ++ children, adjacency, visited, result)
-    end
+  defp do_kahn_sort([id | rest], in_degrees, adjacency, sorted) do
+    children = Map.get(adjacency, id, [])
+
+    {new_rest, new_in_degrees} =
+      Enum.reduce(children, {rest, in_degrees}, fn child, {r, degs} ->
+        new_deg = Map.get(degs, child) - 1
+        degs = Map.put(degs, child, new_deg)
+
+        if new_deg == 0 do
+          # Add to queue if all dependencies met
+          {r ++ [child], degs}
+        else
+          {r, degs}
+        end
+      end)
+
+    do_kahn_sort(new_rest, new_in_degrees, adjacency, [id | sorted])
   end
 
   defp put_step_metadata(workflow, steps) when is_list(steps) do

@@ -752,20 +752,35 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         }
       }
 
-      with {:ok, execution} <- Executions.create_execution(scope, attrs),
-           {:ok, execution} <-
-             put_runic_snapshot(scope, execution, preview_draft, pinned_outputs),
-           :ok <- subscribe_execution(scope, execution.id),
-           {:ok, _pid} <- start_execution_process(execution.id) do
-        step_executions = build_initial_step_executions(execution.id, preview_draft.steps)
+      with {:ok, execution} <- Executions.create_execution(scope, attrs) do
+        try do
+          with {:ok, execution} <-
+                 put_runic_snapshot(scope, execution, preview_draft, pinned_outputs),
+               :ok <- subscribe_execution(scope, execution.id),
+               {:ok, _pid} <- start_execution_process(execution.id) do
+            step_executions = build_initial_step_executions(execution.id, preview_draft.steps)
 
-        socket =
-          socket
-          |> assign(:execution, execution)
-          |> assign(:execution_id, execution.id)
-          |> assign(:step_executions, step_executions)
+            socket =
+              socket
+              |> assign(:execution, execution)
+              |> assign(:execution_id, execution.id)
+              |> assign(:step_executions, step_executions)
 
-        {:ok, socket}
+            {:ok, socket}
+          else
+            {:error, reason} ->
+              _ = Executions.update_execution_status(scope, execution, :failed, error: reason)
+              {:error, format_execution_error(reason), socket}
+          end
+        rescue
+          e ->
+            Logger.error("Crash during preview execution setup: #{inspect(e)}",
+              stacktrace: __STACKTRACE__
+            )
+
+            _ = Executions.update_execution_status(scope, execution, :failed, error: e)
+            {:error, "Crash during setup: #{inspect(e)}", socket}
+        end
       else
         {:error, reason} ->
           {:error, format_execution_error(reason), socket}
