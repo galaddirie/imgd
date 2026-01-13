@@ -35,6 +35,7 @@ interface Props {
   stepExecutions?: any[]
   expressionPreviews?: Record<string, any>
   editorState?: EditorState
+  stepNameById?: Record<string, string>
 }
 
 const props = defineProps<Props>()
@@ -149,13 +150,18 @@ const evaluatedConfig = computed(() => {
 
 const contextData = computed(() => {
   if (!props.execution) return {}
+  const currentStepId = props.node?.id
   return {
     json: unwrapData(activeStepExecution.value?.input_data) || {},
     trigger: props.execution?.trigger?.data || {},
     variables: props.execution?.metadata?.variables || {},
     request: props.execution?.metadata?.extras?.request || {},
     steps: props.stepExecutions?.reduce((acc: any, se: any) => {
-      acc[se.step_id] = { json: unwrapData(se.output_data) }
+      const isCurrentStep = se.step_id === currentStepId
+      const stepName = isCurrentStep ? editName.value : props.stepNameById?.[se.step_id]
+      const key = stepName && stepName.length > 0 ? stepName : se.step_id
+
+      acc[key] = { json: unwrapData(se.output_data) }
       return acc
     }, {}) || {}
   }
@@ -202,7 +208,7 @@ const isWebhookTrigger = computed(() => {
 
 const webhookPath = computed(() => {
   if (!props.node) return ''
-  const rawPath = props.node.data?.config?.path
+  const rawPath = fieldValues.value?.path || props.node.data?.config?.path
   const path = typeof rawPath === 'string' ? rawPath.trim() : ''
   return path.length > 0 ? path : props.node.id
 })
@@ -250,12 +256,13 @@ const copyWebhookUrl = () => {
   // detailed toast could go here
 }
 const slugify = (text: string) => {
+  // Key-safe format: lowercase alphanumeric + underscores (matches backend to_step_id)
   return text
     .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/[\s_]+/g, '-')
-    .replace(/-+/g, '-')
-    .trim()
+    .replace(/[^\w\s]/g, '')
+    .replace(/[\s]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
 }
 
 const getExpressionFor = (sectionId: string, key?: string) => {
@@ -278,8 +285,13 @@ const getExpressionFor = (sectionId: string, key?: string) => {
       if (!key) return `{{ steps }}`
       // If we are referring to a step, use its slugified name
       // If it's the current node, we use the potentially updated editName
-      const stepName = key === props.node?.id ? editName.value : (props.node?.data.name || '')
-      return `{{ steps["${slugify(stepName)}"].json }}`
+      const currentStepId = props.node?.id
+      const currentStepName = props.node?.data?.name || ''
+      const isCurrentStep = key === currentStepId || key === currentStepName
+      const resolvedName = isCurrentStep ? editName.value : props.stepNameById?.[key]
+      const stepName = resolvedName && resolvedName.length > 0 ? resolvedName : key
+      const stepKey = stepName && stepName.length > 0 ? slugify(stepName) : key
+      return `{{ steps["${stepKey}"].json }}`
     default:
       return `{{ ${sectionId}${path} }}`
   }

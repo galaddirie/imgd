@@ -78,6 +78,35 @@ defmodule Imgd.Runtime.Expression.Context do
       "variables" => extract_variables(execution),
       "metadata" => build_metadata_map(execution),
       "request" => build_request_map(execution),
+      "trigger" => normalize_value(current_input),
+      "env" => build_env_map(),
+      "now" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "today" => Date.utc_today() |> Date.to_iso8601()
+    }
+  end
+
+  @doc """
+  Builds a variable map from an ExecutionContext.
+  """
+  def build_from_context(%Imgd.Runtime.ExecutionContext{} = ctx) do
+    input = normalize_value(ctx.input)
+
+    %{
+      "json" => input,
+      "input" => input,
+      "steps" => build_steps_map(ctx.step_outputs),
+      "execution" => %{
+        "id" => ctx.execution_id,
+        "trigger_type" => to_string(ctx.trigger_type || "unknown"),
+        "trigger_data" => normalize_value(ctx.trigger)
+      },
+      "workflow" => %{
+        "id" => ctx.workflow_id
+      },
+      "variables" => normalize_map(ctx.variables),
+      "metadata" => normalize_map(ctx.metadata),
+      "request" => normalize_map(ctx.request),
+      "trigger" => normalize_value(ctx.trigger),
       "env" => build_env_map(),
       "now" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "today" => Date.utc_today() |> Date.to_iso8601()

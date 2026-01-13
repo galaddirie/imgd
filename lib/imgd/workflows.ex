@@ -585,39 +585,96 @@ defmodule Imgd.Workflows do
   defp trigger_type_to_step_type_id(type) when is_binary(type), do: type
 
   # ============================================================================
-  # Naming Logic
+  # Step Identity
   # ============================================================================
 
   @doc """
-  Generates a unique display name for a step in a workflow.
-  Handles "Name", "Name 2", "Name 3" etc.
-  """
-  @spec generate_unique_step_name([map()], String.t()) :: String.t()
-  def generate_unique_step_name(existing_steps, base_name) do
-    existing_names =
-      existing_steps
-      |> Enum.map(& &1.name)
-      |> MapSet.new()
+  Converts a display name into a key-safe step ID.
 
-    do_generate_unique_name(existing_names, base_name, 1)
+  Uses underscores (not hyphens) to create identifiers safe for use as:
+  - Map keys in execution context
+  - Runic component names
+  - Expression variable names (e.g., `steps.my_step.json`)
+
+  ## Examples
+
+      iex> to_step_id("HTTP Request")
+      "http_request"
+
+      iex> to_step_id("My Step 1")
+      "my_step_1"
+  """
+  @spec to_step_id(String.t()) :: String.t()
+  def to_step_id(name) when is_binary(name) do
+    name
+    |> String.downcase()
+    |> String.replace(~r/[^\w\s]/, "")
+    |> String.replace(~r/[\s]+/, "_")
+    |> String.replace(~r/_+/, "_")
+    |> String.trim("_")
   end
 
-  defp do_generate_unique_name(existing_names, name, index) do
-    candidate = if index == 1, do: name, else: "#{name} #{index}"
+  def to_step_id(_), do: ""
 
-    if MapSet.member?(existing_names, candidate) do
-      do_generate_unique_name(existing_names, name, index + 1)
-    else
-      candidate
+  @doc """
+  Generates a unique step name and ID pair for a workflow.
+
+  Returns `{name, step_id}` where both are unique within the workflow.
+  Handles "Name", "Name 2", "Name 3" etc. for display names,
+  and "name", "name_2", "name_3" for step IDs.
+
+  ## Examples
+
+      iex> generate_unique_step_identity([], "HTTP Request")
+      {"HTTP Request", "http_request"}
+
+      iex> generate_unique_step_identity([%{name: "HTTP Request", id: "http_request"}], "HTTP Request")
+      {"HTTP Request 2", "http_request_2"}
+  """
+  @spec generate_unique_step_identity([map()], String.t()) :: {String.t(), String.t()}
+  def generate_unique_step_identity(existing_steps, base_name) do
+    existing_names = existing_steps |> Enum.map(& &1.name) |> MapSet.new()
+    existing_ids = existing_steps |> Enum.map(& &1.id) |> MapSet.new()
+
+    do_generate_unique_identity(existing_names, existing_ids, base_name, 1)
+  end
+
+  defp do_generate_unique_identity(existing_names, existing_ids, base_name, index) do
+    candidate_name = if index == 1, do: base_name, else: "#{base_name} #{index}"
+    candidate_id = to_step_id(candidate_name)
+
+    cond do
+      MapSet.member?(existing_names, candidate_name) ->
+        do_generate_unique_identity(existing_names, existing_ids, base_name, index + 1)
+
+      MapSet.member?(existing_ids, candidate_id) ->
+        do_generate_unique_identity(existing_names, existing_ids, base_name, index + 1)
+
+      true ->
+        {candidate_name, candidate_id}
     end
   end
 
   @doc """
+  Generates a unique display name for a step in a workflow.
+  Handles "Name", "Name 2", "Name 3" etc.
+
+  Deprecated: Use `generate_unique_step_identity/2` to get both name and step_id.
+  """
+  @spec generate_unique_step_name([map()], String.t()) :: String.t()
+  def generate_unique_step_name(existing_steps, base_name) do
+    {name, _id} = generate_unique_step_identity(existing_steps, base_name)
+    name
+  end
+
+  @doc """
   Converts a display name into a slug for use as an execution key.
+
+  Deprecated: Use `to_step_id/1` for step identifiers.
   """
   @spec slugify_step_name(String.t()) :: String.t()
   def slugify_step_name(name) do
-    Imgd.Runtime.Expression.Filters.slugify(name)
+    to_step_id(name)
   end
 
   # ============================================================================

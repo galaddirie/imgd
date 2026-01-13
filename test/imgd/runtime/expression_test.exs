@@ -33,7 +33,7 @@ defmodule Imgd.Runtime.ExpressionTest do
 
       assert {:ok, "10"} =
                Expression.evaluate(
-                 "{{ steps.step_1.json.value }}",
+                 "{{ steps.step_1.json }}",
                  execution,
                  state_store: %{"step_1" => %{"value" => 10}}
                )

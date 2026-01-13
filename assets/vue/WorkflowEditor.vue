@@ -219,6 +219,17 @@ watch(() => getSelectedNodes.value, (newSelection) => {
 // Computed
 // =============================================================================
 
+const stepNameById = computed<Record<string, string>>(() => {
+  const steps = props.workflow.draft?.steps || []
+
+  return steps.reduce((acc, step) => {
+    if (step.id && step.name) {
+      acc[step.id] = step.name
+    }
+    return acc
+  }, {} as Record<string, string>)
+})
+
 const nodes = computed<Node<StepNodeData>[]>(() => {
   const steps = props.workflow.draft?.steps || []
   
@@ -878,6 +889,7 @@ const requestNodeRemoval = (nodeId: string) => {
         </div>
 
         <ExecutionTracePanel :execution="execution" :step-executions="stepExecutions"
+          :step-name-by-id="stepNameById"
           :is-expanded="store.isTracePanelExpanded" @toggle="store.toggleTracePanel"
           @close="store.isTracePanelExpanded = false" @select-step="selectTraceStep" @run-test="handleRunTest"
           @cancel="handleCancelExecution" />
@@ -885,7 +897,7 @@ const requestNodeRemoval = (nodeId: string) => {
 
       <StepConfigModal :is-open="store.isConfigModalOpen" :node="selectedNode" :step-type="selectedStepType"
         :execution="execution" :step-executions="stepExecutions" :expression-previews="expressionPreviews"
-        :editor-state="editorState"
+        :editor-state="editorState" :step-name-by-id="stepNameById"
         @close="store.closeConfigModal" @save="handleSaveConfig" @delete="handleDeleteStep"
         @preview_expression="(payload: { step_id: string; field_key: string; expression: string }) => emit('preview_expression', payload)"
         @toggle_webhook_test="(payload: { step_id: string; action: 'start' | 'stop'; path?: string; method?: string }) => emit('toggle_webhook_test', payload)" />

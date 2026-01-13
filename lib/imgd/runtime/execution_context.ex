@@ -108,6 +108,7 @@ defmodule Imgd.Runtime.ExecutionContext do
 
       case producing_step do
         %{name: name} when is_binary(name) ->
+          # Step ID (name in Runic) is now the key-safe slug, use directly
           Map.put(acc, name, fact.value)
 
         _ ->

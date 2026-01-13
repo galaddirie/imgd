@@ -66,8 +66,20 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
     # Attach hooks to all steps
     workflow
+    |> attach_context_hooks()
     |> attach_logging_hooks()
     |> attach_telemetry_hooks(execution_id)
+  end
+
+  @doc """
+  Attaches context hooks that pass accumulated step outputs to step functions.
+  """
+  @spec attach_context_hooks(Workflow.t()) :: Workflow.t()
+  def attach_context_hooks(workflow) do
+    workflow.components
+    |> Enum.reduce(workflow, fn {component_name, _component}, wf ->
+      Workflow.attach_before_hook(wf, component_name, &before_step_context/3)
+    end)
   end
 
   @doc """
@@ -110,6 +122,35 @@ defmodule Imgd.Runtime.Hooks.Observability do
   # ===========================================================================
   # Before Hooks
   # ===========================================================================
+
+  # Pass accumulated step outputs to the step function via process dictionary
+  defp before_step_context(_step, workflow, _fact) do
+    step_outputs = extract_step_outputs(workflow)
+    Process.put(:imgd_step_outputs, step_outputs)
+    workflow
+  end
+
+  defp extract_step_outputs(workflow) do
+    graph = workflow.graph
+
+    graph
+    |> Graph.vertices()
+    |> Enum.filter(&match?(%Runic.Workflow.Fact{}, &1))
+    |> Enum.reduce(%{}, fn fact, acc ->
+      producing_step =
+        graph
+        |> Graph.in_neighbors(fact)
+        |> Enum.find(&match?(%Runic.Workflow.Step{}, &1))
+
+      case producing_step do
+        %{name: name} when is_binary(name) ->
+          Map.put(acc, name, fact.value)
+
+        _ ->
+          acc
+      end
+    end)
+  end
 
   defp before_step_logging(step, workflow, fact) do
     step_name = get_step_name(step)

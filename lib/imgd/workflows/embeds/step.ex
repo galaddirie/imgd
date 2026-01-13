@@ -2,6 +2,18 @@ defmodule Imgd.Workflows.Embeds.Step do
   @moduledoc """
   Embedded schema for workflow steps.
   Shared between Workflow (mutable) and WorkflowVersion (immutable).
+
+  ## Identity
+
+  - `id` - Key-safe slug derived from display name (e.g., "http_request", "my_step_1")
+  - `name` - User-facing display label (e.g., "HTTP Request", "My Step 1")
+  - `type_id` - Reference to global step type registry
+
+  The `id` is used everywhere as the primary instance identifier:
+  - Runic component names
+  - Execution context keys (`steps.<step_id>.json`)
+  - StepExecution records
+  - Connection references
   """
   @derive Jason.Encoder
   @derive {LiveVue.Encoder,
@@ -18,6 +30,9 @@ defmodule Imgd.Workflows.Embeds.Step do
   import Imgd.ChangesetHelpers
 
   @primary_key {:id, :string, autogenerate: false}
+
+  # Key-safe step ID pattern: lowercase alphanumeric + underscores
+  @step_id_pattern ~r/^[a-z][a-z0-9_]*$/
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -40,6 +55,9 @@ defmodule Imgd.Workflows.Embeds.Step do
     step
     |> cast(attrs, [:id, :type_id, :name, :config, :position, :notes])
     |> validate_required([:id, :type_id, :name])
+    |> validate_format(:id, @step_id_pattern,
+      message: "must be a key-safe identifier (lowercase, alphanumeric, underscores)"
+    )
     |> validate_map_field(:config)
     |> validate_map_field(:position)
   end

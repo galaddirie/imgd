@@ -306,7 +306,7 @@ defmodule Imgd.Runtime.Execution.Server do
       |> Enum.filter(&match?(%Runic.Workflow.Fact{}, &1))
 
     # 2. Map each fact to its producing step's name
-    # Runic steps are named with Imgd Step IDs in the adapter
+    # Step ID (name in Runic) is now the key-safe slug, use directly
     facts
     |> Enum.reduce(%{}, fn fact, acc ->
       producing_step =
@@ -316,15 +316,18 @@ defmodule Imgd.Runtime.Execution.Server do
 
       case producing_step do
         %{name: name} when is_binary(name) ->
-          # If multiple facts from same step (unlikely in current Imgd BUT
-          # possible in Runic collections), we might want to store as list
-          # or latest. For compatibility, we'll store as single value.
           Map.put(acc, name, fact.value)
 
         _ ->
           acc
       end
     end)
+  end
+
+  defp get_step_metadata(workflow) do
+    workflow
+    |> Map.get(:__changed__, %{})
+    |> Map.get(:__step_metadata__, workflow |> Map.get(:__step_metadata__, %{}))
   end
 
   defp maybe_put_step_type(payload, %{step_type_id: step_type_id})

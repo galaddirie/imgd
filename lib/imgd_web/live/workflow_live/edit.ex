@@ -190,10 +190,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       end
 
     steps = socket.assigns.workflow.draft.steps || []
-    unique_name = Imgd.Workflows.generate_unique_step_name(steps, step_type_name)
+    {unique_name, step_id} = Imgd.Workflows.generate_unique_step_identity(steps, step_type_name)
 
     step = %{
-      id: UUID.generate(),
+      id: step_id,
       type_id: type_id,
       name: unique_name,
       config: %{},
@@ -396,20 +396,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     execution = socket.assigns.execution
     step_executions = socket.assigns.step_executions
 
-    # Reconstruct context
-    steps = socket.assigns.workflow.draft.steps
-    step_id_to_slug = Map.new(steps, fn s -> {s.id, Imgd.Workflows.slugify_step_name(s.name)} end)
-
+    # Step ID is now the key-safe slug, no mapping needed
     step_outputs =
       Enum.reduce(step_executions, %{}, fn se, acc ->
-        # Keep both UUID and slug for maximum compatibility during preview
-        acc = Map.put(acc, se.step_id, se.output_data)
-
-        if slug = step_id_to_slug[se.step_id] do
-          Map.put(acc, slug, se.output_data)
-        else
-          acc
-        end
+        Map.put(acc, se.step_id, se.output_data)
       end)
 
     current_step_execution = Enum.find(step_executions, fn se -> se.step_id == step_id end)
@@ -439,17 +429,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               {:ok, full_execution} =
                 Executions.get_execution_with_steps(socket.assigns.current_scope, latest.id)
 
-              # Re-build step outputs and current input with loaded data
+              # Step ID is now the key-safe slug, no mapping needed
               so =
                 Map.new(full_execution.step_executions, fn se -> {se.step_id, se.output_data} end)
-
-              # Also add slug mappings
-              so =
-                Enum.reduce(full_execution.step_executions, so, fn se, acc ->
-                  if slug = step_id_to_slug[se.step_id],
-                    do: Map.put(acc, slug, se.output_data),
-                    else: acc
-                end)
 
               ci =
                 Enum.find(full_execution.step_executions, fn se -> se.step_id == step_id end)

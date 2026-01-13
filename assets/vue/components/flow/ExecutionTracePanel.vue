@@ -24,6 +24,7 @@ interface Props {
   stepExecutions?: StepExecution[]
   logs?: LogEntry[]
   isExpanded?: boolean
+  stepNameById?: Record<string, string>
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -31,6 +32,7 @@ const props = withDefaults(defineProps<Props>(), {
   stepExecutions: () => [],
   logs: () => [],
   isExpanded: true,
+  stepNameById: () => ({}),
 })
 
 const emit = defineEmits<{
@@ -65,7 +67,7 @@ const traces = computed<TraceEntry[]>(() => {
     return props.stepExecutions.map(se => ({
       id: se.id,
       step_id: se.step_id,
-      step_name: se.step_id, // Would need to resolve from step registry
+      step_name: props.stepNameById?.[se.step_id] || se.step_id,
       status: se.status,
       duration_us: se.duration_us,
       timestamp: se.started_at
@@ -234,7 +236,7 @@ const selectStep = (stepId: string) => {
               </div>
               <div class="text-xs text-base-content/40 font-medium tracking-tight">
                 {{ trace.timestamp }}
-                <span v-if="trace.step_id" class="opacity-60">• {{ trace.step_id }}</span>
+                <span v-if="trace.step_id === trace.step_name" class="opacity-60">• {{ trace.step_id }}</span>
               </div>
             </div>
 

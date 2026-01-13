@@ -76,7 +76,7 @@ defmodule Imgd.Runtime.Steps.StepRunner do
               throw({:step_error, step.id, {:compute_error, reason}})
           end
         end,
-        name: Imgd.Workflows.slugify_step_name(step.name)
+        name: runic_name(step)
       )
 
     # Ensure unique hash for programmatic steps to avoid graph vertex collisions
@@ -177,6 +177,16 @@ defmodule Imgd.Runtime.Steps.StepRunner do
   # ===========================================================================
 
   defp build_context(step, input, opts) do
+    # Get pinned outputs from opts (static, from workflow start)
+    pinned_outputs = Keyword.get(opts, :step_outputs, %{})
+
+    # Get dynamic outputs from process dictionary (set by before_step_context hook)
+    # This contains outputs from steps that completed earlier in this execution
+    dynamic_outputs = Process.get(:imgd_step_outputs, %{})
+
+    # Merge: dynamic outputs take precedence (they're fresh), then pinned
+    step_outputs = Map.merge(pinned_outputs, dynamic_outputs)
+
     ExecutionContext.new(
       execution_id: Keyword.get(opts, :execution_id),
       workflow_id: Keyword.get(opts, :workflow_id),
@@ -184,7 +194,7 @@ defmodule Imgd.Runtime.Steps.StepRunner do
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
       input: input,
-      step_outputs: Keyword.get(opts, :step_outputs, %{}),
+      step_outputs: step_outputs,
       trigger: Keyword.get(opts, :trigger_data, %{}),
       trigger_type: Keyword.get(opts, :trigger_type)
     )
@@ -192,38 +202,16 @@ defmodule Imgd.Runtime.Steps.StepRunner do
 
   defp evaluate_config(config, ctx) when is_map(config) do
     # Build variables for expression evaluation
-    vars = build_expression_vars(ctx)
+    vars = Expression.Context.build_from_context(ctx)
 
     Expression.evaluate_deep(config, vars)
   end
 
   defp evaluate_config(config, _ctx), do: {:ok, config}
 
-  defp build_expression_vars(ctx) do
-    normalized_input = Expression.Context.normalize_value(ctx.input)
-
-    %{
-      "json" => normalized_input,
-      "input" => normalized_input,
-      "steps" => build_steps_var(ctx.step_outputs),
-      "execution" => %{
-        "id" => ctx.execution_id
-      },
-      "workflow" => %{
-        "id" => ctx.workflow_id
-      },
-      "variables" => ctx.variables,
-      "metadata" => ctx.metadata,
-      "trigger" => %{"data" => ctx.trigger}
-    }
-  end
-
-  defp build_steps_var(step_outputs) when is_map(step_outputs) do
-    # Transform step outputs into the steps.StepName.json format
-    Map.new(step_outputs, fn {step_id, output} ->
-      {step_id, %{"json" => output}}
-    end)
-  end
-
   defp build_steps_var(_), do: %{}
+
+  # Step ID is now used directly as Runic name
+  defp runic_name(%{id: id}) when is_binary(id) and byte_size(id) > 0, do: id
+  defp runic_name(_), do: "step"
 end
