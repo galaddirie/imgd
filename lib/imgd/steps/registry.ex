@@ -251,7 +251,8 @@ defmodule Imgd.Steps.Registry do
       Imgd.Steps.Executors.Splitter,
       Imgd.Steps.Executors.WebhookTrigger,
       Imgd.Steps.Executors.ScheduleTrigger,
-      Imgd.Steps.Executors.RespondToWebhook
+      Imgd.Steps.Executors.RespondToWebhook,
+      Imgd.Steps.Executors.Wait
     ]
   end
 
