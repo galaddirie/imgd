@@ -83,28 +83,6 @@ config :imgd, ImgdWeb.Endpoint,
 # at the `config/runtime.exs`.
 config :imgd, Imgd.Mailer, adapter: Swoosh.Adapters.Local
 
-config :opentelemetry,
-  span_processor: :batch,
-  traces_exporter: :otlp,
-  metrics_exporter: :none,
-  resource: %{
-    service: %{
-      name: "imgd",
-      version: Mix.Project.config()[:version] || "0.1.0",
-      namespace: "imgd"
-    }
-  }
-
-config :opentelemetry_exporter,
-  otlp_protocol: :http_protobuf,
-  otlp_compression: :gzip
-
-config :imgd, Imgd.Observability.PromEx,
-  disabled: false,
-  manual_metrics_start_delay: :no_delay,
-  drop_metrics_groups: [],
-  grafana: :disabled
-
 config :logger,
   backends: [:console, {LoggerFileBackend, :file}],
   level: :info,
@@ -124,8 +102,6 @@ config :logger, :file,
 config :logger_json, :backend,
   metadata: [
     :request_id,
-    :trace_id,
-    :span_id,
     :execution_id,
     :workflow_id,
     :workflow_name,
@@ -137,11 +113,6 @@ config :logger_json, :backend,
   ],
   json_encoder: Jason,
   formatter: LoggerJSON.Formatters.Basic
-
-config :opentelemetry_logger_metadata,
-  trace_id_field: :trace_id,
-  span_id_field: :span_id,
-  trace_flags_field: :trace_flags
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
