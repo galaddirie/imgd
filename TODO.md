@@ -20,8 +20,6 @@
 
 - [ ] Execution registry (for visbility in what executions are running on what node for observability and lifecycle management - future durability features)
 
-### Data-flow rules
-- [ ] fix:Only allow expressions to access **direct upstream node** data
 
 ### Interoperability
 - [ ] n8n import feature
