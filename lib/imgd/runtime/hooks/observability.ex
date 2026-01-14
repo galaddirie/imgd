@@ -16,7 +16,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
   require Logger
   alias Runic.Workflow
-  alias Imgd.Executions
   alias Imgd.Runtime.StepExecutionState
 
   @type hook_opts :: [execution_id: String.t(), workflow_id: String.t()]
@@ -120,31 +119,9 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
   # Pass accumulated step outputs to the step function via process dictionary
   defp before_step_context(_step, workflow, _fact) do
-    step_outputs = extract_step_outputs(workflow)
-    Process.put(:imgd_step_outputs, step_outputs)
+    outputs = Process.get(:imgd_accumulated_outputs, %{})
+    Process.put(:imgd_step_outputs, outputs)
     workflow
-  end
-
-  defp extract_step_outputs(workflow) do
-    graph = workflow.graph
-
-    graph
-    |> Graph.vertices()
-    |> Enum.filter(&match?(%Runic.Workflow.Fact{}, &1))
-    |> Enum.reduce(%{}, fn fact, acc ->
-      producing_step =
-        graph
-        |> Graph.in_neighbors(fact)
-        |> Enum.find(&match?(%Runic.Workflow.Step{}, &1))
-
-      case producing_step do
-        %{name: name} when is_binary(name) ->
-          Map.put(acc, name, fact.value)
-
-        _ ->
-          acc
-      end
-    end)
   end
 
   defp before_step_logging(_step, workflow, _fact) do
@@ -232,6 +209,11 @@ defmodule Imgd.Runtime.Hooks.Observability do
       completed_at: DateTime.utc_now()
     })
 
+    unless skipped? do
+      acc_outputs = Process.get(:imgd_accumulated_outputs, %{})
+      Process.put(:imgd_accumulated_outputs, Map.put(acc_outputs, step_name, result_fact.value))
+    end
+
     # Async broadcast for UI updates
     Task.start(fn ->
       state_opts = [
@@ -292,26 +274,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
     get_step_metadata(step, workflow)[:step_id] || get_step_name(step)
   end
 
-  defp preview_value(value) when is_binary(value) do
-    if String.length(value) > 100 do
-      String.slice(value, 0, 100) <> "..."
-    else
-      value
-    end
-  end
-
-  defp preview_value(value) when is_map(value), do: "[Map with #{map_size(value)} keys]"
-  defp preview_value(value) when is_list(value), do: "[List with #{length(value)} items]"
-  defp preview_value(value), do: inspect(value, limit: 5)
-
-  defp get_result_type(nil), do: nil
-  defp get_result_type(value) when is_map(value), do: :map
-  defp get_result_type(value) when is_list(value), do: :list
-  defp get_result_type(value) when is_binary(value), do: :string
-  defp get_result_type(value) when is_number(value), do: :number
-  defp get_result_type(value) when is_boolean(value), do: :boolean
-  defp get_result_type(_), do: :other
-
   @spec do_count_output_items(term()) :: non_neg_integer()
   defp do_count_output_items(nil), do: 0
   defp do_count_output_items([]), do: 0
@@ -338,17 +300,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp get_step_start_time(workflow, step_name) do
     workflow
     |> Map.get(:__step_times__, %{})
-    |> Map.get(step_name)
-  end
-
-  defp put_step_execution_id(workflow, step_name, id) do
-    ids = Map.get(workflow, :__step_exec_ids__, %{})
-    Map.put(workflow, :__step_exec_ids__, Map.put(ids, step_name, id))
-  end
-
-  defp get_step_execution_id(workflow, step_name) do
-    workflow
-    |> Map.get(:__step_exec_ids__, %{})
     |> Map.get(step_name)
   end
 

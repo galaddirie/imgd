@@ -12,7 +12,6 @@ defmodule Imgd.Compute.Runners.ComputeNode do
     node_name = String.to_atom(target.id)
 
     if node_name == Node.self() do
-      # Optimization: Execute locally if target is self
       apply(module, function, args)
       |> wrap_ok()
     else

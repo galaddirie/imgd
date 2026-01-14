@@ -293,20 +293,19 @@ defmodule Imgd.Executions do
         ]
       )
 
-    # Broadcast for each step
-    Enum.each(active_steps, fn step ->
-      payload = %{
-        execution_id: execution_id,
-        step_id: step.step_id,
-        status: :cancelled,
-        completed_at: now,
-        step_type_id: step.step_type_id
-      }
+    Task.start(fn ->
+      Enum.each(active_steps, fn step ->
+        payload = %{
+          execution_id: execution_id,
+          step_id: step.step_id,
+          status: :cancelled,
+          completed_at: now,
+          step_type_id: step.step_type_id
+        }
 
-      Imgd.Executions.PubSub.broadcast_step(:step_cancelled, execution_id, nil, payload)
-
-      # Also emit via Runtime.Events for consistency
-      Imgd.Runtime.Events.emit(:step_cancelled, execution_id, payload)
+        Imgd.Executions.PubSub.broadcast_step(:step_cancelled, execution_id, nil, payload)
+        Imgd.Runtime.Events.emit(:step_cancelled, execution_id, payload)
+      end)
     end)
 
     result
@@ -522,49 +521,84 @@ defmodule Imgd.Executions do
   @spec record_step_execution_completed_by_step(Ecto.UUID.t(), String.t(), term(), keyword()) ::
           {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | term()}
   def record_step_execution_completed_by_step(execution_id, step_id, output_data, opts \\ []) do
-    case fetch_latest_active_step_execution(execution_id, step_id) do
-      nil ->
-        {:error, :not_found}
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    error = Keyword.get(opts, :error)
+    output_item_count = Keyword.get(opts, :output_item_count)
 
-      %StepExecution{} = step_execution ->
-        updates = %{
-          status: :completed,
-          output_data: Serializer.wrap_for_db(output_data),
-          output_item_count: Keyword.get(opts, :output_item_count),
-          completed_at: DateTime.utc_now()
-        }
+    updates = [
+      status: :completed,
+      output_data: Serializer.wrap_for_db(output_data),
+      output_item_count: output_item_count,
+      completed_at: now,
+      updated_at: now
+    ]
 
-        safe_repo(fn ->
-          step_execution
-          |> StepExecution.changeset(updates)
-          |> Repo.update()
-        end)
-    end
+    updates = if error, do: Keyword.put(updates, :error, error), else: updates
+
+    query =
+      from(se in StepExecution,
+        where:
+          se.execution_id == ^execution_id and se.step_id == ^step_id and
+            se.status in ^@active_step_statuses
+      )
+
+    safe_repo(fn ->
+      case Repo.update_all(query, [set: updates], returning: true) do
+        {0, _} ->
+          {:error, :not_found}
+
+        {1, [step]} ->
+          {:ok, step}
+
+        {n, steps} ->
+          Logger.warning("Updated multiple step executions (#{n}) for completion",
+            execution_id: execution_id,
+            step_id: step_id
+          )
+
+          {:ok, List.last(steps)}
+      end
+    end)
   end
 
   @doc false
   @spec record_step_execution_failed_by_step(Ecto.UUID.t(), String.t(), term()) ::
           {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | term()}
   def record_step_execution_failed_by_step(execution_id, step_id, reason) do
-    case fetch_latest_active_step_execution(execution_id, step_id) do
-      nil ->
-        {:error, :not_found}
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    error = Execution.format_error({:step_failed, step_id, reason})
 
-      %StepExecution{} = step_execution ->
-        error = Execution.format_error({:step_failed, step_id, reason})
+    updates = [
+      status: :failed,
+      error: error,
+      completed_at: now,
+      updated_at: now
+    ]
 
-        updates = %{
-          status: :failed,
-          error: error,
-          completed_at: DateTime.utc_now()
-        }
+    query =
+      from(se in StepExecution,
+        where:
+          se.execution_id == ^execution_id and se.step_id == ^step_id and
+            se.status in ^@active_step_statuses
+      )
 
-        safe_repo(fn ->
-          step_execution
-          |> StepExecution.changeset(updates)
-          |> Repo.update()
-        end)
-    end
+    safe_repo(fn ->
+      case Repo.update_all(query, [set: updates], returning: true) do
+        {0, _} ->
+          {:error, :not_found}
+
+        {1, [step]} ->
+          {:ok, step}
+
+        {n, steps} ->
+          Logger.warning("Updated multiple step executions (#{n}) for failure",
+            execution_id: execution_id,
+            step_id: step_id
+          )
+
+          {:ok, List.last(steps)}
+      end
+    end)
   end
 
   @doc false

@@ -12,10 +12,11 @@ defmodule Imgd.Runtime.Execution.Server do
   alias Imgd.Runtime.Hooks.Observability
   alias Imgd.Executions
   alias Imgd.Executions.Execution
+  import Ecto.Query, warn: false
   alias Imgd.Repo
 
   defmodule State do
-    defstruct [:execution_id, :runic_workflow, :status, :metadata, :runtime_opts]
+    defstruct [:execution_id, :runic_workflow, :status, :metadata, :runtime_opts, :trigger_data]
   end
 
   # ============================================================================
@@ -55,7 +56,8 @@ defmodule Imgd.Runtime.Execution.Server do
                 runic_workflow: runic_wrk,
                 status: execution.status,
                 metadata: execution.metadata,
-                runtime_opts: runtime_opts
+                runtime_opts: runtime_opts,
+                trigger_data: (execution.trigger && execution.trigger.data) || %{}
               }
 
               # Trigger execution if process was started for a pending/running execution
@@ -139,8 +141,8 @@ defmodule Imgd.Runtime.Execution.Server do
     # Emit execution started event
     Events.emit(:execution_started, state.execution_id, %{status: :running})
 
-    # Get initial trigger data
-    trigger_data = fetch_trigger_data(state.execution_id)
+    # Use cached trigger data from state
+    trigger_data = state.trigger_data
 
     # Execute Runic cycles
     try do
@@ -259,31 +261,33 @@ defmodule Imgd.Runtime.Execution.Server do
     Events.emit(:execution_failed, execution_id, %{status: :failed, error: error_map})
   end
 
-  defp fetch_trigger_data(id) do
-    # In a real app, we'd load this from the 'trigger' field
-    execution = Repo.get!(Execution, id)
-    (execution.trigger && execution.trigger.data) || %{}
-  end
-
   defp update_status(id, status) do
-    Execution
-    |> Repo.get!(id)
-    |> Execution.changeset(%{status: status, started_at: DateTime.utc_now()})
-    |> Repo.update!()
+    Task.start(fn ->
+      now = DateTime.utc_now()
+
+      Repo.update_all(
+        from(e in Execution, where: e.id == ^id),
+        set: [status: status, started_at: now, updated_at: now]
+      )
+    end)
   end
 
   defp finalize_execution(state) do
-    wrk = state.runic_workflow
-    context = build_context_from_runic(wrk)
+    context = Process.get(:imgd_accumulated_outputs, %{})
 
-    Execution
-    |> Repo.get!(state.execution_id)
-    |> Execution.changeset(%{
-      status: :completed,
-      context: context,
-      completed_at: DateTime.utc_now()
-    })
-    |> Repo.update!()
+    Task.start(fn ->
+      now = DateTime.utc_now()
+
+      Repo.update_all(
+        from(e in Execution, where: e.id == ^state.execution_id),
+        set: [
+          status: :completed,
+          context: context,
+          completed_at: now,
+          updated_at: now
+        ]
+      )
+    end)
 
     Logger.info("Execution completed successfully")
   end
@@ -340,37 +344,19 @@ defmodule Imgd.Runtime.Execution.Server do
     Logger.error("Execution failed at step #{step_id}: #{inspect(reason)}")
   end
 
-  defp build_context_from_runic(wrk) do
-    graph = wrk.graph
-
-    # 1. Find all facts in the graph
-    facts =
-      graph
-      |> Graph.vertices()
-      |> Enum.filter(&match?(%Runic.Workflow.Fact{}, &1))
-
-    # 2. Map each fact to its producing step's name
-    # Step ID (name in Runic) is now the key-safe slug, use directly
-    facts
-    |> Enum.reduce(%{}, fn fact, acc ->
-      producing_step =
-        graph
-        |> Graph.in_neighbors(fact)
-        |> Enum.find(&match?(%Runic.Workflow.Step{}, &1))
-
-      case producing_step do
-        %{name: name} when is_binary(name) ->
-          Map.put(acc, name, fact.value)
-
-        _ ->
-          acc
-      end
-    end)
-  end
-
   defp maybe_put_step_type(payload, %{step_type_id: step_type_id})
        when not is_nil(step_type_id) do
     Map.put(payload, :step_type_id, step_type_id)
+  end
+
+  defp maybe_put_step_type(payload, step_execution) when is_map(step_execution) do
+    case step_execution do
+      %{step_type_id: step_type_id} when not is_nil(step_type_id) ->
+        Map.put(payload, :step_type_id, step_type_id)
+
+      _ ->
+        payload
+    end
   end
 
   defp maybe_put_step_type(payload, _step_execution), do: payload

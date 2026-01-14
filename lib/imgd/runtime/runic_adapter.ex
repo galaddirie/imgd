@@ -306,9 +306,8 @@ defmodule Imgd.Runtime.RunicAdapter do
           name: name
         )
 
-      # "collect" and default
       _ ->
-        Runic.reduce([], fn item, acc -> acc ++ [item] end, name: name)
+        Runic.reduce([], fn item, acc -> [item | acc] end, name: name)
     end
   end
 
