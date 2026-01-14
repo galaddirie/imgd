@@ -197,7 +197,6 @@ defmodule Imgd.Executions do
 
     if Scope.can_view_workflow?(scope, execution.workflow) do
       updates = %{status: status}
-
       # Add timestamps based on status
       updates =
         case status do
@@ -590,13 +589,21 @@ defmodule Imgd.Executions do
         {1, [step]} ->
           {:ok, step}
 
-        {n, steps} ->
+        {n, steps} when is_list(steps) ->
           Logger.warning("Updated multiple step executions (#{n}) for failure",
             execution_id: execution_id,
             step_id: step_id
           )
 
           {:ok, List.last(steps)}
+
+        other ->
+          Logger.warning("Unexpected result from update_execution_status: #{inspect(other)}",
+            execution_id: execution_id,
+            step_id: step_id
+          )
+
+          {:ok, nil}
       end
     end)
   end

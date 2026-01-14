@@ -100,6 +100,9 @@ defmodule Imgd.Runtime.Execution.Server do
         _ -> nil
       end
 
+    # Always flush buffered step events before dying
+    flush_step_executions(execution_id)
+
     if (execution_id && reason not in [:normal, :shutdown]) and not match?({:shutdown, _}, reason) do
       case Repo.get(Execution, execution_id) do
         %Execution{status: status} = execution
@@ -125,9 +128,6 @@ defmodule Imgd.Runtime.Execution.Server do
       end
     end
 
-    # Always flush buffered step events before dying
-    flush_step_executions(execution_id)
-
     :ok
   end
 
@@ -152,15 +152,26 @@ defmodule Imgd.Runtime.Execution.Server do
 
       # Sync the Runic graph results back to the Imgd context
       new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
-      finalize_execution(new_state)
 
-      # Flush step events to DB
-      flush_step_executions(state.execution_id)
+      # Check if we've been cancelled while running
+      case Repo.get(Execution, state.execution_id) do
+        %Execution{status: :cancelled} ->
+          # If cancelled, do not finalize as completed.
+          # We still flush step events (which will be marked cancelled by flush_step_executions)
+          flush_step_executions(state.execution_id)
+          {:stop, :normal, state}
 
-      # Emit completion event
-      Events.emit(:execution_completed, state.execution_id, %{status: :completed})
+        _ ->
+          finalize_execution(new_state)
 
-      {:stop, :normal, new_state}
+          # Flush step events to DB
+          flush_step_executions(state.execution_id)
+
+          # Emit completion event
+          Events.emit(:execution_completed, state.execution_id, %{status: :completed})
+
+          {:stop, :normal, new_state}
+      end
     catch
       :throw, {:step_error, step_id, reason} ->
         handle_failure(state, step_id, reason)
@@ -293,6 +304,10 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp handle_failure(state, step_id, reason) do
+    # Flush step events to DB first to ensure :running events are persisted
+    # before we try to mark them as :failed
+    flush_step_executions(state.execution_id)
+
     error_map = Execution.format_error({:step_failed, step_id, reason})
     completed_at = DateTime.utc_now()
 
@@ -338,9 +353,6 @@ defmodule Imgd.Runtime.Execution.Server do
     # Emit execution failed event
     Events.emit(:execution_failed, state.execution_id, %{status: :failed, error: error_map})
 
-    # Flush step events to DB
-    flush_step_executions(state.execution_id)
-
     Logger.error("Execution failed at step #{step_id}: #{inspect(reason)}")
   end
 
@@ -371,7 +383,7 @@ defmodule Imgd.Runtime.Execution.Server do
       events =
         if execution && execution.status == :cancelled do
           Enum.map(events, fn e ->
-            if e.status == :running, do: Map.put(e, :status, :cancelled), else: e
+            if e.status in [:running, :completed], do: Map.put(e, :status, :cancelled), else: e
           end)
         else
           events

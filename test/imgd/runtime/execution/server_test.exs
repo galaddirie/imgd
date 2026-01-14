@@ -109,14 +109,20 @@ defmodule Imgd.Runtime.Execution.ServerTest do
     assert execution.status == :running
 
     # Cancel the execution
-    scope = %Imgd.Accounts.Scope{user: Repo.get!(Imgd.Accounts.User, workflow.user_id)}
+    workflow = Repo.get!(Imgd.Workflows.Workflow, workflow.id)
+    user = Repo.get!(Imgd.Accounts.User, workflow.user_id)
+    scope = Imgd.Accounts.Scope.for_user(user)
     {:ok, cancelled_execution} = Imgd.Executions.cancel_execution(scope, execution)
     assert cancelled_execution.status == :cancelled
 
     # Manually stop the process as the LiveView would
-    GenServer.stop(pid, :shutdown)
+    try do
+      GenServer.stop(pid, :shutdown)
+    catch
+      :exit, _ -> :ok
+    end
 
-    assert_receive {:DOWN, ^ref, :process, ^pid, :shutdown}, 1000
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 1000
 
     # Verify execution status and step statuses
     execution = Repo.get!(Execution, execution.id)
