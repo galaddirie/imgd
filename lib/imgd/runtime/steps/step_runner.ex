@@ -187,6 +187,12 @@ defmodule Imgd.Runtime.Steps.StepRunner do
     # Merge: dynamic outputs take precedence (they're fresh), then pinned
     step_outputs = Map.merge(pinned_outputs, dynamic_outputs)
 
+    # Filter outputs to only include upstream steps
+    upstream_ids = Map.get(Keyword.get(opts, :upstream_lookup, %{}), step.id, [])
+
+    step_outputs =
+      Map.take(step_outputs, upstream_ids)
+
     ExecutionContext.new(
       execution_id: Keyword.get(opts, :execution_id),
       workflow_id: Keyword.get(opts, :workflow_id),
@@ -208,8 +214,6 @@ defmodule Imgd.Runtime.Steps.StepRunner do
   end
 
   defp evaluate_config(config, _ctx), do: {:ok, config}
-
-  defp build_steps_var(_), do: %{}
 
   # Step ID is now used directly as Runic name
   defp runic_name(%{id: id}) when is_binary(id) and byte_size(id) > 0, do: id

@@ -402,6 +402,12 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         Map.put(acc, se.step_id, se.output_data)
       end)
 
+    # Filter outputs to only include upstream steps
+    draft = socket.assigns.workflow.draft
+    graph = Imgd.Graph.from_workflow!(draft.steps, draft.connections, validate: false)
+    upstream_ids = Imgd.Graph.upstream(graph, step_id)
+    step_outputs = Map.take(step_outputs, upstream_ids)
+
     current_step_execution = Enum.find(step_executions, fn se -> se.step_id == step_id end)
     current_input = if current_step_execution, do: current_step_execution.input_data, else: nil
 
@@ -432,6 +438,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               # Step ID is now the key-safe slug, no mapping needed
               so =
                 Map.new(full_execution.step_executions, fn se -> {se.step_id, se.output_data} end)
+                |> Map.take(upstream_ids)
 
               ci =
                 Enum.find(full_execution.step_executions, fn se -> se.step_id == step_id end)

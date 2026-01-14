@@ -36,6 +36,7 @@ interface Props {
   expressionPreviews?: Record<string, any>
   editorState?: EditorState
   stepNameById?: Record<string, string>
+  upstreamStepIds?: Record<string, string[]>
 }
 
 const props = defineProps<Props>()
@@ -151,14 +152,18 @@ const evaluatedConfig = computed(() => {
 const contextData = computed(() => {
   if (!props.execution) return {}
   const currentStepId = props.node?.id
+  const upstreamIds = props.node ? (props.upstreamStepIds?.[props.node.id] || []) : []
+  
   return {
     json: unwrapData(activeStepExecution.value?.input_data) || {},
     trigger: props.execution?.trigger?.data || {},
     variables: props.execution?.metadata?.variables || {},
     request: props.execution?.metadata?.extras?.request || {},
     steps: props.stepExecutions?.reduce((acc: any, se: any) => {
-      const isCurrentStep = se.step_id === currentStepId
-      const stepName = isCurrentStep ? editName.value : props.stepNameById?.[se.step_id]
+      // Only include if it's an upstream step
+      if (!upstreamIds.includes(se.step_id)) return acc
+      
+      const stepName = props.stepNameById?.[se.step_id]
       const key = stepName && stepName.length > 0 ? stepName : se.step_id
 
       acc[key] = { json: unwrapData(se.output_data) }

@@ -230,6 +230,38 @@ const stepNameById = computed<Record<string, string>>(() => {
   }, {} as Record<string, string>)
 })
 
+const upstreamStepIdsByStepId = computed<Record<string, string[]>>(() => {
+  const steps = props.workflow.draft?.steps || []
+  const connections = props.workflow.draft?.connections || []
+  
+  const adj = new Map<string, string[]>()
+  connections.forEach(conn => {
+    if (!adj.has(conn.target_step_id)) adj.set(conn.target_step_id, [])
+    adj.get(conn.target_step_id)!.push(conn.source_step_id)
+  })
+  
+  const upstream: Record<string, string[]> = {}
+  
+  const getUpstream = (id: string, visited = new Set<string>()): Set<string> => {
+    const parents = adj.get(id) || []
+    const result = new Set<string>()
+    parents.forEach(p => {
+      if (!visited.has(p)) {
+        visited.add(p)
+        result.add(p)
+        getUpstream(p, visited).forEach(u => result.add(u))
+      }
+    })
+    return result
+  }
+  
+  steps.forEach(step => {
+    upstream[step.id] = Array.from(getUpstream(step.id))
+  })
+  
+  return upstream
+})
+
 const nodes = computed<Node<StepNodeData>[]>(() => {
   const steps = props.workflow.draft?.steps || []
   
@@ -899,7 +931,7 @@ const requestNodeRemoval = (nodeId: string) => {
 
       <StepConfigModal :is-open="store.isConfigModalOpen" :node="selectedNode" :step-type="selectedStepType"
         :execution="execution" :step-executions="stepExecutions" :expression-previews="expressionPreviews"
-        :editor-state="editorState" :step-name-by-id="stepNameById"
+        :editor-state="editorState" :step-name-by-id="stepNameById" :upstream-step-ids="upstreamStepIdsByStepId"
         @close="store.closeConfigModal" @save="handleSaveConfig" @delete="handleDeleteStep"
         @preview_expression="(payload: { step_id: string; field_key: string; expression: string }) => emit('preview_expression', payload)"
         @toggle_webhook_test="(payload: { step_id: string; action: 'start' | 'stop'; path?: string; method?: string }) => emit('toggle_webhook_test', payload)" />

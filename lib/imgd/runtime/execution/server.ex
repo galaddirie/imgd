@@ -383,12 +383,6 @@ defmodule Imgd.Runtime.Execution.Server do
     end)
   end
 
-  defp get_step_metadata(workflow) do
-    workflow
-    |> Map.get(:__changed__, %{})
-    |> Map.get(:__step_metadata__, workflow |> Map.get(:__step_metadata__, %{}))
-  end
-
   defp maybe_put_step_type(payload, %{step_type_id: step_type_id})
        when not is_nil(step_type_id) do
     Map.put(payload, :step_type_id, step_type_id)

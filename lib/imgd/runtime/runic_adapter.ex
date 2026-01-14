@@ -62,12 +62,17 @@ defmodule Imgd.Runtime.RunicAdapter do
     step_outputs =
       Keyword.get(opts, :step_outputs, Keyword.get(opts, :pinned_outputs, %{}))
 
+    # Build graph to compute upstream dependencies
+    graph = Imgd.Graph.from_workflow!(source.steps, source.connections, validate: false)
+    upstream_lookup = build_upstream_lookup(graph)
+
     step_opts = [
       execution_id: Keyword.get(opts, :execution_id),
       workflow_id: extract_source_id(source),
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
       step_outputs: step_outputs,
+      upstream_lookup: upstream_lookup,
       trigger_data: Keyword.get(opts, :trigger_data, %{}),
       trigger_type: Keyword.get(opts, :trigger_type),
       default_compute: Keyword.get(opts, :default_compute)
@@ -166,6 +171,12 @@ defmodule Imgd.Runtime.RunicAdapter do
   defp build_parent_lookup(connections) do
     # Group connections by target_step_id to find parents
     Enum.group_by(connections, & &1.target_step_id, & &1.source_step_id)
+  end
+
+  defp build_upstream_lookup(graph) do
+    Enum.reduce(Imgd.Graph.vertex_ids(graph), %{}, fn step_id, acc ->
+      Map.put(acc, step_id, Imgd.Graph.upstream(graph, step_id))
+    end)
   end
 
   defp topological_sort_steps(steps, connections) do
