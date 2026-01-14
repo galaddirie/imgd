@@ -90,7 +90,6 @@ const emit = defineEmits<{
   (e: 'disable_step', payload: { step_id: string; mode: 'skip' | 'exclude' }): void
   (e: 'enable_step', payload: { step_id: string }): void
   (e: 'run_test', payload?: { step_ids?: string[] }): void
-  (e: 'cancel_execution'): void
   (e: 'save_workflow'): void
   (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void
   // Collaboration events
@@ -816,7 +815,6 @@ const handleDeleteStep = (stepId: string) => requestNodeRemoval(stepId)
 
 const handleSave = () => emit('save_workflow')
 const handleRunTest = () => emit('run_test')
-const handleCancelExecution = () => emit('cancel_execution')
 const selectTraceStep = (stepId: string) => store.selectNode(stepId)
 
 type ConnectionLookupEdge = {
@@ -912,21 +910,13 @@ const requestNodeRemoval = (nodeId: string) => {
               <PlayIcon class="h-6 w-6" />
               <span class="text-base font-semibold">Execute Workflow</span>
             </button>
-            <button
-              v-else
-              class="btn btn-warning rounded-xl px-8 py-3 flex items-center gap-3 font-semibold shadow-lg shadow-warning/20 transition-all text-base hover:scale-105 active:scale-95"
-              @click="handleCancelExecution">
-              <ArrowPathIcon class="h-6 w-6 animate-spin" />
-              <span class="text-base font-semibold">Stop Execution</span>
-            </button>
           </div>
         </div>
 
         <ExecutionTracePanel :execution="execution" :step-executions="stepExecutions"
           :step-name-by-id="stepNameById"
           :is-expanded="store.isTracePanelExpanded" @toggle="store.toggleTracePanel"
-          @close="store.isTracePanelExpanded = false" @select-step="selectTraceStep" @run-test="handleRunTest"
-          @cancel="handleCancelExecution" />
+          @close="store.isTracePanelExpanded = false" @select-step="selectTraceStep" @run-test="handleRunTest" />
       </div>
 
       <StepConfigModal :is-open="store.isConfigModalOpen" :node="selectedNode" :step-type="selectedStepType"

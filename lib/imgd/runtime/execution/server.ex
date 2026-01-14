@@ -106,7 +106,7 @@ defmodule Imgd.Runtime.Execution.Server do
     if (execution_id && reason not in [:normal, :shutdown]) and not match?({:shutdown, _}, reason) do
       case Repo.get(Execution, execution_id) do
         %Execution{status: status} = execution
-        when status not in [:completed, :failed, :cancelled] ->
+        when status not in [:completed, :failed] ->
           Logger.error("Execution server terminating unexpectedly: #{inspect(reason)}")
           error_map = Execution.format_error(reason)
 
@@ -119,9 +119,6 @@ defmodule Imgd.Runtime.Execution.Server do
           |> Repo.update()
 
           Events.emit(:execution_failed, execution_id, %{status: :failed, error: error_map})
-
-          # Also cancel any active steps
-          Executions.cancel_active_step_executions(execution_id)
 
         _ ->
           :ok
@@ -152,26 +149,15 @@ defmodule Imgd.Runtime.Execution.Server do
 
       # Sync the Runic graph results back to the Imgd context
       new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
+      finalize_execution(new_state)
 
-      # Check if we've been cancelled while running
-      case Repo.get(Execution, state.execution_id) do
-        %Execution{status: :cancelled} ->
-          # If cancelled, do not finalize as completed.
-          # We still flush step events (which will be marked cancelled by flush_step_executions)
-          flush_step_executions(state.execution_id)
-          {:stop, :normal, state}
+      # Flush step events to DB
+      flush_step_executions(state.execution_id)
 
-        _ ->
-          finalize_execution(new_state)
+      # Emit completion event
+      Events.emit(:execution_completed, state.execution_id, %{status: :completed})
 
-          # Flush step events to DB
-          flush_step_executions(state.execution_id)
-
-          # Emit completion event
-          Events.emit(:execution_completed, state.execution_id, %{status: :completed})
-
-          {:stop, :normal, new_state}
-      end
+      {:stop, :normal, new_state}
     catch
       :throw, {:step_error, step_id, reason} ->
         handle_failure(state, step_id, reason)
@@ -326,9 +312,6 @@ defmodule Imgd.Runtime.Execution.Server do
           nil
       end
 
-    # Cancel any other steps that might be running/pending
-    Executions.cancel_active_step_executions(state.execution_id)
-
     payload =
       %{
         execution_id: state.execution_id,
@@ -373,22 +356,10 @@ defmodule Imgd.Runtime.Execution.Server do
 
   defp maybe_put_step_type(payload, _step_execution), do: payload
 
-  defp flush_step_executions(execution_id) do
+  defp flush_step_executions(_execution_id) do
     events = Observability.flush_step_events()
 
     if events != [] do
-      # If the execution was cancelled, mark any active steps as cancelled
-      execution = Repo.get(Execution, execution_id)
-
-      events =
-        if execution && execution.status == :cancelled do
-          Enum.map(events, fn e ->
-            if e.status in [:running, :completed], do: Map.put(e, :status, :cancelled), else: e
-          end)
-        else
-          events
-        end
-
       case Executions.record_step_executions_batch(events) do
         {:ok, _count} ->
           :ok
