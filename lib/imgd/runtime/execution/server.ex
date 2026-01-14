@@ -147,6 +147,9 @@ defmodule Imgd.Runtime.Execution.Server do
       new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
       finalize_execution(new_state)
 
+      # Flush step events to DB
+      flush_step_executions()
+
       # Emit completion event
       Events.emit(:execution_completed, state.execution_id, %{status: :completed})
 
@@ -203,7 +206,9 @@ defmodule Imgd.Runtime.Execution.Server do
         # Merge runtime opts (like ephemeral PIDs) into metadata
         metadata =
           %{
-            trace_id: Map.get(execution.metadata, "trace_id"),
+            trace_id:
+              (execution.metadata && Map.get(execution.metadata, :trace_id)) ||
+                Map.get(execution.metadata || %{}, "trace_id"),
             workflow_id: execution.workflow_id
           }
           |> Map.merge(Map.new(runtime_opts))
@@ -211,9 +216,11 @@ defmodule Imgd.Runtime.Execution.Server do
         # Pass execution context to the adapter
         opts = [
           execution_id: execution.id,
-          variables: Map.get(execution.metadata, "variables", %{}),
-          trigger_data: execution.trigger.data || %{},
-          trigger_type: execution.trigger.type,
+          variables:
+            (execution.metadata && Map.get(execution.metadata, :variables)) ||
+              Map.get(execution.metadata || %{}, "variables", %{}),
+          trigger_data: (execution.trigger && execution.trigger.data) || %{},
+          trigger_type: (execution.trigger && execution.trigger.type) || :manual,
           metadata: metadata,
           step_outputs: Keyword.get(runtime_opts, :step_outputs, %{})
         ]
@@ -250,7 +257,7 @@ defmodule Imgd.Runtime.Execution.Server do
   defp fetch_trigger_data(id) do
     # In a real app, we'd load this from the 'trigger' field
     execution = Repo.get!(Execution, id)
-    execution.trigger.data || %{}
+    (execution.trigger && execution.trigger.data) || %{}
   end
 
   defp update_status(id, status) do
@@ -322,6 +329,9 @@ defmodule Imgd.Runtime.Execution.Server do
     # Emit execution failed event
     Events.emit(:execution_failed, state.execution_id, %{status: :failed, error: error_map})
 
+    # Flush step events to DB
+    flush_step_executions()
+
     Logger.error("Execution failed at step #{step_id}: #{inspect(reason)}")
   end
 
@@ -359,4 +369,18 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp maybe_put_step_type(payload, _step_execution), do: payload
+
+  defp flush_step_executions do
+    events = Observability.flush_step_events()
+
+    if events != [] do
+      case Executions.record_step_executions_batch(events) do
+        {:ok, _count} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Failed to flush step executions batch", reason: inspect(reason))
+      end
+    end
+  end
 end

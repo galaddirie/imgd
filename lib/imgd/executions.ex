@@ -609,6 +609,61 @@ defmodule Imgd.Executions do
     end
   end
 
+  @doc """
+  Records multiple step executions in a single batch.
+  Matches against existing active steps by step_id and execution_id if they exist,
+  otherwise inserts new records.
+
+  Note: insert_all does not run timestamps/changeset validations,
+  so we handle UUID and timestamp generation manually.
+  """
+  @spec record_step_executions_batch([map()]) :: {:ok, integer()} | {:error, term()}
+  def record_step_executions_batch(batches) when is_list(batches) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    # Process batches into raw maps for insert_all
+    # We group by execution_id + step_id to merge started/completed events
+    # If a step has both started and completed in the same execution (common for simple steps),
+    # we merge them into a single completed record.
+    rows =
+      batches
+      |> Enum.group_by(fn b -> {b.execution_id, b.step_id} end)
+      |> Enum.map(fn {{exec_id, step_id}, entries} ->
+        # Merge all entries for this specific step run
+        merged =
+          Enum.reduce(entries, %{}, fn entry, acc ->
+            Map.merge(acc, entry)
+          end)
+
+        # Build raw DB row
+        %{
+          id: Ecto.UUID.generate(),
+          execution_id: exec_id,
+          step_id: step_id,
+          step_type_id: merged[:step_type_id] || "unknown",
+          status: merged[:status] || :completed,
+          input_data: Serializer.wrap_for_db(merged[:input_data]),
+          output_data: Serializer.wrap_for_db(merged[:output_data]),
+          output_item_count: merged[:output_item_count],
+          error: merged[:error],
+          started_at: merged[:started_at] || now,
+          completed_at: merged[:completed_at] || now,
+          metadata: merged[:metadata] || %{},
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    if rows == [] do
+      {:ok, 0}
+    else
+      safe_repo(fn ->
+        {count, _} = Repo.insert_all(StepExecution, rows)
+        {:ok, count}
+      end)
+    end
+  end
+
   defp fetch_latest_active_step_execution(nil, _step_id), do: nil
 
   defp fetch_latest_active_step_execution(execution_id, step_id) do

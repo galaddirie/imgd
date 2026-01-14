@@ -43,11 +43,6 @@ need to figure out how to model this, is each event a workflow execution or only
 - [ ] Stream trigger (similar modeling concerns)
 - [ ] Option to disable overhead (telemetry/metrics/logging) for high-frequency/long-lived workflows
 
-### Performance / Optimization
-- [ ] Compile expression evaluations to avoid runtime template evaluation (basically building routes from output to target ports)
-  - [ ] Store compiled templates in **workflow versions** (DB)
-  - [ ] Drafts compile on every run
-  - [ ] Target: save ~3–4ms per expression evaluation
 
 ### Observability + Sandbox
 - [ ] Integrate WASM sandbox with OTEL metrics + telemetry

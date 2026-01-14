@@ -152,15 +152,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
     end)
   end
 
-  defp before_step_logging(step, workflow, fact) do
-    step_name = get_step_name(step)
-    input_preview = preview_value(fact.value)
-
-    Logger.debug("Starting step",
-      step: step_name,
-      input: input_preview
-    )
-
+  defp before_step_logging(_step, workflow, _fact) do
+    # Logging removed for performance
     workflow
   end
 
@@ -169,8 +162,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
     start_time = System.monotonic_time()
     started_at = DateTime.utc_now()
     step_type_id = get_step_type_id(step, workflow)
-    persisted_step_type_id = step_type_id || "unknown"
-
     original_step_id = get_original_step_id(step, workflow)
 
     # Store start time and input for duration and complete payloads
@@ -180,42 +171,35 @@ defmodule Imgd.Runtime.Hooks.Observability do
       |> put_step_started_at(step_name, started_at)
       |> put_step_input_data(step_name, fact.value)
 
-    workflow =
-      case Executions.record_step_execution_started(
-             execution_id,
-             original_step_id,
-             persisted_step_type_id,
-             fact.value
-           ) do
-        {:ok, step_execution} ->
-          put_step_execution_id(workflow, step_name, step_execution.id)
+    # Buffer the "started" event instead of persisting immediately
+    push_step_event(%{
+      execution_id: execution_id,
+      step_id: original_step_id,
+      step_type_id: step_type_id || "unknown",
+      status: :running,
+      input_data: fact.value,
+      started_at: started_at
+    })
 
-        {:error, reason} ->
-          Logger.warning("Failed to persist step execution start",
-            execution_id: execution_id,
-            step_id: step_name,
-            reason: inspect(reason)
-          )
-
-          workflow
-      end
-
-    :telemetry.execute(
-      [:imgd, :step, :start],
-      %{system_time: System.system_time()},
-      %{
-        step_name: step_name,
-        execution_id: execution_id
-      }
-    )
-
-    state =
-      StepExecutionState.started(execution_id, original_step_id, fact.value,
-        step_type_id: step_type_id,
-        started_at: started_at
+    # Async broadcast for UI updates
+    Task.start(fn ->
+      :telemetry.execute(
+        [:imgd, :step, :start],
+        %{system_time: System.system_time()},
+        %{
+          step_name: step_name,
+          execution_id: execution_id
+        }
       )
 
-    Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, state)
+      state =
+        StepExecutionState.started(execution_id, original_step_id, fact.value,
+          step_type_id: step_type_id,
+          started_at: started_at
+        )
+
+      Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, state)
+    end)
 
     workflow
   end
@@ -224,15 +208,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
   # After Hooks
   # ===========================================================================
 
-  defp after_step_logging(step, workflow, result_fact) do
-    step_name = get_step_name(step)
-    output_preview = preview_value(result_fact.value)
-
-    Logger.debug("Completed step",
-      step: step_name,
-      output: output_preview
-    )
-
+  defp after_step_logging(_step, workflow, _result_fact) do
+    # Logging removed for performance
     workflow
   end
 
@@ -253,93 +230,68 @@ defmodule Imgd.Runtime.Hooks.Observability do
     # Count output items - splitter steps can produce multiple items
     output_item_count = do_count_output_items(result_fact.value)
 
-    :telemetry.execute(
-      [:imgd, :step, :stop],
-      %{
-        duration_us: duration_us,
-        system_time: System.system_time(),
-        output_item_count: output_item_count
-      },
-      %{
-        step_name: step_name,
-        execution_id: execution_id,
-        result_type: get_result_type(result_fact.value),
-        output_item_count: output_item_count,
-        skipped: skipped?
-      }
-    )
-
-    # Retrieve input data if possible (though we should have it from Runic fact)
-    # Runic fact in after_hook is the RESULT of the step, not the input.
-    # We need the input data which was used to start the step.
-    # In Runic, the input to a step is available in the workflow data or the before_hook.
-    # However, our observability hook doesn't easily store the input.
-    # Let's see if we can get it from the workflow metadata where we might have stored it.
-
-    # Actually, Runic's after_hook receives (step, workflow, result_fact).
-    # The input data is not directly in the after_hook.
-    # We should have stored it in the before_hook if we wanted it here.
-    # Wait, Runic fact.value in before_hook is the input.
-    # In after_hook, result_fact.value is the output.
-
-    # However, our StepExecutionState.completed needs both.
-    # Since we can't easily get input here without storing it in metadata,
-    # let's modify before_step_telemetry to store input in workflow metadata.
-
     input_data = get_step_input_data(workflow, step_name)
-
     started_at = get_step_started_at(workflow, step_name)
 
-    state_opts = [
-      step_type_id: step_type_id,
-      duration_us: duration_us,
+    # Buffer the "completed" / "skipped" event
+    push_step_event(%{
+      execution_id: execution_id,
+      step_id: original_step_id,
+      step_type_id: step_type_id || "unknown",
+      status: if(skipped?, do: :skipped, else: :completed),
+      input_data: input_data,
+      output_data: result_fact.value,
+      output_item_count: output_item_count,
       started_at: started_at,
-      completed_at: DateTime.utc_now(),
-      output_item_count: output_item_count
-    ]
+      completed_at: DateTime.utc_now()
+    })
 
-    state =
-      if skipped? do
-        StepExecutionState.skipped(execution_id, original_step_id, input_data, state_opts)
-      else
-        StepExecutionState.completed(
-          execution_id,
-          original_step_id,
-          input_data,
-          result_fact.value,
-          state_opts
-        )
-      end
+    # Async broadcast for UI updates
+    Task.start(fn ->
+      :telemetry.execute(
+        [:imgd, :step, :stop],
+        %{
+          duration_us: duration_us,
+          system_time: System.system_time(),
+          output_item_count: output_item_count
+        },
+        %{
+          step_name: step_name,
+          execution_id: execution_id,
+          result_type: get_result_type(result_fact.value),
+          output_item_count: output_item_count,
+          skipped: skipped?
+        }
+      )
 
-    if skipped? do
-      Executions.record_step_execution_skipped_by_step(execution_id, original_step_id)
-    else
-      case get_step_execution_id(workflow, step_name) do
-        nil ->
-          Executions.record_step_execution_completed_by_step(
+      state_opts = [
+        step_type_id: step_type_id,
+        duration_us: duration_us,
+        started_at: started_at,
+        completed_at: DateTime.utc_now(),
+        output_item_count: output_item_count
+      ]
+
+      state =
+        if skipped? do
+          StepExecutionState.skipped(execution_id, original_step_id, input_data, state_opts)
+        else
+          StepExecutionState.completed(
             execution_id,
             original_step_id,
+            input_data,
             result_fact.value,
-            output_item_count: output_item_count
+            state_opts
           )
+        end
 
-        step_execution_id ->
-          Executions.record_step_execution_completed_by_id(step_execution_id, result_fact.value,
-            output_item_count: output_item_count
-          )
-      end
-    end
-
-    Logger.debug("Broadcasting #{if skipped?, do: "step_skipped", else: "step_completed"}",
-      payload: state
-    )
-
-    Imgd.Executions.PubSub.broadcast_step(
-      if(skipped?, do: :step_skipped, else: :step_completed),
-      execution_id,
-      nil,
-      state
-    )
+      Imgd.Executions.PubSub.broadcast_step(
+        if(skipped?, do: :step_skipped, else: :step_completed),
+        execution_id,
+        nil,
+        state
+      )
+    end)
 
     workflow
   end
@@ -450,5 +402,26 @@ defmodule Imgd.Runtime.Hooks.Observability do
     workflow
     |> Map.get(:__step_inputs__, %{})
     |> Map.get(step_name)
+  end
+
+  # ===========================================================================
+  # Event Buffering
+  # ===========================================================================
+
+  @doc """
+  Pushes a step event to the process-local buffer for batch persistence.
+  """
+  def push_step_event(event) do
+    events = Process.get(:imgd_step_events, [])
+    Process.put(:imgd_step_events, [event | events])
+  end
+
+  @doc """
+  Retrieves and clears the process-local event buffer.
+  """
+  def flush_step_events do
+    events = Process.get(:imgd_step_events, [])
+    Process.put(:imgd_step_events, [])
+    Enum.reverse(events)
   end
 end

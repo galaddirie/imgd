@@ -143,13 +143,16 @@ defmodule Imgd.Runtime.Events do
 
   defp log_event(%{type: type, execution_id: exec_id} = event) do
     level = event_log_level(type)
-    message = event_message(type)
 
-    Logger.log(level, message,
-      type: type,
-      execution_id: exec_id,
-      data: Map.get(event, :data, %{})
-    )
+    if level == :error do
+      message = event_message(type)
+
+      Logger.log(level, message,
+        type: type,
+        execution_id: exec_id,
+        data: Map.get(event, :data, %{})
+      )
+    end
   end
 
   defp emit_telemetry(%{type: type, execution_id: exec_id, data: data}) do
