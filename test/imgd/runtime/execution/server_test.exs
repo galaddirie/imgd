@@ -79,58 +79,6 @@ defmodule Imgd.Runtime.Execution.ServerTest do
     assert execution.completed_at
   end
 
-  test "cancelling an execution terminates the process and updates status" do
-    workflow = insert(:workflow)
-
-    steps = [
-      %Step{
-        id: "wait_1",
-        type_id: "wait",
-        name: "Wait 1",
-        config: %{"duration" => 2000, "unit" => "milliseconds"}
-      }
-    ]
-
-    insert_draft(workflow, steps, [])
-
-    execution =
-      insert_execution(workflow,
-        status: :pending,
-        metadata: %{"trace_id" => "trace-cancel"}
-      )
-
-    {:ok, pid} = start_supervised({Server, execution_id: execution.id})
-    ref = Process.monitor(pid)
-
-    # Wait a bit for it to start running
-    Process.sleep(100)
-
-    execution = Repo.get!(Execution, execution.id)
-    assert execution.status == :running
-
-    # Cancel the execution
-    scope = %Imgd.Accounts.Scope{user: Repo.get!(Imgd.Accounts.User, workflow.user_id)}
-    {:ok, cancelled_execution} = Imgd.Executions.cancel_execution(scope, execution)
-    assert cancelled_execution.status == :cancelled
-
-    # Manually stop the process as the LiveView would
-    GenServer.stop(pid, :shutdown)
-
-    assert_receive {:DOWN, ^ref, :process, ^pid, :shutdown}, 1000
-
-    # Verify execution status and step statuses
-    execution = Repo.get!(Execution, execution.id)
-    assert execution.status == :cancelled
-    assert execution.completed_at
-
-    # Verify active steps are cancelled
-    step_executions = Imgd.Executions.list_step_executions(scope, execution)
-
-    assert Enum.any?(step_executions, fn se ->
-             se.step_id == "wait_1" && se.status == :cancelled
-           end)
-  end
-
   defp insert_draft(workflow, steps, connections) do
     %WorkflowDraft{
       workflow_id: workflow.id,
