@@ -197,6 +197,7 @@ defmodule Imgd.Executions do
 
     if Scope.can_view_workflow?(scope, execution.workflow) do
       updates = %{status: status}
+
       # Add timestamps based on status
       updates =
         case status do
@@ -232,6 +233,82 @@ defmodule Imgd.Executions do
     else
       {:error, :access_denied}
     end
+  end
+
+  @doc """
+  Cancels an execution.
+
+  Returns `{:ok, execution}` if successful, `{:error, reason}` otherwise.
+  """
+  @spec cancel_execution(Scope.t() | nil, Execution.t()) ::
+          {:ok, Execution.t()} | {:error, :not_found | :access_denied | :already_terminal}
+  def cancel_execution(scope, %Execution{} = execution) do
+    if Execution.terminal?(execution) do
+      {:error, :already_terminal}
+    else
+      case update_execution_status(scope, execution, :cancelled) do
+        {:ok, updated_execution} ->
+          # Broadcast cancellation
+          Imgd.Executions.PubSub.broadcast_execution_cancelled(updated_execution)
+
+          # Emit execution cancelled event
+          Imgd.Runtime.Events.emit(:execution_cancelled, updated_execution.id)
+
+          # Cancel active steps
+          cancel_active_step_executions(updated_execution.id)
+
+          {:ok, updated_execution}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  @doc """
+  Cancels all active step executions for an execution.
+
+  An active step is one with status :pending, :queued, or :running.
+  All matched steps will be transitioned to :cancelled.
+  """
+  @spec cancel_active_step_executions(Ecto.UUID.t()) :: {integer(), nil | [term()]}
+  def cancel_active_step_executions(execution_id) do
+    now = DateTime.utc_now()
+
+    query =
+      from se in StepExecution,
+        where: se.execution_id == ^execution_id and se.status in ^@active_step_statuses
+
+    # We use update_all for efficiency, but we need to broadcast events.
+    # In a high-scale system, we might just broadcast one "execution_cancelled" event
+    # and let the UI handle it, but for granularity, we'll fetch and broadcast.
+    active_steps = Repo.all(query)
+
+    result =
+      Repo.update_all(query,
+        set: [
+          status: :cancelled,
+          completed_at: now,
+          updated_at: now
+        ]
+      )
+
+    Task.start(fn ->
+      Enum.each(active_steps, fn step ->
+        payload = %{
+          execution_id: execution_id,
+          step_id: step.step_id,
+          status: :cancelled,
+          completed_at: now,
+          step_type_id: step.step_type_id
+        }
+
+        Imgd.Executions.PubSub.broadcast_step(:step_cancelled, execution_id, nil, payload)
+        Imgd.Runtime.Events.emit(:step_cancelled, execution_id, payload)
+      end)
+    end)
+
+    result
   end
 
   @doc """
@@ -513,21 +590,13 @@ defmodule Imgd.Executions do
         {1, [step]} ->
           {:ok, step}
 
-        {n, steps} when is_list(steps) ->
+        {n, steps} ->
           Logger.warning("Updated multiple step executions (#{n}) for failure",
             execution_id: execution_id,
             step_id: step_id
           )
 
           {:ok, List.last(steps)}
-
-        other ->
-          Logger.warning("Unexpected result from update_execution_status: #{inspect(other)}",
-            execution_id: execution_id,
-            step_id: step_id
-          )
-
-          {:ok, nil}
       end
     end)
   end

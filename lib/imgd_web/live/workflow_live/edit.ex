@@ -166,6 +166,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:disable_step={JS.push("disable_step")}
           v-on:enable_step={JS.push("enable_step")}
           v-on:run_test={JS.push("run_test")}
+          v-on:cancel_execution={JS.push("cancel_execution")}
           v-on:preview_expression={JS.push("preview_expression")}
           v-on:toggle_webhook_test={JS.push("toggle_webhook_test")}
           expressionPreviews={@expression_previews}
@@ -357,6 +358,28 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       "stop" ->
         _ = Server.disable_test_webhook(workflow_id, step_id)
         {:noreply, socket}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("cancel_execution", _params, socket) do
+    case socket.assigns.execution do
+      %Execution{} = execution ->
+        _ = maybe_stop_execution_process(execution.id)
+
+        case Executions.cancel_execution(socket.assigns.current_scope, execution) do
+          {:ok, updated_execution} ->
+            {:noreply, assign(socket, :execution, updated_execution)}
+
+          {:error, :already_terminal} ->
+            {:noreply, socket}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Unable to cancel execution")}
+        end
 
       _ ->
         {:noreply, socket}
@@ -593,6 +616,12 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     {:noreply, update_execution_assign(socket, execution)}
   end
 
+  @impl true
+  def handle_info({:execution_cancelled, %Execution{} = execution}, socket) do
+    {:noreply, update_execution_assign(socket, execution)}
+  end
+
+  @impl true
   def handle_info({:execution_failed, %Execution{} = execution, error}, socket) do
     socket = put_flash(socket, :error, "Execution failed: #{format_execution_error(error)}")
     {:noreply, update_execution_assign(socket, execution)}
@@ -600,7 +629,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_info({event, payload}, socket)
-      when event in [:step_started, :step_completed, :step_failed, :step_skipped] do
+      when event in [:step_started, :step_completed, :step_failed, :step_skipped, :step_cancelled] do
     socket =
       if event == :step_failed do
         step_id = payload[:step_id] || payload["step_id"]
@@ -852,6 +881,17 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_stop_execution_process(execution_id) do
+    case ExecutionSupervisor.get_execution_pid(execution_id) do
+      {:ok, pid} ->
+        Process.exit(pid, :shutdown)
+        :ok
+
+      {:error, _reason} ->
+        :ok
     end
   end
 
