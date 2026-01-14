@@ -6,8 +6,8 @@
 - [ ] Sub-workflows
 - [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)
     - [ ] Add variable trigger nodes (ex. variable changed)
-
 - [ ] 
+
 ### Editor UX
 - [ ] Add **Save** button
 - [ ] Add **Publish** button
@@ -85,3 +85,9 @@ merge node will also act as a edit fields node
 - determine risk of api key exposure in webhook trigger outputs
 
 
+
+
+editing  step config modal - changes reflect slow takes a few seconds to update when making executions
+
+
+bug in execution cancellation - it  continues running  and when we refresh the page it shows all nodes as cancelled including nodes that already completed successfully
