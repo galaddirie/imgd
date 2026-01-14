@@ -72,9 +72,6 @@ config :imgd, dev_routes: true
 config :logger, level: :debug
 config :logger, :console, level: :debug
 
-config :opentelemetry_exporter,
-  otlp_endpoint: "http://localhost:4318"
-
 # Set a higher stacktrace during development. Avoid configuring such
 # in production as building large stacktraces may be expensive.
 config :phoenix, :stacktrace_depth, 20

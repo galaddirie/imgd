@@ -88,7 +88,11 @@ defmodule Imgd.Runtime.StepSkipIntegrationTest do
     # Run it
     Workflow.react_until_satisfied(wf, %{})
 
-    # 5. Check DB
+    # 5. Flush and persist (since we are not in Execution.Server)
+    events = Observability.flush_step_events()
+    Executions.record_step_executions_batch(events)
+
+    # 6. Check DB
     step_exec = Repo.get_by(StepExecution, execution_id: execution.id, step_id: "manual_trigger")
     assert step_exec.status == :skipped
   end

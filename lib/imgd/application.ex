@@ -5,8 +5,6 @@ defmodule Imgd.Application do
 
   @impl true
   def start(_type, _args) do
-    setup_opentelemetry()
-    Imgd.Observability.Telemetry.setup()
     Imgd.Sandbox.Telemetry.setup()
 
     _flame_parent = FLAME.Parent.get()
@@ -16,7 +14,6 @@ defmodule Imgd.Application do
         # Start the Cluster Supervisor
         Imgd.ClusterSupervisor,
         ImgdWeb.Telemetry,
-        Imgd.Observability.PromEx,
         Imgd.Repo,
         {Oban, Application.fetch_env!(:imgd, Oban)},
         {DNSCluster, query: Application.get_env(:imgd, :dns_cluster_query) || :ignore},
@@ -45,17 +42,6 @@ defmodule Imgd.Application do
   @impl true
   def config_change(changed, _new, removed) do
     ImgdWeb.Endpoint.config_change(changed, removed)
-    :ok
-  end
-
-  defp setup_opentelemetry do
-    :opentelemetry_cowboy.setup()
-    OpentelemetryPhoenix.setup(adapter: :cowboy2)
-    OpentelemetryEcto.setup([:imgd, :repo])
-    OpentelemetryOban.setup()
-    OpentelemetryLiveView.setup()
-    OpentelemetryLoggerMetadata.setup()
-
     :ok
   end
 end

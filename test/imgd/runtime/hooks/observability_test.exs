@@ -55,28 +55,17 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
       %{scope: scope, workflow: workflow, execution: execution}
     end
 
-    test "emits telemetry and pubsub events for step completion", %{
+    test "emits pubsub events for step completion", %{
       scope: scope,
       workflow: _workflow,
       execution: execution
     } do
       execution_id = execution.id
-      handler_id = "obs-telemetry-#{System.unique_integer([:positive])}"
 
       PubSub.subscribe_execution(scope, execution_id)
 
-      :telemetry.attach(
-        handler_id,
-        [:imgd, :step, :stop],
-        fn event, measurements, metadata, _config ->
-          send(self(), {:telemetry_event, event, measurements, metadata})
-        end,
-        nil
-      )
-
       on_exit(fn ->
         PubSub.unsubscribe_execution(execution_id)
-        :telemetry.detach(handler_id)
       end)
 
       workflow =
@@ -90,10 +79,6 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
       assert_receive {:step_completed, payload}
       assert payload.step_id == "list_step"
       assert payload.output_item_count == 3
-
-      assert_receive {:telemetry_event, [:imgd, :step, :stop], measurements, metadata}
-      assert measurements.duration_us >= 0
-      assert metadata.output_item_count == 3
     end
   end
 

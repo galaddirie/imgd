@@ -326,7 +326,7 @@ defmodule Imgd.Executions do
       Repo.all(
         from se in StepExecution,
           where: se.execution_id == ^execution.id,
-          order_by: [asc: se.inserted_at]
+          order_by: [asc: se.started_at, asc: se.inserted_at]
       )
     else
       []

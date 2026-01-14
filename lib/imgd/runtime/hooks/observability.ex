@@ -12,11 +12,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
       workflow
       |> Observability.attach_all_hooks(execution_id: "exec_123")
 
-  ## Telemetry Events
-
-  - `[:imgd, :workflow, :step, :start]` - Step is about to execute
-  - `[:imgd, :workflow, :step, :stop]` - Step completed successfully
-  - `[:imgd, :workflow, :step, :exception]` - Step raised an exception
   """
 
   require Logger
@@ -183,15 +178,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
     # Async broadcast for UI updates
     Task.start(fn ->
-      :telemetry.execute(
-        [:imgd, :step, :start],
-        %{system_time: System.system_time()},
-        %{
-          step_name: step_name,
-          execution_id: execution_id
-        }
-      )
-
       state =
         StepExecutionState.started(execution_id, original_step_id, fact.value,
           step_type_id: step_type_id,
@@ -248,22 +234,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
     # Async broadcast for UI updates
     Task.start(fn ->
-      :telemetry.execute(
-        [:imgd, :step, :stop],
-        %{
-          duration_us: duration_us,
-          system_time: System.system_time(),
-          output_item_count: output_item_count
-        },
-        %{
-          step_name: step_name,
-          execution_id: execution_id,
-          result_type: get_result_type(result_fact.value),
-          output_item_count: output_item_count,
-          skipped: skipped?
-        }
-      )
-
       state_opts = [
         step_type_id: step_type_id,
         duration_us: duration_us,

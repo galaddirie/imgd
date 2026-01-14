@@ -43,6 +43,8 @@ defmodule Imgd.Runtime.Execution.Server do
     Logger.metadata(execution_id: execution_id)
     Logger.info("Initializing execution server")
 
+    Process.flag(:trap_exit, true)
+
     try do
       case load_with_source(execution_id) do
         {:ok, execution} ->
@@ -121,6 +123,9 @@ defmodule Imgd.Runtime.Execution.Server do
       end
     end
 
+    # Always flush buffered step events before dying
+    flush_step_executions(execution_id)
+
     :ok
   end
 
@@ -148,7 +153,7 @@ defmodule Imgd.Runtime.Execution.Server do
       finalize_execution(new_state)
 
       # Flush step events to DB
-      flush_step_executions()
+      flush_step_executions(state.execution_id)
 
       # Emit completion event
       Events.emit(:execution_completed, state.execution_id, %{status: :completed})
@@ -330,7 +335,7 @@ defmodule Imgd.Runtime.Execution.Server do
     Events.emit(:execution_failed, state.execution_id, %{status: :failed, error: error_map})
 
     # Flush step events to DB
-    flush_step_executions()
+    flush_step_executions(state.execution_id)
 
     Logger.error("Execution failed at step #{step_id}: #{inspect(reason)}")
   end
@@ -370,10 +375,22 @@ defmodule Imgd.Runtime.Execution.Server do
 
   defp maybe_put_step_type(payload, _step_execution), do: payload
 
-  defp flush_step_executions do
+  defp flush_step_executions(execution_id) do
     events = Observability.flush_step_events()
 
     if events != [] do
+      # If the execution was cancelled, mark any active steps as cancelled
+      execution = Repo.get(Execution, execution_id)
+
+      events =
+        if execution && execution.status == :cancelled do
+          Enum.map(events, fn e ->
+            if e.status == :running, do: Map.put(e, :status, :cancelled), else: e
+          end)
+        else
+          events
+        end
+
       case Executions.record_step_executions_batch(events) do
         {:ok, _count} ->
           :ok

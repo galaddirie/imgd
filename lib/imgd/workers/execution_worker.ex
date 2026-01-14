@@ -7,32 +7,10 @@ defmodule Imgd.Workers.ExecutionWorker do
   This is the **job queue entry point** — a thin wrapper that handles async/background job concerns:
 
   - Receives Oban jobs from the queue
-  - Extracts and restores OpenTelemetry trace context for distributed tracing
+  - Receives Oban jobs from the queue
   - Starts or attaches to execution processes via `Imgd.Runtime.Execution.Supervisor`
   - Monitors execution processes and waits for completion
   - Returns Oban-compatible results (:ok, {:error, ...})
-
-  ## Execution Flow
-
-  1. **Job Reception**: Receives job with `execution_id` from Oban queue
-  2. **Trace Context**: Restores distributed tracing context for observability
-  3. **Process Management**: Attempts to start execution via supervisor, or attaches to existing process
-  4. **Monitoring**: Monitors the execution process and waits for completion
-  5. **Result Translation**: Translates process exit reasons to Oban job results
-
-  ## Process Lifecycle Handling
-
-  The worker handles different execution process termination scenarios:
-
-  - `:normal` - Execution completed successfully
-  - `:shutdown` - Execution was gracefully stopped
-  - Other reasons - Execution failed or crashed (logged as error)
-
-
-  ## Job Arguments
-
-  - `execution_id` - The UUID of the execution to run
-  - `trace_context` - Serialized OpenTelemetry context for distributed tracing (optional)
 
   ## Configuration
 
@@ -48,14 +26,9 @@ defmodule Imgd.Workers.ExecutionWorker do
 
   require Logger
 
-  alias Imgd.Observability.Instrumentation
-
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
     execution_id = Map.fetch!(args, "execution_id")
-
-    # Extract and restore trace context for distributed tracing
-    Instrumentation.extract_trace_context(args)
 
     Logger.metadata(execution_id: execution_id)
     Logger.info("Starting workflow execution job")
@@ -184,19 +157,9 @@ defmodule Imgd.Workers.ExecutionWorker do
   Includes trace context propagation for distributed tracing.
   """
   def build_args(execution_id, opts \\ []) do
-    base_args = %{
+    args = %{
       "execution_id" => execution_id
     }
-
-    # Add trace context if available
-    trace_ctx = Instrumentation.serialize_trace_context()
-
-    args =
-      if map_size(trace_ctx) > 0 do
-        Map.put(base_args, "trace_context", trace_ctx)
-      else
-        base_args
-      end
 
     # Add any additional metadata
     case Keyword.get(opts, :metadata) do

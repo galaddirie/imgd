@@ -18,11 +18,6 @@ defmodule ImgdWeb.Endpoint do
 
   plug :favicon, dev_server: {PhoenixVite.Components, :has_vite_watcher?, [__MODULE__]}
 
-  # PromEx Metrics Endpoint
-  # Exposes /metrics for Prometheus scraping
-  # This must come before other plugs to avoid auth requirements
-  plug PromEx.Plug, prom_ex_module: Imgd.Observability.PromEx
-
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

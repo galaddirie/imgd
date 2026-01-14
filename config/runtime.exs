@@ -8,45 +8,6 @@ import Config
 
 env = config_env()
 
-config :opentelemetry,
-  resource: %{
-    service: %{
-      name: System.get_env("OTEL_SERVICE_NAME", "imgd"),
-      # For releases, you may want to pass APP_VERSION via env instead of Mix.Project
-      version: System.get_env("APP_VERSION") || "0.1.0",
-      namespace: "imgd"
-    },
-    deployment: %{
-      environment: Atom.to_string(env)
-    }
-  }
-
-default_otlp =
-  case env do
-    :prod -> "http://tempo:4318"
-    _ -> "http://localhost:4318"
-  end
-
-config :opentelemetry_exporter,
-  otlp_endpoint: System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT", default_otlp)
-
-if env == :prod do
-  grafana_host = System.get_env("GRAFANA_HOST", "http://grafana:3000")
-
-  grafana_token =
-    System.get_env("GRAFANA_AUTH_TOKEN") ||
-      raise "GRAFANA_AUTH_TOKEN is required in prod for PromEx Grafana integration"
-
-  config :imgd, Imgd.Observability.PromEx,
-    grafana: [
-      host: grafana_host,
-      auth_token: grafana_token,
-      upload_dashboards_on_start: true,
-      folder_name: "imgd",
-      annotate_app_lifecycle: true
-    ]
-end
-
 if env == :prod do
   config :flame, :backend, FLAME.LocalBackend
 

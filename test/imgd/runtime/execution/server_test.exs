@@ -114,7 +114,7 @@ defmodule Imgd.Runtime.Execution.ServerTest do
     assert cancelled_execution.status == :cancelled
 
     # Manually stop the process as the LiveView would
-    Process.exit(pid, :shutdown)
+    GenServer.stop(pid, :shutdown)
 
     assert_receive {:DOWN, ^ref, :process, ^pid, :shutdown}, 1000
 

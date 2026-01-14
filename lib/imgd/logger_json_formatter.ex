@@ -1,6 +1,6 @@
 defmodule Imgd.LoggerJSONFormatter do
   @moduledoc """
-  Logger formatter that emits flat JSON lines compatible with promtail.
+  Logger formatter that emits flat JSON lines.
   """
 
   @spec format(Logger.level(), Logger.message(), Logger.Formatter.time(), Logger.metadata()) ::
