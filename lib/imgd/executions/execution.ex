@@ -20,8 +20,6 @@ defmodule Imgd.Executions.Execution do
              :completed_at,
              :expires_at,
              :metadata,
-             :runic_log,
-             :runic_snapshot,
              :triggered_by_user_id,
              :inserted_at,
              :updated_at
@@ -157,10 +155,6 @@ defmodule Imgd.Executions.Execution do
     belongs_to :triggered_by_user, User, foreign_key: :triggered_by_user_id
     has_many :step_executions, StepExecution
 
-    # Runic dataflow state
-    field :runic_log, {:array, :map}, default: []
-    field :runic_snapshot, :binary
-
     timestamps()
   end
 
@@ -177,9 +171,7 @@ defmodule Imgd.Executions.Execution do
       :started_at,
       :completed_at,
       :expires_at,
-      :triggered_by_user_id,
-      :runic_log,
-      :runic_snapshot
+      :triggered_by_user_id
     ])
     |> cast_embed(:trigger, required: true, with: &trigger_changeset/2)
     |> cast_embed(:metadata, with: &metadata_changeset/2)

@@ -177,20 +177,8 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp build_runic_workflow(execution, runtime_opts) do
-    # Hydrate Runic Workflow (from snapshot or build from draft)
-    runic_wrk =
-      cond do
-        execution.runic_snapshot ->
-          hydrate_from_snapshot(execution.runic_snapshot)
-
-        execution.runic_log && length(execution.runic_log) > 0 ->
-          # Option for replaying construction log here if needed
-          build_from_source(execution, runtime_opts)
-
-        true ->
-          # Fresh start
-          build_from_source(execution, runtime_opts)
-      end
+    # Hydrate Runic Workflow from source
+    runic_wrk = build_from_source(execution, runtime_opts)
 
     if runic_wrk do
       # Attach observability hooks for logging, telemetry, events
@@ -226,19 +214,12 @@ defmodule Imgd.Runtime.Execution.Server do
           variables: Map.get(execution.metadata, "variables", %{}),
           trigger_data: execution.trigger.data || %{},
           trigger_type: execution.trigger.type,
-          metadata: metadata
+          metadata: metadata,
+          step_outputs: Keyword.get(runtime_opts, :step_outputs, %{})
         ]
 
         RunicAdapter.to_runic_workflow(source, opts)
     end
-  end
-
-  defp hydrate_from_snapshot(binary) do
-    :erlang.binary_to_term(binary)
-  rescue
-    e ->
-      Logger.error("Failed to hydrate execution snapshot: #{inspect(e)}")
-      nil
   end
 
   defp get_source(%Execution{
@@ -283,22 +264,11 @@ defmodule Imgd.Runtime.Execution.Server do
     wrk = state.runic_workflow
     context = build_context_from_runic(wrk)
 
-    # Get serializable Runic log
-    runic_log =
-      wrk
-      |> Workflow.log()
-      |> Enum.map(&Imgd.Runtime.Serializer.sanitize/1)
-
-    # Binary snapshot for fast resumption
-    snapshot = :erlang.term_to_binary(wrk)
-
     Execution
     |> Repo.get!(state.execution_id)
     |> Execution.changeset(%{
       status: :completed,
       context: context,
-      runic_log: runic_log,
-      runic_snapshot: snapshot,
       completed_at: DateTime.utc_now()
     })
     |> Repo.update!()

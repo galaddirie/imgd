@@ -42,8 +42,6 @@ defmodule Imgd.Runtime.Execution.ServerTest do
     assert execution.status == :completed
     assert execution.started_at
     assert execution.completed_at
-    assert length(execution.runic_log) > 0
-    assert is_binary(execution.runic_snapshot)
     assert execution.context["step_1"] == %{"value" => 1}
     assert execution.context["step_2"] == %{"value" => 1}
   end

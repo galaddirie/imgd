@@ -13,7 +13,6 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   alias Imgd.Executions.Execution
   alias Imgd.Executions.PubSub, as: ExecutionPubSub
   alias Imgd.Runtime.Execution.Supervisor, as: ExecutionSupervisor
-  alias Imgd.Runtime.RunicAdapter
   alias Ecto.UUID
   require Logger
 
@@ -766,10 +765,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
       with {:ok, execution} <- Executions.create_execution(scope, attrs) do
         try do
-          with {:ok, execution} <-
-                 put_runic_snapshot(scope, execution, preview_draft, pinned_outputs),
-               :ok <- subscribe_execution(scope, execution.id),
-               {:ok, _pid} <- start_execution_process(execution.id) do
+          with :ok <- subscribe_execution(scope, execution.id),
+               {:ok, _pid} <- start_execution_process(execution.id, step_outputs: pinned_outputs) do
             step_executions = build_initial_step_executions(execution.id, preview_draft.steps)
 
             socket =
@@ -798,22 +795,6 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           {:error, format_execution_error(reason), socket}
       end
     end
-  end
-
-  defp put_runic_snapshot(scope, %Execution{} = execution, draft, pinned_outputs) do
-    metadata = normalize_execution_metadata(execution.metadata)
-
-    runic_workflow =
-      RunicAdapter.to_runic_workflow(draft,
-        execution_id: execution.id,
-        metadata: metadata,
-        step_outputs: pinned_outputs,
-        trigger_data: execution.trigger.data || %{},
-        trigger_type: execution.trigger.type
-      )
-
-    snapshot = :erlang.term_to_binary(runic_workflow)
-    Executions.put_execution_snapshot(scope, execution, snapshot)
   end
 
   defp find_trigger_data(draft) do
@@ -873,15 +854,6 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end)
   end
 
-  defp normalize_execution_metadata(nil), do: %{}
-
-  defp normalize_execution_metadata(%{__struct__: _} = metadata) do
-    Map.from_struct(metadata)
-  end
-
-  defp normalize_execution_metadata(metadata) when is_map(metadata), do: metadata
-  defp normalize_execution_metadata(_metadata), do: %{}
-
   defp subscribe_execution(scope, execution_id) do
     case ExecutionPubSub.subscribe_execution(scope, execution_id) do
       :ok -> :ok
@@ -904,8 +876,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
-  defp start_execution_process(execution_id) do
-    case ExecutionSupervisor.start_execution(execution_id) do
+  defp start_execution_process(execution_id, opts) do
+    case ExecutionSupervisor.start_execution(execution_id, opts) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
       {:error, reason} -> {:error, reason}
