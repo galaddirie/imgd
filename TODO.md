@@ -42,8 +42,7 @@ need to figure out how to model this, is each event a workflow execution or only
 - [ ] Option to disable overhead (telemetry/metrics/logging) for high-frequency/long-lived workflows
 
 
-### Observability + Sandbox
-- [ ] Integrate WASM sandbox with OTEL metrics + telemetry
+
 
 ### Examples / Demos
 - [ ] FLAME example: input video → return thumbnails
