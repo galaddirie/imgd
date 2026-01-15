@@ -332,7 +332,15 @@ defmodule Imgd.Runtime.Execution.Server do
     {usage, state} = finalize_resource_usage(state)
 
     error_map = Execution.format_error({:step_failed, step_id, reason})
-    completed_at = DateTime.utc_now()
+    completed_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    Observability.push_step_event(%{
+      execution_id: state.execution_id,
+      step_id: step_id,
+      status: :failed,
+      error: error_map,
+      completed_at: completed_at
+    })
 
     step_execution =
       case Executions.record_step_execution_failed_by_step(state.execution_id, step_id, reason) do

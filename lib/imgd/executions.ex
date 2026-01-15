@@ -16,6 +16,18 @@ defmodule Imgd.Executions do
   alias Imgd.Runtime.Serializer
 
   @active_step_statuses [:pending, :queued, :running]
+  @active_status_rank %{pending: 0, queued: 1, running: 2}
+  @terminal_status_priority %{failed: 3, cancelled: 2, completed: 1, skipped: 0}
+  @status_sort_rank %{
+    pending: 0,
+    queued: 1,
+    running: 2,
+    completed: 3,
+    skipped: 4,
+    cancelled: 5,
+    failed: 6
+  }
+  @max_timestamp 9_999_999_999_999_999
 
   @type execution_params :: %{
           required(:workflow_id) => Ecto.UUID.t(),
@@ -568,35 +580,18 @@ defmodule Imgd.Executions do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     error = Execution.format_error({:step_failed, step_id, reason})
 
-    updates = [
+    entry = %{
+      execution_id: execution_id,
+      step_id: step_id,
       status: :failed,
       error: error,
-      completed_at: now,
-      updated_at: now
-    ]
-
-    query =
-      from(se in StepExecution,
-        where:
-          se.execution_id == ^execution_id and se.step_id == ^step_id and
-            se.status in ^@active_step_statuses
-      )
+      completed_at: now
+    }
 
     safe_repo(fn ->
-      case Repo.update_all(query, [set: updates], returning: true) do
-        {0, _} ->
-          {:error, :not_found}
-
-        {1, [step]} ->
-          {:ok, step}
-
-        {n, steps} ->
-          Logger.warning("Updated multiple step executions (#{n}) for failure",
-            execution_id: execution_id,
-            step_id: step_id
-          )
-
-          {:ok, List.last(steps)}
+      case persist_step_execution_entries([entry], now) do
+        {:ok, step_execution, _action} -> {:ok, step_execution}
+        {:error, failure_reason} -> {:error, failure_reason}
       end
     end)
   end
@@ -645,56 +640,399 @@ defmodule Imgd.Executions do
 
   @doc """
   Records multiple step executions in a single batch.
-  Matches against existing active steps by step_id and execution_id if they exist,
-  otherwise inserts new records.
-
-  Note: insert_all does not run timestamps/changeset validations,
-  so we handle UUID and timestamp generation manually.
+  Merges step events per step and persists them with FSM-aware, commutative semantics.
   """
   @spec record_step_executions_batch([map()]) :: {:ok, integer()} | {:error, term()}
   def record_step_executions_batch(batches) when is_list(batches) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
-    # Process batches into raw maps for insert_all
-    # We group by execution_id + step_id to merge started/completed events
-    # If a step has both started and completed in the same execution (common for simple steps),
-    # we merge them into a single completed record.
-    rows =
-      batches
-      |> Enum.group_by(fn b -> {b.execution_id, b.step_id} end)
-      |> Enum.map(fn {{exec_id, step_id}, entries} ->
-        # Merge all entries for this specific step run
-        merged =
-          Enum.reduce(entries, %{}, fn entry, acc ->
-            Map.merge(acc, entry)
+    batches
+    |> Enum.map(&normalize_step_entry/1)
+    |> Enum.filter(&valid_step_entry?/1)
+    |> case do
+      [] ->
+        {:ok, 0}
+
+      entries ->
+        safe_repo(fn ->
+          entries
+          |> Enum.group_by(fn entry ->
+            {entry.execution_id, entry.step_id, entry.attempt || 1}
           end)
+          |> Enum.reduce_while({:ok, 0}, fn {_key, grouped_entries}, {:ok, count} ->
+            case persist_step_execution_entries(grouped_entries, now) do
+              {:ok, _step_execution, :noop} ->
+                {:cont, {:ok, count}}
 
-        # Build raw DB row
-        %{
-          id: Ecto.UUID.generate(),
-          execution_id: exec_id,
-          step_id: step_id,
-          step_type_id: merged[:step_type_id] || "unknown",
-          status: merged[:status] || :completed,
-          input_data: Serializer.wrap_for_db(merged[:input_data]),
-          output_data: Serializer.wrap_for_db(merged[:output_data]),
-          output_item_count: merged[:output_item_count],
-          error: merged[:error],
-          started_at: merged[:started_at] || now,
-          completed_at: merged[:completed_at] || now,
-          metadata: merged[:metadata] || %{},
-          inserted_at: now,
-          updated_at: now
-        }
-      end)
+              {:ok, _step_execution, _action} ->
+                {:cont, {:ok, count + 1}}
 
-    if rows == [] do
-      {:ok, 0}
+              {:error, reason} ->
+                {:halt, {:error, reason}}
+            end
+          end)
+        end)
+    end
+  end
+
+  defp persist_step_execution_entries(entries, now) when is_list(entries) do
+    [first | _] = entries
+    execution_id = Map.get(first, :execution_id)
+    step_id = Map.get(first, :step_id)
+    attempt = Map.get(first, :attempt) || 1
+
+    existing = fetch_latest_step_execution(execution_id, step_id, attempt)
+    merged = merge_step_entries([existing | entries], now)
+
+    if valid_step_entry?(merged) do
+      attrs = step_execution_attrs(merged)
+
+      case existing do
+        nil ->
+          case StepExecution.changeset(%StepExecution{}, attrs) |> Repo.insert() do
+            {:ok, step_execution} -> {:ok, step_execution, :inserted}
+            {:error, changeset} -> {:error, changeset}
+          end
+
+        %StepExecution{} = step_execution ->
+          changeset = StepExecution.changeset(step_execution, attrs)
+
+          cond do
+            changeset.changes == %{} ->
+              {:ok, step_execution, :noop}
+
+            changeset.valid? ->
+              case Repo.update(changeset) do
+                {:ok, updated} -> {:ok, updated, :updated}
+                {:error, update_error} -> {:error, update_error}
+              end
+
+            transition_error?(changeset) ->
+              {:ok, step_execution, :noop}
+
+            true ->
+              {:error, changeset}
+          end
+      end
     else
-      safe_repo(fn ->
-        {count, _} = Repo.insert_all(StepExecution, rows)
-        {:ok, count}
-      end)
+      {:error, :invalid_entry}
+    end
+  end
+
+  defp merge_step_entries(entries, now) do
+    normalized =
+      entries
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&normalize_step_entry/1)
+      |> Enum.filter(&valid_step_entry?/1)
+
+    case normalized do
+      [] ->
+        %{}
+
+      _ ->
+        base = List.first(normalized)
+        status = choose_step_status(normalized)
+        queued_at = min_datetime(normalized, :queued_at)
+        started_at = min_datetime(normalized, :started_at)
+
+        completed_at =
+          normalized
+          |> max_datetime(:completed_at)
+          |> maybe_default_completed_at(status, now)
+
+        %{
+          execution_id: base.execution_id,
+          step_id: base.step_id,
+          step_type_id: pick_first_non_nil(normalized, :step_type_id),
+          status: status,
+          input_data: pick_input_data(normalized),
+          output_data: pick_output_data(normalized),
+          output_item_count: pick_output_item_count(normalized),
+          error: pick_error(normalized),
+          metadata: merge_metadata(normalized),
+          queued_at: queued_at,
+          started_at: started_at,
+          completed_at: completed_at,
+          attempt: pick_attempt(normalized),
+          retry_of_id: pick_first_non_nil(normalized, :retry_of_id)
+        }
+    end
+  end
+
+  defp step_execution_attrs(merged) do
+    %{
+      execution_id: merged.execution_id,
+      step_id: merged.step_id,
+      step_type_id: merged.step_type_id || "unknown",
+      status: merged.status || :pending,
+      input_data: Serializer.wrap_for_db(merged.input_data),
+      output_data: Serializer.wrap_for_db(merged.output_data),
+      output_item_count: merged.output_item_count,
+      error: merged.error,
+      metadata: merged.metadata || %{},
+      queued_at: merged.queued_at,
+      started_at: merged.started_at,
+      completed_at: merged.completed_at,
+      attempt: merged.attempt || 1,
+      retry_of_id: merged.retry_of_id
+    }
+  end
+
+  defp normalize_step_entry(%StepExecution{} = step_execution) do
+    %{
+      execution_id: step_execution.execution_id,
+      step_id: step_execution.step_id,
+      step_type_id: step_execution.step_type_id,
+      status: step_execution.status,
+      input_data: step_execution.input_data,
+      output_data: step_execution.output_data,
+      output_item_count: step_execution.output_item_count,
+      error: step_execution.error,
+      metadata: step_execution.metadata,
+      queued_at: step_execution.queued_at,
+      started_at: step_execution.started_at,
+      completed_at: step_execution.completed_at,
+      attempt: step_execution.attempt,
+      retry_of_id: step_execution.retry_of_id
+    }
+  end
+
+  defp normalize_step_entry(entry) when is_map(entry) do
+    %{
+      execution_id: fetch_step_value(entry, :execution_id),
+      step_id: fetch_step_value(entry, :step_id),
+      step_type_id: fetch_step_value(entry, :step_type_id),
+      status: normalize_status(fetch_step_value(entry, :status)),
+      input_data: fetch_step_value(entry, :input_data),
+      output_data: fetch_step_value(entry, :output_data),
+      output_item_count: fetch_step_value(entry, :output_item_count),
+      error: fetch_step_value(entry, :error),
+      metadata: normalize_metadata(fetch_step_value(entry, :metadata)),
+      queued_at: normalize_datetime(fetch_step_value(entry, :queued_at)),
+      started_at: normalize_datetime(fetch_step_value(entry, :started_at)),
+      completed_at: normalize_datetime(fetch_step_value(entry, :completed_at)),
+      attempt: fetch_step_value(entry, :attempt),
+      retry_of_id: fetch_step_value(entry, :retry_of_id)
+    }
+  end
+
+  defp normalize_step_entry(_entry), do: %{}
+
+  defp valid_step_entry?(entry) do
+    execution_id = Map.get(entry, :execution_id)
+    step_id = Map.get(entry, :step_id)
+    is_binary(execution_id) and is_binary(step_id) and step_id != ""
+  end
+
+  defp fetch_step_value(entry, key) do
+    Map.get(entry, key) || Map.get(entry, Atom.to_string(key))
+  end
+
+  defp normalize_status(status) when is_atom(status), do: status
+
+  defp normalize_status(status) when is_binary(status) do
+    case status do
+      "pending" -> :pending
+      "queued" -> :queued
+      "running" -> :running
+      "completed" -> :completed
+      "failed" -> :failed
+      "skipped" -> :skipped
+      "cancelled" -> :cancelled
+      _ -> nil
+    end
+  end
+
+  defp normalize_status(_), do: nil
+
+  defp normalize_metadata(metadata) when is_map(metadata), do: metadata
+  defp normalize_metadata(_), do: %{}
+
+  defp normalize_datetime(%DateTime{} = dt), do: dt
+  defp normalize_datetime(_), do: nil
+
+  defp choose_step_status(entries) do
+    {terminal_entries, active_entries} =
+      Enum.split_with(entries, fn entry -> terminal_status?(entry.status) end)
+
+    cond do
+      terminal_entries != [] ->
+        terminal_entries
+        |> Enum.max_by(&terminal_status_key/1)
+        |> Map.get(:status)
+
+      active_entries != [] ->
+        active_entries
+        |> Enum.max_by(&active_status_key/1)
+        |> Map.get(:status)
+
+      true ->
+        :pending
+    end
+  end
+
+  defp terminal_status?(status) when status in [:completed, :failed, :skipped, :cancelled],
+    do: true
+
+  defp terminal_status?(_status), do: false
+
+  defp terminal_status_key(entry) do
+    {
+      timestamp_to_int(entry.completed_at),
+      Map.get(@terminal_status_priority, entry.status, 0)
+    }
+  end
+
+  defp active_status_key(entry) do
+    {
+      Map.get(@active_status_rank, entry.status, 0),
+      timestamp_to_int(active_status_time(entry))
+    }
+  end
+
+  defp active_status_time(%{status: :running} = entry), do: entry.started_at
+  defp active_status_time(%{status: :queued} = entry), do: entry.queued_at
+  defp active_status_time(_entry), do: nil
+
+  defp pick_first_non_nil(entries, key) do
+    entries
+    |> sort_entries_by_event_time(:asc)
+    |> Enum.find_value(&Map.get(&1, key))
+  end
+
+  defp pick_attempt(entries) do
+    entries
+    |> Enum.map(&Map.get(&1, :attempt))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.max(fn -> 1 end)
+  end
+
+  defp pick_input_data(entries) do
+    entries
+    |> sort_entries_by_timestamp(:started_at, :asc)
+    |> Enum.find_value(&Map.get(&1, :input_data))
+  end
+
+  defp pick_output_data(entries) do
+    entries
+    |> Enum.filter(&terminal_status?(&1.status))
+    |> sort_entries_by_timestamp(:completed_at, :desc)
+    |> Enum.find_value(&Map.get(&1, :output_data))
+  end
+
+  defp pick_output_item_count(entries) do
+    entries
+    |> Enum.filter(&terminal_status?(&1.status))
+    |> sort_entries_by_timestamp(:completed_at, :desc)
+    |> Enum.find_value(&Map.get(&1, :output_item_count))
+  end
+
+  defp pick_error(entries) do
+    entries
+    |> Enum.filter(&Map.get(&1, :error))
+    |> sort_entries_by_timestamp(:completed_at, :desc)
+    |> Enum.find_value(&Map.get(&1, :error))
+  end
+
+  defp merge_metadata(entries) do
+    entries
+    |> sort_entries_by_event_time(:asc)
+    |> Enum.reduce(%{}, fn entry, acc ->
+      Map.merge(acc, entry.metadata || %{})
+    end)
+  end
+
+  defp min_datetime(entries, key) do
+    entries
+    |> Enum.map(&Map.get(&1, key))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.min(fn -> nil end)
+  end
+
+  defp max_datetime(entries, key) do
+    entries
+    |> Enum.map(&Map.get(&1, key))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.max(fn -> nil end)
+  end
+
+  defp maybe_default_completed_at(nil, status, now)
+       when status in [:completed, :failed, :skipped, :cancelled],
+       do: now
+
+  defp maybe_default_completed_at(completed_at, _status, _now), do: completed_at
+
+  defp sort_entries_by_timestamp(entries, field, order) do
+    Enum.sort_by(entries, fn entry ->
+      timestamp_sort_key(Map.get(entry, field), order, entry.status)
+    end)
+  end
+
+  defp sort_entries_by_event_time(entries, order) do
+    Enum.sort_by(entries, fn entry ->
+      timestamp_sort_key(event_time(entry), order, entry.status)
+    end)
+  end
+
+  defp event_time(entry) do
+    case entry.status do
+      status when status in [:completed, :failed, :skipped, :cancelled] ->
+        entry.completed_at
+
+      :running ->
+        entry.started_at
+
+      :queued ->
+        entry.queued_at
+
+      _ ->
+        nil
+    end
+  end
+
+  defp timestamp_sort_key(%DateTime{} = dt, :asc, status) do
+    {DateTime.to_unix(dt, :microsecond), Map.get(@status_sort_rank, status, 0)}
+  end
+
+  defp timestamp_sort_key(%DateTime{} = dt, :desc, status) do
+    {-DateTime.to_unix(dt, :microsecond), Map.get(@status_sort_rank, status, 0)}
+  end
+
+  defp timestamp_sort_key(nil, :asc, status) do
+    {@max_timestamp, Map.get(@status_sort_rank, status, 0)}
+  end
+
+  defp timestamp_sort_key(nil, :desc, status) do
+    {0, Map.get(@status_sort_rank, status, 0)}
+  end
+
+  defp timestamp_to_int(%DateTime{} = dt), do: DateTime.to_unix(dt, :microsecond)
+  defp timestamp_to_int(_), do: 0
+
+  defp transition_error?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:status, {_message, opts}} -> Keyword.get(opts, :validation) == :transition
+      _ -> false
+    end)
+  end
+
+  defp fetch_latest_step_execution(nil, _step_id, _attempt), do: nil
+
+  defp fetch_latest_step_execution(execution_id, step_id, attempt) do
+    case Ecto.UUID.cast(execution_id) do
+      {:ok, uuid} ->
+        from(se in StepExecution,
+          where:
+            se.execution_id == ^uuid and se.step_id == ^step_id and
+              se.attempt == ^attempt,
+          order_by: [desc: se.inserted_at],
+          limit: 1
+        )
+        |> Repo.one()
+
+      :error ->
+        nil
     end
   end
 
