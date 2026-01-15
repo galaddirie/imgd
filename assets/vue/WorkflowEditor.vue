@@ -124,6 +124,7 @@ const {
   removeNodes,
   setNodes,
   setEdges,
+  addSelectedNodes,
   viewport,
 } = useVueFlow()
 
@@ -133,6 +134,7 @@ const isMounted = ref(false)
 const isSyncingDraft = ref(false)
 const pendingNodeRemovalIds = new Set<string>()
 const pendingEdgeRemovalIds = new Set<string>()
+const isUpdatingSelection = ref(false)
 onMounted(() => {
   isMounted.value = true
   syncDraftState()
@@ -205,7 +207,9 @@ onNodeDrag(handleNodeDrag)
 const handleSelectionChange = ({ nodes }: { nodes: Node<StepNodeData>[] }) => {
   const selectedIds = nodes.map(n => n.id)
   // Update local store selection to match VueFlow's selection
+  isUpdatingSelection.value = true
   store.selectNode(selectedIds.length === 1 ? selectedIds[0] : null)
+  isUpdatingSelection.value = false
   emit('selection_changed', { step_ids: selectedIds })
 }
 
@@ -214,6 +218,21 @@ watch(() => getSelectedNodes.value, (newSelection) => {
   const selectedIds = newSelection.map(n => n.id)
   emit('selection_changed', { step_ids: selectedIds })
 }, { deep: true })
+
+// Watch for store selection changes and sync to Vue Flow
+watch(() => store.selectedNodeId, (newSelectedId) => {
+  console.log('WorkflowEditor watcher: store.selectedNodeId changed to:', newSelectedId)
+  if (isUpdatingSelection.value) {
+    console.log('Skipping due to isUpdatingSelection')
+    return // Avoid infinite loop
+  }
+
+  const nodes = getNodes.value.map(node => ({
+    ...node,
+    selected: node.id === newSelectedId
+  }))
+  setNodes(nodes)
+})
 
 // =============================================================================
 // Computed
@@ -817,7 +836,10 @@ const handleDeleteStep = (stepId: string) => requestNodeRemoval(stepId)
 const handleSave = () => emit('save_workflow')
 const handleRunTest = () => emit('run_test')
 const handleCancelExecution = () => emit('cancel_execution')
-const selectTraceStep = (stepId: string) => store.selectNode(stepId)
+const selectTraceStep = (stepId: string) => {
+  console.log('selectTraceStep called with:', stepId)
+  store.selectNode(stepId)
+}
 
 type ConnectionLookupEdge = {
   id: string
@@ -923,7 +945,7 @@ const requestNodeRemoval = (nodeId: string) => {
         </div>
 
         <ExecutionTracePanel :execution="execution" :step-executions="stepExecutions"
-          :step-name-by-id="stepNameById"
+          :step-name-by-id="stepNameById" :selected-step-id="store.selectedNodeId"
           :is-expanded="store.isTracePanelExpanded" @toggle="store.toggleTracePanel"
           @close="store.isTracePanelExpanded = false" @select-step="selectTraceStep" @run-test="handleRunTest"
           @cancel="handleCancelExecution" />

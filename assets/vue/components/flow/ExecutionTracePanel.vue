@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type {
   Execution,
   StepExecution,
   TraceEntry,
-  LogEntry,
   ExecutionStatus,
   StepExecutionStatus
 } from '@/types/workflow'
@@ -22,17 +21,17 @@ import {
 interface Props {
   execution?: Execution | null
   stepExecutions?: StepExecution[]
-  logs?: LogEntry[]
   isExpanded?: boolean
   stepNameById?: Record<string, string>
+  selectedStepId?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   execution: null,
   stepExecutions: () => [],
-  logs: () => [],
   isExpanded: true,
   stepNameById: () => ({}),
+  selectedStepId: null,
 })
 
 const emit = defineEmits<{
@@ -43,8 +42,20 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const activeTab = ref<'steps' | 'logs' | 'output'>('steps')
+const activeTab = ref<'input' | 'output'>('input')
 const selectedStepId = ref<string | null>(null)
+
+// Computed properties
+const selectedStepExecution = computed(() => {
+  if (!selectedStepId.value) return null
+  return props.stepExecutions.find(se => se.step_id === selectedStepId.value) || null
+})
+
+// Watch for external selection changes and sync to local state
+watch(() => props.selectedStepId, (newSelectedStepId) => {
+  console.log('ExecutionTracePanel watcher: selectedStepId changed to:', newSelectedStepId)
+  selectedStepId.value = newSelectedStepId
+}, { immediate: true })
 
 // Mock data when no props (for development)
 const mockTraces: TraceEntry[] = [
@@ -54,12 +65,6 @@ const mockTraces: TraceEntry[] = [
   { id: '4', step_id: 'step_transform', step_name: 'Format Response', status: 'running', timestamp: '16:15:03.012' },
 ]
 
-const mockLogs: LogEntry[] = [
-  { id: 'l1', level: 'info', message: 'Workflow execution started', timestamp: '16:15:00.100' },
-  { id: 'l2', level: 'info', message: 'Executing "Manual Trigger"...', timestamp: '16:15:01.234' },
-  { id: 'l3', level: 'info', message: 'HTTP GET https://api.example.com/users returned 200 OK', timestamp: '16:15:02.456' },
-  { id: 'l4', level: 'warn', message: 'Variable "user_id" is undefined, using default', timestamp: '16:15:02.789' },
-]
 
 // Computed traces from props or mock
 const traces = computed<TraceEntry[]>(() => {
@@ -86,17 +91,6 @@ const traces = computed<TraceEntry[]>(() => {
   return mockTraces
 })
 
-const logs = computed<LogEntry[]>(() => {
-  if (props.logs.length > 0) {
-    return props.logs
-  }
-
-  if (props.execution) {
-    return []
-  }
-
-  return mockLogs
-})
 
 // Execution status
 const executionStatus = computed<ExecutionStatus>(() => {
@@ -144,26 +138,17 @@ const stepStatusClass = (status: StepExecutionStatus): string => {
   return map[status] || 'bg-base-content/20'
 }
 
-// Log level styling
-const logLevelClass = (level: LogEntry['level']): string => {
-  const map = {
-    debug: 'text-base-content/50',
-    info: 'text-primary',
-    warn: 'text-warning',
-    error: 'text-error',
-  }
-  return map[level]
-}
 
 // Format duration
 const formatDuration = (us?: number): string => {
-  if (!us) return '...'
+  if (!us) return ''
   if (us < 1000) return `${us}µs`
   if (us < 1_000_000) return `${(us / 1000).toFixed(1)}ms`
   return `${(us / 1_000_000).toFixed(2)}s`
 }
 
 const selectStep = (stepId: string) => {
+  console.log('ExecutionTracePanel selectStep called with:', stepId)
   selectedStepId.value = stepId
   emit('selectStep', stepId)
 }
@@ -263,50 +248,35 @@ const selectStep = (stepId: string) => {
       <div class="flex-1 flex flex-col overflow-hidden bg-base-200/20">
         <!-- Tab content -->
         <div class="flex-1 overflow-y-auto p-5 custom-scrollbar">
-          <!-- Logs Tab -->
-          <div v-if="activeTab === 'logs'" class="space-y-2 font-mono text-sm">
-            <div v-for="log in logs" :key="log.id"
-              class="flex gap-4 group hover:bg-base-100/50 rounded px-2 py-1 -mx-2">
-              <span class="opacity-30 shrink-0 font-medium w-24">
-                {{ log.timestamp }}
-              </span>
-              <span :class="logLevelClass(log.level)"
-                class="font-semibold shrink-0 w-12 text-xs tracking-tight uppercase">
-                [{{ log.level }}]
-              </span>
-              <span class="text-base-content/70 group-hover:text-base-content transition-colors">
-                {{ log.message }}
-              </span>
+          <!-- Input Tab -->
+          <div v-if="activeTab === 'input'" class="space-y-4">
+            <div v-if="selectedStepExecution?.input_data" class="font-mono text-sm">
+              <h4 class="font-semibold text-sm mb-3">Input Data</h4>
+              <pre
+                class="bg-base-100 rounded-xl p-4 border border-base-200 overflow-auto">{{ JSON.stringify(selectedStepExecution.input_data, null, 2) }}</pre>
             </div>
-
-            <div v-if="logs.length === 0" class="py-8 text-center text-base-content/40">
-              <p class="text-sm">No logs available</p>
-            </div>
-          </div>
-
-          <!-- Steps Tab (default) -->
-          <div v-else-if="activeTab === 'steps'" class="space-y-4">
-            <div v-if="selectedStepId" class="bg-base-100 rounded-xl p-4 border border-base-200">
-              <h4 class="font-semibold text-sm mb-3">Step Details</h4>
-              <div class="text-sm text-base-content/60">
-                <p>Step ID: <code class="text-primary">{{ selectedStepId }}</code></p>
-                <!-- Would show input/output data here -->
-              </div>
+            <div v-else-if="selectedStepId" class="py-8 text-center text-base-content/40">
+              <p class="text-sm">No input data available</p>
+              <p class="text-xs mt-1">The step may not have started yet or has no input</p>
             </div>
             <div v-else class="py-8 text-center text-base-content/40">
-              <p class="text-sm">Select a step to view details</p>
+              <p class="text-sm">Select a step to view input data</p>
             </div>
           </div>
 
           <!-- Output Tab -->
           <div v-else-if="activeTab === 'output'" class="space-y-4">
-            <div v-if="execution?.output" class="font-mono text-sm">
+            <div v-if="selectedStepExecution?.output_data" class="font-mono text-sm">
+              <h4 class="font-semibold text-sm mb-3">Output Data</h4>
               <pre
-                class="bg-base-100 rounded-xl p-4 border border-base-200 overflow-auto">{{ JSON.stringify(execution.output, null, 2) }}</pre>
+                class="bg-base-100 rounded-xl p-4 border border-base-200 overflow-auto">{{ JSON.stringify(selectedStepExecution.output_data, null, 2) }}</pre>
+            </div>
+            <div v-else-if="selectedStepId" class="py-8 text-center text-base-content/40">
+              <p class="text-sm">No output data available</p>
+              <p class="text-xs mt-1">The step may not have completed yet or has no output</p>
             </div>
             <div v-else class="py-8 text-center text-base-content/40">
-              <CheckCircleIcon class="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p class="text-sm">No output available yet</p>
+              <p class="text-sm">Select a step to view output data</p>
             </div>
           </div>
         </div>
@@ -314,7 +284,7 @@ const selectStep = (stepId: string) => {
         <!-- Tab Bar -->
         <div class="px-5 py-3 border-t border-base-200 bg-base-100 shrink-0">
           <div class="flex bg-base-200/50 p-1 rounded-xl w-fit">
-            <button v-for="tab in (['steps', 'logs', 'output'] as const)" :key="tab"
+            <button v-for="tab in (['input', 'output'] as const)" :key="tab"
               class="px-5 py-1.5 text-xs font-semibold rounded-lg transition-all capitalize" :class="activeTab === tab
                 ? 'bg-base-100 text-primary shadow-sm'
                 : 'text-base-content/50 hover:text-base-content'" @click="activeTab = tab">
