@@ -9,11 +9,8 @@ import type {
 } from '@/types/workflow'
 import {
   ChevronUpIcon,
-  XMarkIcon,
-  CheckCircleIcon,
   ExclamationCircleIcon,
   ClockIcon,
-  PlayIcon,
   StopIcon,
 } from '@heroicons/vue/24/outline'
 
@@ -45,18 +42,6 @@ const emit = defineEmits<{
 const activeTab = ref<'input' | 'output'>('input')
 const selectedStepId = ref<string | null>(null)
 
-// Computed properties
-const selectedStepExecution = computed(() => {
-  if (!selectedStepId.value) return null
-  return props.stepExecutions.find(se => se.step_id === selectedStepId.value) || null
-})
-
-// Watch for external selection changes and sync to local state
-watch(() => props.selectedStepId, (newSelectedStepId) => {
-  console.log('ExecutionTracePanel watcher: selectedStepId changed to:', newSelectedStepId)
-  selectedStepId.value = newSelectedStepId
-}, { immediate: true })
-
 // Mock data when no props (for development)
 const mockTraces: TraceEntry[] = [
   { id: '1', step_id: 'trigger_1', step_name: 'Manual Trigger', status: 'completed', duration_us: 120, timestamp: '16:15:01.234' },
@@ -65,6 +50,21 @@ const mockTraces: TraceEntry[] = [
   { id: '4', step_id: 'step_transform', step_name: 'Format Response', status: 'running', timestamp: '16:15:03.012' },
 ]
 
+const selectedStepExecution = computed(() => {
+  if (!selectedStepId.value) return null
+  return props.stepExecutions.find(se => se.step_id === selectedStepId.value) || null
+})
+
+// Watch for external selection changes and sync to local state
+watch(() => props.selectedStepId, (newSelectedStepId) => {
+  selectedStepId.value = newSelectedStepId ?? null
+}, { immediate: true })
+
+const formatTraceTimestamp = (execution: StepExecution): string => {
+  if (execution.started_at) return new Date(execution.started_at).toLocaleTimeString()
+  if (execution.completed_at) return new Date(execution.completed_at).toLocaleTimeString()
+  return ''
+}
 
 // Computed traces from props or mock
 const traces = computed<TraceEntry[]>(() => {
@@ -75,11 +75,7 @@ const traces = computed<TraceEntry[]>(() => {
       step_name: props.stepNameById?.[se.step_id] || se.step_id,
       status: se.status,
       duration_us: se.duration_us,
-      timestamp: se.started_at
-        ? new Date(se.started_at).toLocaleTimeString()
-        : se.completed_at
-          ? new Date(se.completed_at).toLocaleTimeString()
-          : '',
+      timestamp: formatTraceTimestamp(se),
       error: se.error ? JSON.stringify(se.error) : undefined,
     }))
   }
@@ -88,7 +84,11 @@ const traces = computed<TraceEntry[]>(() => {
     return []
   }
 
-  return mockTraces
+  if (import.meta.env.DEV) {
+    return mockTraces
+  }
+
+  return []
 })
 
 
@@ -148,7 +148,7 @@ const formatDuration = (us?: number): string => {
 }
 
 const selectStep = (stepId: string) => {
-  console.log('ExecutionTracePanel selectStep called with:', stepId)
+  if (selectedStepId.value === stepId) return
   selectedStepId.value = stepId
   emit('selectStep', stepId)
 }

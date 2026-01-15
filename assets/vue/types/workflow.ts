@@ -118,6 +118,7 @@ export interface EdgeData {
 export type ExecutionStatus =
     | 'pending'
     | 'running'
+    | 'paused'
     | 'completed'
     | 'failed'
     | 'cancelled'
@@ -175,6 +176,16 @@ export interface StepExecution {
     completed_at?: string
     metadata?: Record<string, unknown>
     inserted_at: string
+}
+
+export interface TraceEntry {
+    id: string
+    step_id: string
+    step_name: string
+    status: StepExecutionStatus
+    duration_us?: number
+    timestamp?: string
+    error?: string
 }
 
 // =============================================================================

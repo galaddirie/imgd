@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, markRaw, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, markRaw, watch, nextTick } from 'vue'
 import type { Node, Edge, Connection as VueFlowConnection, XYPosition, Position, GraphNode } from '@vue-flow/core'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
+import { useThrottleFn } from '@vueuse/core'
 
 import NodeLibrary from './components/flow/NodeLibrary.vue'
 import StepConfigModal from './components/flow/StepConfigModal.vue'
@@ -16,10 +17,22 @@ import ContextMenu from './components/ui/ContextMenu.vue'
 import CollaborativeCursors from './components/flow/CollaborativeCursors.vue'
 import type { MenuItem } from './components/ui/ContextMenu.vue'
 
+import { useWorkflowEdges } from './composables/useWorkflowEdges'
+import { useWorkflowGraph } from './composables/useWorkflowGraph'
+import { useWorkflowNodes } from './composables/useWorkflowNodes'
+import {
+  CURSOR_THROTTLE_MS,
+  DEFAULT_NODE_DIMENSIONS,
+  DEFAULT_VIEWPORT,
+  DOUBLE_CLICK_DELAY_MS,
+  EDGE_LABEL_GAP,
+  EDGE_LABEL_HALF_HEIGHT,
+  EDGE_LABEL_HALF_WIDTH,
+  EDGE_LABEL_POSITION,
+} from './constants/layout'
 import { useClientStore } from './store/clientStore'
-import { oklchToHex, generateColor } from './lib/color'
+import { oklchToHex } from './lib/color'
 import { useLayout } from './lib/useLayout'
-import { useThrottleFn } from '@vueuse/core'
 
 import {
   TrashIcon,
@@ -36,7 +49,6 @@ import {
 import type {
   Workflow,
   Step,
-  Connection,
   StepType,
   NodeLibraryItem,
   StepNodeData,
@@ -124,11 +136,10 @@ const {
   removeNodes,
   setNodes,
   setEdges,
-  addSelectedNodes,
   viewport,
 } = useVueFlow()
 
-const vueFlowRef = ref<any>(null)
+const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null)
 
 const isMounted = ref(false)
 const isSyncingDraft = ref(false)
@@ -141,6 +152,22 @@ onMounted(() => {
 })
 
 const { layout, previousDirection } = useLayout()
+
+const { nodes } = useWorkflowNodes({
+  workflow: () => props.workflow,
+  stepTypes: () => props.stepTypes,
+  stepExecutions: () => props.stepExecutions,
+  editorState: () => props.editorState,
+  presences: () => props.presences,
+  currentUserId: () => props.currentUserId,
+})
+
+const { edges } = useWorkflowEdges({
+  workflow: () => props.workflow,
+  stepExecutions: () => props.stepExecutions,
+})
+
+const { stepNameById, upstreamStepIdsByStepId } = useWorkflowGraph(() => props.workflow)
 
 const nodeTypes = {
   step: markRaw(WorkflowStepNode),
@@ -156,18 +183,21 @@ const canvasRef = ref<HTMLElement | null>(null)
 // Consolidated interaction tracking (mouse + transient dragging)
 const emitInteraction = useThrottleFn((x: number, y: number, dragging_steps?: Record<string, XYPosition> | null) => {
   emit('mouse_move', { x, y, dragging_steps })
-}, 50)
+}, CURSOR_THROTTLE_MS)
 
-const handlePaneMouseMove = (event: MouseEvent) => {
-  if (!canvasRef.value) return
+const getFlowPositionFromEvent = (point: { clientX: number; clientY: number }) => {
+  if (!canvasRef.value) return null
 
   const { left, top } = canvasRef.value.getBoundingClientRect()
-
-  // Convert screen coordinates to flow coordinates
-  const flowPosition = project({
-    x: event.clientX - left,
-    y: event.clientY - top,
+  return project({
+    x: point.clientX - left,
+    y: point.clientY - top,
   })
+}
+
+const handlePaneMouseMove = (event: MouseEvent) => {
+  const flowPosition = getFlowPositionFromEvent(event)
+  if (!flowPosition) return
 
   // If we're dragging, onNodeDrag handles the emission
   // Otherwise, we emit just the cursor position
@@ -178,16 +208,10 @@ const handlePaneMouseMove = (event: MouseEvent) => {
 
 // Track transient node positions during drag
 const handleNodeDrag = (event: { event: MouseEvent | TouchEvent; node: Node<StepNodeData>; nodes: Node<StepNodeData>[] }) => {
-  if (!canvasRef.value) return
-
-  const { left, top } = canvasRef.value.getBoundingClientRect()
-  
   // Get mouse position from drag event
   const mouseEvent = 'clientX' in event.event ? event.event : event.event.touches[0]
-  const flowPosition = project({
-    x: mouseEvent.clientX - left,
-    y: mouseEvent.clientY - top,
-  })
+  const flowPosition = getFlowPositionFromEvent(mouseEvent)
+  if (!flowPosition) return
 
   const dragging_steps: Record<string, XYPosition> = {}
   event.nodes.forEach(node => {
@@ -221,9 +245,7 @@ watch(() => getSelectedNodes.value, (newSelection) => {
 
 // Watch for store selection changes and sync to Vue Flow
 watch(() => store.selectedNodeId, (newSelectedId) => {
-  console.log('WorkflowEditor watcher: store.selectedNodeId changed to:', newSelectedId)
   if (isUpdatingSelection.value) {
-    console.log('Skipping due to isUpdatingSelection')
     return // Avoid infinite loop
   }
 
@@ -232,127 +254,6 @@ watch(() => store.selectedNodeId, (newSelectedId) => {
     selected: node.id === newSelectedId
   }))
   setNodes(nodes)
-})
-
-// =============================================================================
-// Computed
-// =============================================================================
-
-const stepNameById = computed<Record<string, string>>(() => {
-  const steps = props.workflow.draft?.steps || []
-
-  return steps.reduce((acc, step) => {
-    if (step.id && step.name) {
-      acc[step.id] = step.name
-    }
-    return acc
-  }, {} as Record<string, string>)
-})
-
-const upstreamStepIdsByStepId = computed<Record<string, string[]>>(() => {
-  const steps = props.workflow.draft?.steps || []
-  const connections = props.workflow.draft?.connections || []
-  
-  const adj = new Map<string, string[]>()
-  connections.forEach(conn => {
-    if (!adj.has(conn.target_step_id)) adj.set(conn.target_step_id, [])
-    adj.get(conn.target_step_id)!.push(conn.source_step_id)
-  })
-  
-  const upstream: Record<string, string[]> = {}
-  
-  const getUpstream = (id: string, visited = new Set<string>()): Set<string> => {
-    const parents = adj.get(id) || []
-    const result = new Set<string>()
-    parents.forEach(p => {
-      if (!visited.has(p)) {
-        visited.add(p)
-        result.add(p)
-        getUpstream(p, visited).forEach(u => result.add(u))
-      }
-    })
-    return result
-  }
-  
-  steps.forEach(step => {
-    upstream[step.id] = Array.from(getUpstream(step.id))
-  })
-  
-  return upstream
-})
-
-const nodes = computed<Node<StepNodeData>[]>(() => {
-  const steps = props.workflow.draft?.steps || []
-  
-  // Get all transient node positions from other users' presences
-  const transientPositions = props.presences.reduce((acc, p) => {
-    if (p.user.id !== props.currentUserId && p.dragging_steps) {
-      Object.entries(p.dragging_steps).forEach(([id, pos]) => {
-        acc[id] = pos
-      })
-    }
-    return acc
-  }, {} as Record<string, XYPosition>)
-
-  return steps.map(step => {
-    const stepType = props.stepTypes.find(st => st.id === step.type_id)
-    const stepExecution = props.stepExecutions.find(se => se.step_id === step.id)
-    const isPinned = props.editorState?.pinned_outputs?.[step.id] !== undefined
-    const isDisabled = props.editorState?.disabled_steps?.includes(step.id)
-    const lockedBy = props.editorState?.step_locks?.[step.id]
-
-    const selectedBy = props.presences
-      .filter(p => p.user.id !== props.currentUserId && p.selected_steps?.includes(step.id))
-      .map(p => ({
-        id: p.user.id,
-        name: p.user.name || p.user.email || 'Unknown User',
-        color: generateColor(p.user.name || p.user.email || 'Unknown User', 0)
-      }))
-
-    return {
-      id: step.id,
-      type: 'step',
-      position: transientPositions[step.id] || step.position,
-      data: {
-        id: step.id,
-        type_id: step.type_id,
-        name: step.name,
-        config: step.config,
-        notes: step.notes,
-        icon: stepType?.icon,
-        category: stepType?.category,
-        step_kind: stepType?.step_kind,
-        status: stepExecution?.status,
-        stats: stepExecution ? { duration_us: stepExecution.duration_us, out: stepExecution.output_item_count } : undefined,
-        hasInput: stepType?.step_kind !== 'trigger',
-        hasOutput: true,
-        disabled: isDisabled,
-        pinned: isPinned,
-        locked_by: lockedBy,
-        selected_by: selectedBy,
-      } satisfies StepNodeData,
-    }
-  })
-})
-
-const edges = computed<Edge<EdgeData>[]>(() => {
-  const connections = props.workflow.draft?.connections || []
-
-  return connections.map(conn => {
-    const isAnimated = props.stepExecutions.some(
-      se => se.step_id === conn.source_step_id && se.status === 'running'
-    )
-
-    return {
-      id: conn.id,
-      source: conn.source_step_id,
-      target: conn.target_step_id,
-      sourceHandle: conn.source_output,
-      targetHandle: conn.target_input,
-      type: 'custom',
-      data: { animated: isAnimated } satisfies EdgeData,
-    }
-  })
 })
 
 const syncDraftState = async () => {
@@ -416,6 +317,10 @@ onEdgesChange((changes) => {
   const nextEdges = applyEdgeChanges(nextChanges)
   setEdges(nextEdges)
 })
+
+// =============================================================================
+// Derived state
+// =============================================================================
 
 const selectedNode = computed<Node<StepNodeData> | null>(() => {
   if (!store.selectedNodeId) return null
@@ -512,14 +417,6 @@ type LayoutNode = {
 type LayoutBounds = { minX: number; minY: number; maxX: number; maxY: number }
 type LayoutDirection = 'LR' | 'RL'
 
-const DEFAULT_NODE_DIMENSIONS = { width: 150, height: 50 }
-const EDGE_LABEL_DIMENSIONS = { width: 40, height: 12 }
-const EDGE_LABEL_PADDING = 6
-const EDGE_LABEL_POSITION = 0.6
-const EDGE_LABEL_HALF_WIDTH = EDGE_LABEL_DIMENSIONS.width / 2 + EDGE_LABEL_PADDING
-const EDGE_LABEL_HALF_HEIGHT = EDGE_LABEL_DIMENSIONS.height / 2 + EDGE_LABEL_PADDING
-const EDGE_LABEL_GAP = Math.ceil((EDGE_LABEL_HALF_WIDTH / (1 - EDGE_LABEL_POSITION)) * 2)
-
 const getNodeDimensions = (node: LayoutNode) => ({
   width: node.dimensions?.width || DEFAULT_NODE_DIMENSIONS.width,
   height: node.dimensions?.height || DEFAULT_NODE_DIMENSIONS.height,
@@ -561,11 +458,9 @@ const getLayoutBounds = (nodes: LayoutNode[], edges: Edge<EdgeData>[]): LayoutBo
 
     const labelX = sourceX + (targetX - sourceX) * EDGE_LABEL_POSITION
     const labelY = sourceY + (targetY - sourceY) * EDGE_LABEL_POSITION
-    const labelHalfWidth = EDGE_LABEL_DIMENSIONS.width / 2 + EDGE_LABEL_PADDING
-    const labelHalfHeight = EDGE_LABEL_DIMENSIONS.height / 2 + EDGE_LABEL_PADDING
 
-    updateBounds(bounds, labelX - labelHalfWidth, labelY - labelHalfHeight)
-    updateBounds(bounds, labelX + labelHalfWidth, labelY + labelHalfHeight)
+    updateBounds(bounds, labelX - EDGE_LABEL_HALF_WIDTH, labelY - EDGE_LABEL_HALF_HEIGHT)
+    updateBounds(bounds, labelX + EDGE_LABEL_HALF_WIDTH, labelY + EDGE_LABEL_HALF_HEIGHT)
   })
 
   return bounds
@@ -641,7 +536,7 @@ const handleNodeClick = (event: { node: Node<StepNodeData> }) => {
   clickTimer.value = setTimeout(() => {
     store.selectNode(node.id)
     clickTimer.value = null
-  }, 250)
+  }, DOUBLE_CLICK_DELAY_MS)
 }
 
 const handleNodeDoubleClick = (event: { node: Node<StepNodeData> }) => {
@@ -736,7 +631,6 @@ const handleContextMenuSelect = (itemId: string) => {
       handleLayout()
       break
     case 'run-from':
-      console.log('Run from:', nodeId)
       break
   }
 
@@ -754,9 +648,10 @@ const handleDrop = (event: DragEvent) => {
   const typeId = event.dataTransfer?.getData('application/vueflow')
   if (!typeId) return
 
-  const { left, top } = canvasRef.value!.getBoundingClientRect()
-  const position = project({ x: event.clientX - left, y: event.clientY - top })
-  emit('add_step', { type_id: typeId, position })
+  const position = getFlowPositionFromEvent(event)
+  if (position) {
+    emit('add_step', { type_id: typeId, position })
+  }
 }
 
 onPaneClick(() => store.hideContextMenu())
@@ -811,13 +706,9 @@ const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
 
 onNodeDragStop((event: { nodes: Node<StepNodeData>[] }) => {
   // Clear transient drag positions and emit final positions for persistence
-  if (canvasRef.value) {
-    const lastEvent = window.event as MouseEvent // Fallback to get mouse position if needed
-    // Actually, onNodeDragStop doesn't give mouse position easily.
-    // We can just emit null for dragging_steps to clear it.
-    // For now, let's just use 0,0 for cursor as it will be updated by the next mousemove anyway.
-    emitInteraction(0, 0, null)
-  }
+  // We can just emit null for dragging_steps to clear it.
+  // For now, we use 0,0 for the cursor as it will be updated by the next mousemove anyway.
+  emitInteraction(0, 0, null)
 
   for (const node of event.nodes) {
     emit('move_step', { step_id: node.id, position: node.position })
@@ -837,7 +728,6 @@ const handleSave = () => emit('save_workflow')
 const handleRunTest = () => emit('run_test')
 const handleCancelExecution = () => emit('cancel_execution')
 const selectTraceStep = (stepId: string) => {
-  console.log('selectTraceStep called with:', stepId)
   store.selectNode(stepId)
 }
 
@@ -900,7 +790,7 @@ const requestNodeRemoval = (nodeId: string) => {
         <div ref="canvasRef" class="flex-1 overflow-hidden relative" @mousemove="handlePaneMouseMove">
           <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes"
             :nodes-connectable="true" :nodes-draggable="true" :edges-updatable="true" :apply-default="false"
-            :default-viewport="{ zoom: 1.2, x: 100, y: 50 }" fit-view-on-init @node-click="handleNodeClick"
+            :default-viewport="DEFAULT_VIEWPORT" fit-view-on-init @node-click="handleNodeClick"
             @node-double-click="handleNodeDoubleClick" @node-context-menu="handleNodeContextMenu"
             @selection-change="handleSelectionChange" @selection-context-menu="handleSelectionContextMenu"
             @pane-context-menu="handlePaneContextMenu" @edge-update="handleEdgeUpdate" @dragover="handleDragOver"
