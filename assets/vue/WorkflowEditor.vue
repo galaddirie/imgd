@@ -11,6 +11,7 @@ import NodeLibrary from './components/flow/NodeLibrary.vue'
 import StepConfigModal from './components/flow/StepConfigModal.vue'
 import EditorToolbar from './components/flow/EditorToolbar.vue'
 import ExecutionTracePanel from './components/flow/ExecutionTracePanel.vue'
+import ResourceUsageOverlay from './components/flow/ResourceUsageOverlay.vue'
 import WorkflowStepNode from './components/flow/Node.vue'
 import CustomEdge from './components/flow/Edge.vue'
 import ContextMenu from './components/ui/ContextMenu.vue'
@@ -57,6 +58,7 @@ import type {
   StepExecution,
   EditorState,
   UserPresence,
+  ResourceUsage,
 } from './types/workflow'
 
 // =============================================================================
@@ -346,6 +348,12 @@ const isExecutionRunning = computed(() => {
 // Filter out current user from presences for cursor display
 const otherUserPresences = computed(() => {
   return props.presences.filter(p => p.user.id !== props.currentUserId)
+})
+
+const executionUsage = computed<ResourceUsage | null>(() => {
+  const metadata = props.execution?.metadata as Record<string, any> | undefined
+  const extras = metadata?.extras as Record<string, any> | undefined
+  return (extras?.resource_usage as ResourceUsage) ?? null
 })
 
 const contextMenuItems = computed<MenuItem[]>(() => {
@@ -806,6 +814,8 @@ const requestNodeRemoval = (nodeId: string) => {
             class="absolute inset-0 pointer-events-none z-40 transition-opacity duration-1000 ease-out opacity-100"
             style="background: radial-gradient(ellipse at center, transparent 70%, rgba(239, 68, 68, 0.04) 90%, rgba(239, 68, 68, 0.06) 100%);"
           ></div>
+
+          <ResourceUsageOverlay :execution-usage="executionUsage" :execution-status="execution?.status" />
 
           <!-- Collaborative Cursors - rendered in overlay with viewport transform -->
           <!-- We move it back to manual sync because direct nesting in VueFlow slots can break in LiveVue SSR -->

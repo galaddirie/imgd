@@ -581,10 +581,23 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           socket
         end
 
-      {:noreply, refresh_execution_from_event(socket, event)}
+      usage = fetch_resource_usage(event.data)
+
+      socket =
+        socket
+        |> maybe_push_resource_usage("execution", usage)
+        |> refresh_execution_from_event(event)
+        |> maybe_assign_execution_usage(usage)
+
+      {:noreply, socket}
     else
       {:noreply, socket}
     end
+  end
+
+  @impl true
+  def handle_info({:resource_usage, usage}, socket) do
+    {:noreply, maybe_push_resource_usage(socket, "session", usage)}
   end
 
   @impl true
@@ -1094,4 +1107,39 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   defp format_error_message(%{message: message}), do: message
   defp format_error_message(%{"message" => message}), do: message
   defp format_error_message(error), do: inspect(error)
+
+  defp fetch_resource_usage(data) when is_map(data) do
+    Map.get(data, "resource_usage") || Map.get(data, :resource_usage)
+  end
+
+  defp fetch_resource_usage(_data), do: nil
+
+  defp maybe_push_resource_usage(socket, _source, nil), do: socket
+
+  defp maybe_push_resource_usage(socket, source, usage) do
+    push_event(socket, "resource_usage", %{
+      source: source,
+      usage: usage
+    })
+  end
+
+  defp maybe_assign_execution_usage(socket, nil), do: socket
+
+  defp maybe_assign_execution_usage(socket, usage) do
+    case socket.assigns.execution do
+      %Execution{} = execution ->
+        metadata = execution.metadata || %Execution.Metadata{}
+        extras = metadata.extras || %{}
+
+        updated_metadata = %Execution.Metadata{
+          metadata
+          | extras: Map.put(extras, "resource_usage", usage)
+        }
+
+        assign(socket, :execution, %{execution | metadata: updated_metadata})
+
+      _ ->
+        socket
+    end
+  end
 end

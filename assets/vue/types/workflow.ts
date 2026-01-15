@@ -158,6 +158,22 @@ export interface Execution {
     updated_at: string
 }
 
+export interface ResourceUsage {
+    sampled_at_ms?: number
+    started_at_ms?: number
+    completed_at_ms?: number
+    duration_ms?: number
+    interval_ms?: number
+    memory_bytes?: number
+    heap_bytes?: number
+    total_heap_bytes?: number
+    stack_bytes?: number
+    message_queue_len?: number
+    reductions?: number
+    reductions_delta?: number
+    reductions_per_s?: number
+}
+
 export interface StepExecution {
     id: string
     execution_id: string

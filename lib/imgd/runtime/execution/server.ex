@@ -10,13 +10,24 @@ defmodule Imgd.Runtime.Execution.Server do
   alias Imgd.Runtime.RunicAdapter
   alias Imgd.Runtime.Events
   alias Imgd.Runtime.Hooks.Observability
+  alias Imgd.Runtime.ResourceUsage
   alias Imgd.Executions
   alias Imgd.Executions.Execution
+  alias Imgd.Executions.PubSub, as: ExecutionPubSub
   import Ecto.Query, warn: false
   alias Imgd.Repo
 
   defmodule State do
-    defstruct [:execution_id, :runic_workflow, :status, :metadata, :runtime_opts, :trigger_data]
+    defstruct [
+      :execution_id,
+      :runic_workflow,
+      :status,
+      :metadata,
+      :runtime_opts,
+      :trigger_data,
+      :resource_usage_start,
+      resource_usage_reported: false
+    ]
   end
 
   # ============================================================================
@@ -125,6 +136,16 @@ defmodule Imgd.Runtime.Execution.Server do
       end
     end
 
+    case state do
+      %State{} = typed_state when not is_nil(execution_id) ->
+        typed_state = ensure_resource_usage_start(typed_state)
+        {usage, _state} = finalize_resource_usage(typed_state)
+        _ = maybe_persist_execution_resource_usage(execution_id, usage)
+
+      _ ->
+        :ok
+    end
+
     # Always flush buffered step events before dying
     flush_step_executions(execution_id)
 
@@ -133,6 +154,8 @@ defmodule Imgd.Runtime.Execution.Server do
 
   @impl true
   def handle_info(:run, state) do
+    state = ensure_resource_usage_start(state)
+
     # Transition to running in DB if pending
     if state.status == :pending do
       update_status(state.execution_id, :running)
@@ -149,21 +172,33 @@ defmodule Imgd.Runtime.Execution.Server do
       # For now, we run until completion or wait state.
       # Runic's react_until_satisfied is the primary driver.
       new_runic_wrk = Workflow.react_until_satisfied(state.runic_workflow, trigger_data)
+      stop_reason = pending_stop_reason()
 
-      # Sync the Runic graph results back to the Imgd context
-      new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
-      finalize_execution(new_state)
+      if stop_reason do
+        new_state = %{state | runic_workflow: new_runic_wrk}
+        {:noreply, new_state}
+      else
+        # Sync the Runic graph results back to the Imgd context
+        new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
+        finalize_execution(new_state)
 
-      # Flush step events to DB
-      flush_step_executions(state.execution_id)
+        # Flush step events to DB
+        flush_step_executions(state.execution_id)
 
-      # Emit completion event
-      Events.emit(:execution_completed, state.execution_id, %{status: :completed})
+        {usage, new_state} = finalize_resource_usage(new_state)
+        _ = maybe_persist_execution_resource_usage(new_state.execution_id, usage)
 
-      {:stop, :normal, new_state}
+        # Emit completion event
+        Events.emit(:execution_completed, new_state.execution_id, %{
+          status: :completed,
+          resource_usage: usage
+        })
+
+        {:stop, :normal, new_state}
+      end
     catch
       :throw, {:step_error, step_id, reason} ->
-        handle_failure(state, step_id, reason)
+        state = handle_failure(state, step_id, reason)
         {:stop, :normal, state}
 
       kind, reason ->
@@ -172,7 +207,7 @@ defmodule Imgd.Runtime.Execution.Server do
           stacktrace: __STACKTRACE__
         )
 
-        handle_failure(state, "system", reason)
+        state = handle_failure(state, "system", reason)
         {:stop, :normal, state}
     end
   end
@@ -293,6 +328,9 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp handle_failure(state, step_id, reason) do
+    state = ensure_resource_usage_start(state)
+    {usage, state} = finalize_resource_usage(state)
+
     error_map = Execution.format_error({:step_failed, step_id, reason})
     completed_at = DateTime.utc_now()
 
@@ -335,13 +373,21 @@ defmodule Imgd.Runtime.Execution.Server do
     })
     |> Repo.update!()
 
+    _ = maybe_persist_execution_resource_usage(state.execution_id, usage)
+
     # Emit execution failed event
-    Events.emit(:execution_failed, state.execution_id, %{status: :failed, error: error_map})
+    Events.emit(:execution_failed, state.execution_id, %{
+      status: :failed,
+      error: error_map,
+      resource_usage: usage
+    })
 
     # Flush step events to DB
     flush_step_executions(state.execution_id)
 
     Logger.error("Execution failed at step #{step_id}: #{inspect(reason)}")
+
+    state
   end
 
   defp maybe_put_step_type(payload, %{step_type_id: step_type_id})
@@ -371,7 +417,16 @@ defmodule Imgd.Runtime.Execution.Server do
       events =
         if execution && execution.status == :cancelled do
           Enum.map(events, fn e ->
-            if e.status == :running, do: Map.put(e, :status, :cancelled), else: e
+            cond do
+              e.status == :running ->
+                Map.put(e, :status, :cancelled)
+
+              cancel_completed_after?(e, execution.completed_at) ->
+                Map.put(e, :status, :cancelled)
+
+              true ->
+                e
+            end
           end)
         else
           events
@@ -384,6 +439,90 @@ defmodule Imgd.Runtime.Execution.Server do
         {:error, reason} ->
           Logger.warning("Failed to flush step executions batch", reason: inspect(reason))
       end
+    end
+  end
+
+  defp ensure_resource_usage_start(%State{resource_usage_start: nil} = state) do
+    %{state | resource_usage_start: ResourceUsage.sample(self())}
+  end
+
+  defp ensure_resource_usage_start(state), do: state
+
+  defp finalize_resource_usage(%State{resource_usage_reported: true} = state) do
+    {nil, state}
+  end
+
+  defp finalize_resource_usage(%State{} = state) do
+    usage =
+      case {state.resource_usage_start, ResourceUsage.sample(self())} do
+        {%{} = start_sample, %{} = end_sample} ->
+          ResourceUsage.summarize(start_sample, end_sample)
+
+        _ ->
+          nil
+      end
+
+    {usage, %{state | resource_usage_reported: true}}
+  end
+
+  defp pending_stop_reason do
+    case Process.info(self(), :messages) do
+      {:messages, messages} ->
+        Enum.find_value(messages, fn
+          {:system, _from, {:terminate, reason}} -> reason
+          _ -> nil
+        end)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp cancel_completed_after?(_event, nil), do: false
+
+  defp cancel_completed_after?(event, %DateTime{} = cancelled_at) do
+    completed_at =
+      case Map.get(event, :completed_at) || Map.get(event, "completed_at") do
+        %DateTime{} = dt -> dt
+        _ -> nil
+      end
+
+    case completed_at do
+      %DateTime{} = dt -> DateTime.compare(dt, cancelled_at) in [:gt, :eq]
+      _ -> false
+    end
+  end
+
+  defp maybe_persist_execution_resource_usage(_execution_id, nil), do: :ok
+
+  defp maybe_persist_execution_resource_usage(execution_id, usage) do
+    case Repo.get(Execution, execution_id) do
+      nil ->
+        :ok
+
+      %Execution{} = execution ->
+        metadata = execution.metadata || %Execution.Metadata{}
+        extras = metadata.extras || %{}
+        tags = metadata.tags || %{}
+
+        metadata_attrs = %{
+          trace_id: metadata.trace_id,
+          correlation_id: metadata.correlation_id,
+          triggered_by: metadata.triggered_by,
+          parent_execution_id: metadata.parent_execution_id,
+          tags: tags,
+          extras: Map.put(extras, "resource_usage", usage)
+        }
+
+        case execution
+             |> Execution.changeset(%{metadata: metadata_attrs})
+             |> Repo.update() do
+          {:ok, updated_execution} ->
+            ExecutionPubSub.broadcast_execution_updated(updated_execution)
+
+          {:error, _} ->
+            :ok
+        end
     end
   end
 end
