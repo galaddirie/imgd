@@ -74,16 +74,35 @@ const formatCount = (value?: unknown) => {
   return Math.round(num).toLocaleString()
 }
 
-const formatCpu = (usage: ResourceUsage | null) => {
+const formatCpu = (usage: ResourceUsage | null, showTotal: boolean = false) => {
   if (!usage) return '--'
-  const perSecond = toNumber(usage.reductions_per_s)
-  if (perSecond !== undefined) return `${Math.round(perSecond).toLocaleString()} r/s`
+  
+  // For completed executions, show total work (more meaningful for comparison)
+  // For live sessions, show rate (more meaningful for current intensity)
+  if (showTotal) {
+    const delta = toNumber(usage.reductions_delta)
+    if (delta !== undefined) {
+      const perSecond = toNumber(usage.reductions_per_s)
+      if (perSecond !== undefined && perSecond > 0) {
+        // Show both total and rate for completed executions
+        return `${Math.round(delta).toLocaleString()} r (${Math.round(perSecond).toLocaleString()} r/s)`
+      }
+      return `${Math.round(delta).toLocaleString()} r`
+    }
+    
+    const total = toNumber(usage.reductions)
+    if (total !== undefined) return `${Math.round(total).toLocaleString()} r`
+  } else {
+    // Live session: show rate
+    const perSecond = toNumber(usage.reductions_per_s)
+    if (perSecond !== undefined) return `${Math.round(perSecond).toLocaleString()} r/s`
 
-  const delta = toNumber(usage.reductions_delta)
-  if (delta !== undefined) return `${Math.round(delta).toLocaleString()} r`
+    const delta = toNumber(usage.reductions_delta)
+    if (delta !== undefined) return `${Math.round(delta).toLocaleString()} r`
 
-  const total = toNumber(usage.reductions)
-  if (total !== undefined) return `${Math.round(total).toLocaleString()} r`
+    const total = toNumber(usage.reductions)
+    if (total !== undefined) return `${Math.round(total).toLocaleString()} r`
+  }
 
   return '--'
 }
@@ -99,7 +118,7 @@ const formatCpu = (usage: ResourceUsage | null) => {
           <span class="text-emerald-500/80">live</span>
         </div>
         <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-base-content/80">
-          <span>CPU {{ formatCpu(sessionUsage) }}</span>
+          <span>CPU {{ formatCpu(sessionUsage, false) }}</span>
           <span>Mem {{ formatBytes(sessionUsage?.memory_bytes) }}</span>
           <span>Heap {{ formatBytes(sessionUsage?.total_heap_bytes) }}</span>
           <span>MQ {{ formatCount(sessionUsage?.message_queue_len) }}</span>
@@ -114,7 +133,7 @@ const formatCpu = (usage: ResourceUsage | null) => {
           <span class="text-base-content/40">{{ executionLabel }}</span>
         </div>
         <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-base-content/80">
-          <span>CPU {{ formatCpu(executionUsage) }}</span>
+          <span>CPU {{ formatCpu(executionUsage, true) }}</span>
           <span>Mem {{ formatBytes(executionUsage?.memory_bytes) }}</span>
           <span>Heap {{ formatBytes(executionUsage?.total_heap_bytes) }}</span>
           <span>MQ {{ formatCount(executionUsage?.message_queue_len) }}</span>
