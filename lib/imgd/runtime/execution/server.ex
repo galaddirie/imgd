@@ -240,12 +240,19 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp build_from_source(execution, runtime_opts) do
-    case get_source(execution) do
+    source_override = Keyword.get(runtime_opts, :source) || Keyword.get(runtime_opts, :draft)
+
+    case source_override || get_source(execution) do
       nil ->
         nil
 
       source ->
         # Merge runtime opts (like ephemeral PIDs) into metadata
+        runtime_metadata =
+          runtime_opts
+          |> Keyword.drop([:source, :draft])
+          |> Map.new()
+
         metadata =
           %{
             trace_id:
@@ -253,7 +260,7 @@ defmodule Imgd.Runtime.Execution.Server do
                 Map.get(execution.metadata || %{}, "trace_id"),
             workflow_id: execution.workflow_id
           }
-          |> Map.merge(Map.new(runtime_opts))
+          |> Map.merge(runtime_metadata)
 
         # Pass execution context to the adapter
         opts = [

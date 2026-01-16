@@ -398,7 +398,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     # Step ID is now the key-safe slug, no mapping needed
     step_outputs =
       Enum.reduce(step_executions, %{}, fn se, acc ->
-        Map.put(acc, se.step_id, se.output_data)
+        Map.put(acc, se.step_id, Map.get(se, :output_data))
       end)
 
     # Filter outputs to only include upstream steps
@@ -408,7 +408,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     step_outputs = Map.take(step_outputs, upstream_ids)
 
     current_step_execution = Enum.find(step_executions, fn se -> se.step_id == step_id end)
-    current_input = if current_step_execution, do: current_step_execution.input_data, else: nil
+
+    current_input =
+      if current_step_execution, do: Map.get(current_step_execution, :input_data), else: nil
 
     result =
       cond do
@@ -749,9 +751,21 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     socket = unsubscribe_execution(socket)
 
     workflow = socket.assigns.workflow
-    draft = workflow.draft
-    editor_state = socket.assigns.editor_state
     scope = socket.assigns.current_scope
+
+    {draft, editor_state} =
+      fetch_session_state(
+        workflow.id,
+        workflow.draft,
+        socket.assigns.editor_state
+      )
+
+    workflow = %{workflow | draft: draft}
+
+    socket =
+      socket
+      |> assign(:workflow, workflow)
+      |> assign(:editor_state, editor_state)
 
     if is_nil(draft) do
       {:error, "workflow draft missing", socket}
@@ -779,7 +793,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       with {:ok, execution} <- Executions.create_execution(scope, attrs) do
         try do
           with :ok <- subscribe_execution(scope, execution.id),
-               {:ok, _pid} <- start_execution_process(execution.id, step_outputs: pinned_outputs) do
+               {:ok, _pid} <-
+                 start_execution_process(execution.id,
+                   step_outputs: pinned_outputs,
+                   source: preview_draft
+                 ) do
             step_executions = build_initial_step_executions(execution.id, preview_draft.steps)
 
             socket =
@@ -862,6 +880,15 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         step_type_id: step.type_id,
         status: :pending,
         attempt: 1,
+        input_data: nil,
+        output_data: nil,
+        output_item_count: nil,
+        error: nil,
+        queued_at: nil,
+        started_at: nil,
+        completed_at: nil,
+        duration_us: nil,
+        metadata: %{},
         inserted_at: now
       }
     end)
@@ -1101,6 +1128,21 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       step_locks: state[:step_locks] || state["step_locks"] || %{},
       webhook_test: state[:webhook_test] || state["webhook_test"]
     }
+  end
+
+  defp fetch_session_state(workflow_id, fallback_draft, fallback_editor_state) do
+    try do
+      case Server.get_sync_state(workflow_id) do
+        {:ok, %{type: :full_sync, draft: draft, editor_state: editor_state}} ->
+          draft = draft || fallback_draft
+          {draft, deserialize_editor_state(editor_state, workflow_id)}
+
+        _ ->
+          {fallback_draft, fallback_editor_state}
+      end
+    catch
+      :exit, _ -> {fallback_draft, fallback_editor_state}
+    end
   end
 
   defp format_error_message(error) when is_binary(error), do: error
