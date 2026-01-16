@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useThemeStore } from '@/stores/theme';
-import type { NodeLibraryItem } from '@/types/workflow';
+import type { StepKind, NodeLibraryItem } from '@/types/workflow';
 import {
   MagnifyingGlassIcon,
   CursorArrowRaysIcon,

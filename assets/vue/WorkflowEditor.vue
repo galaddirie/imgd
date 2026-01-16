@@ -84,7 +84,7 @@ interface Props {
   editorState?: EditorState;
   presences?: UserPresence[];
   currentUserId?: string;
-  expressionPreviews?: Record<string, unknown>;
+  expressionPreviews?: Record<string, any>;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -203,7 +203,7 @@ const nodeTypes = {
 };
 
 const edgeTypes = {
-  custom: markRaw(CustomEdge),
+  custom: markRaw(CustomEdge as any),
 };
 
 const clickTimer = ref<ReturnType<typeof setTimeout> | null>(null);
@@ -394,8 +394,8 @@ const otherUserPresences = computed(() => {
 });
 
 const executionUsage = computed<ResourceUsage | null>(() => {
-  const metadata = props.execution?.metadata as Record<string, unknown> | undefined;
-  const extras = metadata?.extras as Record<string, unknown> | undefined;
+  const metadata = props.execution?.metadata as Record<string, any> | undefined;
+  const extras = metadata?.extras as Record<string, any> | undefined;
   return (extras?.resource_usage as ResourceUsage) ?? null;
 });
 
@@ -610,7 +610,7 @@ const handleNodeDoubleClick = (event: { node: Node<StepNodeData> }) => {
 type SelectionContextMenuEvent = { event: MouseEvent; nodes: GraphNode<StepNodeData>[] };
 
 const findNodeUnderCursor = (event: MouseEvent, nodes: GraphNode<StepNodeData>[]) => {
-  const flowElement = (vueFlowRef.value?.$el as HTMLElement | undefined) ?? canvasRef.value;
+  const flowElement = (vueFlowRef.value as any)?.$el ?? canvasRef.value;
   if (!flowElement) return null;
   const { left, top } = flowElement.getBoundingClientRect();
   const point = project({ x: event.clientX - left, y: event.clientY - top });

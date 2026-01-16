@@ -8,6 +8,9 @@ import {
   ArrowUturnLeftIcon,
   ArrowUturnRightIcon,
   CloudArrowUpIcon,
+  PlayCircleIcon,
+  UserCircleIcon,
+  CheckCircleIcon,
   ExclamationCircleIcon,
   ArrowPathIcon,
 } from '@heroicons/vue/24/outline';

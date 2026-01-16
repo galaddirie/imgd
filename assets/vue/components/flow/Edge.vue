@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { getBezierPath, useVueFlow, Position } from '@vue-flow/core';
-import { computed, type CSSProperties } from 'vue';
+import { BaseEdge, getBezierPath, useVueFlow } from '@vue-flow/core';
+import { MarkerType } from '@vue-flow/core';
+import { computed } from 'vue';
+import type { EdgeProps } from '@vue-flow/core';
 import { lightenColor, colorMap, type NodeStatus, oklchToHex } from '@/lib/color';
 import { useThemeStore } from '@/stores/theme';
 
 interface EdgeData {
   animated?: boolean;
 }
+
+import { Position } from '@vue-flow/core';
 
 interface Props {
   id: string;
@@ -20,7 +24,7 @@ interface Props {
   targetPosition?: Position;
   data?: EdgeData;
   markerEnd?: string;
-  style?: CSSProperties;
+  style?: any;
   selected?: boolean;
   sourceHandleId?: string;
   targetHandleId?: string;
@@ -74,6 +78,7 @@ const handleColor = computed(() => {
 const lighterColor = computed(() => lightenColor(handleColor.value, 90));
 
 const gradientId = computed(() => `edge-gradient-${props.id}`);
+const glowId = computed(() => `edge-glow-${props.id}`);
 
 // Stats from source node
 const sourceStats = computed(() => sourceNode.value?.data?.stats);

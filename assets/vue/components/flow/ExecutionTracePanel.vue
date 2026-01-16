@@ -40,7 +40,7 @@ const emit = defineEmits<{
 }>();
 
 const activeTab = ref<'input' | 'output'>('input');
-const localSelectedStepId = ref<string | null>(null);
+const selectedStepId = ref<string | null>(null);
 
 // Mock data when no props (for development)
 const mockTraces: TraceEntry[] = [
@@ -78,15 +78,15 @@ const mockTraces: TraceEntry[] = [
 ];
 
 const selectedStepExecution = computed(() => {
-  if (!localSelectedStepId.value) return null;
-  return props.stepExecutions.find(se => se.step_id === localSelectedStepId.value) || null;
+  if (!selectedStepId.value) return null;
+  return props.stepExecutions.find(se => se.step_id === selectedStepId.value) || null;
 });
 
 // Watch for external selection changes and sync to local state
 watch(
   () => props.selectedStepId,
   newSelectedStepId => {
-    localSelectedStepId.value = newSelectedStepId ?? null;
+    selectedStepId.value = newSelectedStepId ?? null;
   },
   { immediate: true }
 );
@@ -177,8 +177,8 @@ const formatDuration = (us?: number): string => {
 };
 
 const selectStep = (stepId: string) => {
-  if (localSelectedStepId.value === stepId) return;
-  localSelectedStepId.value = stepId;
+  if (selectedStepId.value === stepId) return;
+  selectedStepId.value = stepId;
   emit('selectStep', stepId);
 };
 </script>
@@ -247,7 +247,7 @@ const selectStep = (stepId: string) => {
             class="hover:bg-primary/5 group flex cursor-pointer items-center gap-3 rounded-xl p-2.5 transition-all"
             :class="{
               'bg-primary/5 border-primary/20 border': trace.status === 'running',
-              'bg-primary/10 border-primary/30 border': localSelectedStepId === trace.step_id,
+              'bg-primary/10 border-primary/30 border': selectedStepId === trace.step_id,
             }"
             @click="selectStep(trace.step_id)"
           >
@@ -305,7 +305,7 @@ const selectStep = (stepId: string) => {
                 JSON.stringify(selectedStepExecution.input_data, null, 2)
               }}</pre>
             </div>
-            <div v-else-if="localSelectedStepId" class="text-base-content/40 py-8 text-center">
+            <div v-else-if="selectedStepId" class="text-base-content/40 py-8 text-center">
               <p class="text-sm">No input data available</p>
               <p class="mt-1 text-xs">The step may not have started yet or has no input</p>
             </div>
@@ -322,7 +322,7 @@ const selectStep = (stepId: string) => {
                 JSON.stringify(selectedStepExecution.output_data, null, 2)
               }}</pre>
             </div>
-            <div v-else-if="localSelectedStepId" class="text-base-content/40 py-8 text-center">
+            <div v-else-if="selectedStepId" class="text-base-content/40 py-8 text-center">
               <p class="text-sm">No output data available</p>
               <p class="mt-1 text-xs">The step may not have completed yet or has no output</p>
             </div>

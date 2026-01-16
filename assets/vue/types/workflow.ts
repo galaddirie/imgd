@@ -1,5 +1,3 @@
-import type { Component } from 'vue';
-
 // =============================================================================
 // Workflow Types
 // =============================================================================
@@ -256,7 +254,7 @@ export interface ContextMenuState {
 export interface MenuItem {
   id: string;
   label: string;
-  icon?: Component;
+  icon?: any;
   shortcut?: string;
   disabled?: boolean;
   danger?: boolean;

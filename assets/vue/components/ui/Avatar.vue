@@ -8,7 +8,7 @@ import type { UserPresence } from '@/types/workflow';
 // =============================================================================
 
 interface Props {
-  presences?: UserPresence[];
+  presences: UserPresence[];
 }
 
 const props = withDefaults(defineProps<Props>(), {

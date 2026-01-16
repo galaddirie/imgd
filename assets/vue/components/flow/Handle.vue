@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Handle, Position } from '@vue-flow/core';
-import type { HandleType } from '@vue-flow/core';
+import { Handle } from '@vue-flow/core';
+import type { HandleProps, HandleType } from '@vue-flow/core';
 
 interface Props {
   id?: string;
@@ -9,8 +9,10 @@ interface Props {
   connectable?: boolean;
   connectableStart?: boolean;
   connectableEnd?: boolean;
-  [key: string]: unknown;
+  [key: string]: any;
 }
+
+import { Position } from '@vue-flow/core';
 
 const props = defineProps<Props>();
 </script>

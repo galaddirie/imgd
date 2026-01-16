@@ -6,7 +6,7 @@ import Handle from './Handle.vue';
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '@/lib/color';
 import { useThemeStore } from '@/stores/theme';
 import { useClientStore } from '@/store/clientStore';
-import type { StepNodeData } from '@/types/workflow';
+import type { StepNodeData, StepKind } from '@/types/workflow';
 import {
   GlobeAltIcon,
   ServerIcon,
@@ -165,6 +165,19 @@ const statusConfig = computed(() => {
 });
 
 const currentStatusStyle = computed(() => statusConfig.value[effectiveStatus.value]);
+
+// Step kind badge styling
+const stepKindConfig: Record<StepKind, { label: string; class: string }> = {
+  trigger: { label: 'Trigger', class: 'badge-primary' },
+  action: { label: 'Action', class: 'badge-info' },
+  transform: { label: 'Transform', class: 'badge-secondary' },
+  control_flow: { label: 'Logic', class: 'badge-warning' },
+};
+
+const stepKindBadge = computed(() => {
+  const kind = props.data.step_kind ?? 'action';
+  return stepKindConfig[kind];
+});
 
 // Node classes
 const nodeClasses = computed(() => [
@@ -325,9 +338,9 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false);
           <template v-if="showStats">
             <ClockIcon class="size-3.5" />
             <span>{{ formatDuration(data.stats?.duration_us) }}</span>
-            <template v-if="data.stats?.bytes">
+            <template v-if="(data.stats as any)?.bytes">
               <span class="text-base-content/40 mx-0.5">•</span>
-              <span>{{ formatBytes(data.stats?.bytes) }}</span>
+              <span>{{ formatBytes((data.stats as any)?.bytes) }}</span>
             </template>
           </template>
           <!-- Invisible placeholder to maintain consistent height -->

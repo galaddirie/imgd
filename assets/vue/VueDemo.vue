@@ -97,7 +97,7 @@ const completedCount = computed(() => filterByType('completed').length);
                 <input
                   type="checkbox"
                   :checked="todo.completed"
-                  @change="live.pushEvent('toggle_todo', { id: todo.id })"
+                  @change="$live.pushEvent('toggle_todo', { id: todo.id })"
                   class="checkbox checkbox-primary"
                 />
                 <span
@@ -106,7 +106,7 @@ const completedCount = computed(() => filterByType('completed').length);
                   {{ todo.text }}
                 </span>
                 <button
-                  @click="live.pushEvent('delete_todo', { id: todo.id })"
+                  @click="$live.pushEvent('delete_todo', { id: todo.id })"
                   class="btn btn-error btn-sm"
                 >
                   Delete
@@ -136,7 +136,7 @@ const completedCount = computed(() => filterByType('completed').length);
         <!-- Actions -->
         <div v-if="props.todos.some(todo => todo.completed)" class="card-actions justify-between">
           <span class="text-sm opacity-70">{{ completedCount }} completed</span>
-          <button @click="live.pushEvent('clear_completed', {})" class="btn btn-error btn-sm">
+          <button @click="$live.pushEvent('clear_completed', {})" class="btn btn-error btn-sm">
             Clear completed
           </button>
         </div>
