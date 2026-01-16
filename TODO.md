@@ -13,8 +13,6 @@
 - [ ] Add **Publish** button
 - [ ] Unsaved changes indicator + autosave
 - [ ] Undo/redo (unsaved changes remain in session local storage)
-- [ ] we should show the resources used by a execution ( total memory, cpu, etc)
-- [ ] we should show the resources used by a collabrative edit session  ( total memory, cpu, etc)
 
 - [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
 
@@ -83,10 +81,3 @@ merge node will also act as a edit fields node
 
 - determine risk of api key exposure in webhook trigger outputs
 
-
-
-
-editing  step config modal - changes reflect slow takes a few seconds to update when making executions
-
-
-bug in execution cancellation - it  continues running  and when we refresh the page it shows all nodes as cancelled including nodes that already completed successfully
