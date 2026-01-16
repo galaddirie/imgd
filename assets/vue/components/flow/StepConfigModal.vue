@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { watchDebounced } from '@vueuse/core';
+import type { Node } from '@vue-flow/core';
 import ExpressionPreviewError from './ExpressionPreviewError.vue';
-import type { EditorState } from '@/types/workflow';
+import type { EditorState, Execution, StepExecution, StepNodeData, StepType } from '@/types/workflow';
 import {
   ArrowRightOnRectangleIcon,
   BoltIcon,
@@ -13,27 +14,24 @@ import {
 } from '@heroicons/vue/24/outline';
 import { unwrapData, formatDataForDisplay } from '@/lib/dataUtils';
 
-interface NodeData {
-  id: string;
-  type_id: string;
-  name: string;
-  config?: Record<string, unknown>;
-  [key: string]: any;
-}
+type ConfigSchemaField = {
+  title?: string;
+  type?: string;
+  format?: string;
+  default?: unknown;
+};
 
-interface Node {
-  id: string;
-  data: Record<string, any>;
-  [key: string]: any;
-}
+type ConfigSchema = {
+  properties?: Record<string, ConfigSchemaField>;
+};
 
 interface Props {
-  node: any | null;
+  node: Node<StepNodeData> | null;
   isOpen: boolean;
-  stepType?: any;
-  execution?: any;
-  stepExecutions?: any[];
-  expressionPreviews?: Record<string, any>;
+  stepType?: StepType | null;
+  execution?: Execution | null;
+  stepExecutions?: StepExecution[];
+  expressionPreviews?: Record<string, unknown>;
   editorState?: EditorState;
   stepNameById?: Record<string, string>;
   upstreamStepIds?: Record<string, string[]>;
@@ -44,7 +42,7 @@ const emit = defineEmits(['close', 'save', 'preview_expression', 'toggle_webhook
 
 const activeTab = ref<'config' | 'output' | 'pinned'>('config');
 const fieldModes = ref<Record<string, 'literal' | 'expression'>>({});
-const fieldValues = ref<Record<string, any>>({});
+const fieldValues = ref<Record<string, unknown>>({});
 const searchQuery = ref('');
 const isEditingName = ref(false);
 const editName = ref('');
@@ -56,7 +54,7 @@ watch(
     if (open && newNode) {
       const config = newNode.data.config || {};
       const modes: Record<string, 'literal' | 'expression'> = {};
-      const values: Record<string, any> = {};
+      const values: Record<string, unknown> = {};
 
       Object.entries(config).forEach(([key, value]) => {
         const isExpr = typeof value === 'string' && (value.includes('{{') || value.includes('{%'));
@@ -108,17 +106,19 @@ const toggleMode = (field: string) => {
 };
 
 // Map schema types to input types
+type FieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json';
+
 const fields = computed(() => {
   if (!props.node) return [];
 
-  const schema = props.stepType?.config_schema?.properties || {};
+  const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
   const config = props.node.data.config || {};
 
   // Combine schema-defined fields and existing config fields
   const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
 
   return Array.from(allKeys).map(key => {
-    const schemaField = schema[key] || {};
+    const schemaField: ConfigSchemaField = schema[key] ?? {};
     let type = inferType(config[key] ?? schemaField.default);
 
     if (schemaField.format === 'json') {
@@ -135,7 +135,7 @@ const fields = computed(() => {
   });
 });
 
-const inferType = (val: any) => {
+const inferType = (val: unknown): FieldType => {
   if (typeof val === 'boolean') return 'boolean';
   if (typeof val === 'number') return 'number';
   if (typeof val === 'string' && val.length > 50) return 'textarea';
@@ -158,38 +158,48 @@ const activeStepExecution = computed(() => {
   return props.stepExecutions.find(se => se.step_id === props.node?.id) || null;
 });
 
-const evaluatedConfig = computed(() => {
-  return activeStepExecution.value?.metadata?.evaluated_config || {};
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+};
+
+const evaluatedConfig = computed<Record<string, unknown>>(() => {
+  const metadata = toRecord(activeStepExecution.value?.metadata);
+  const evaluated = toRecord(metadata?.evaluated_config);
+  return evaluated ?? {};
 });
 
 const contextData = computed(() => {
   if (!props.execution) return {};
-  const currentStepId = props.node?.id;
   const upstreamIds = props.node ? props.upstreamStepIds?.[props.node.id] || [] : [];
+  const metadata = toRecord(props.execution.metadata);
+  const extras = toRecord(metadata?.extras);
+
+  const steps =
+    props.stepExecutions?.reduce<Record<string, { json: unknown }>>((acc, se) => {
+      // Only include if it's an upstream step
+      if (!upstreamIds.includes(se.step_id)) return acc;
+
+      const stepName = props.stepNameById?.[se.step_id];
+      const key = stepName && stepName.length > 0 ? stepName : se.step_id;
+
+      acc[key] = { json: unwrapData(se.output_data) };
+      return acc;
+    }, {}) ?? {};
 
   return {
     json: unwrapData(activeStepExecution.value?.input_data) || {},
     trigger: props.execution?.trigger?.data || {},
-    variables: props.execution?.metadata?.variables || {},
-    request: props.execution?.metadata?.extras?.request || {},
-    steps:
-      props.stepExecutions?.reduce((acc: any, se: any) => {
-        // Only include if it's an upstream step
-        if (!upstreamIds.includes(se.step_id)) return acc;
-
-        const stepName = props.stepNameById?.[se.step_id];
-        const key = stepName && stepName.length > 0 ? stepName : se.step_id;
-
-        acc[key] = { json: unwrapData(se.output_data) };
-        return acc;
-      }, {}) || {},
+    variables: metadata?.variables ?? {},
+    request: extras?.request ?? {},
+    steps,
   };
 });
 
 const explorerData = computed(() => {
   const data = contextData.value;
 
-  const wrapPrimitive = (val: any, key: string) => {
+  const wrapPrimitive = (val: unknown, key: string) => {
     if (val === null || val === undefined) return val;
     if (typeof val === 'object' && !Array.isArray(val)) return val;
     return { [key]: val };

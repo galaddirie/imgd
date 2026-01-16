@@ -1,24 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import {
-  TrashIcon,
-  DocumentDuplicateIcon,
-  Cog6ToothIcon,
-  EyeSlashIcon,
-  EyeIcon,
-  BookmarkIcon,
-  PlayIcon,
-  ClipboardDocumentIcon,
-  PlusIcon,
-  ArrowPathIcon,
-  ScissorsIcon,
-  DocumentIcon,
-} from '@heroicons/vue/24/outline';
+import { ref, computed, onMounted, onUnmounted, type Component } from 'vue';
 
 export interface MenuItem {
   id: string;
   label: string;
-  icon?: any;
+  icon?: Component;
   shortcut?: string;
   danger?: boolean;
   disabled?: boolean;
@@ -107,7 +93,7 @@ onUnmounted(() => {
         class="bg-base-100 border-base-300 fixed z-[1100] min-w-[180px] rounded-xl border py-1.5 shadow-xl"
         :style="{ left: `${adjustedPosition.x}px`, top: `${adjustedPosition.y}px` }"
       >
-        <template v-for="(item, index) in items" :key="item.id">
+        <template v-for="item in items" :key="item.id">
           <!-- Divider -->
           <div v-if="item.divider" class="border-base-300 mx-2 my-1.5 border-t" />
 
