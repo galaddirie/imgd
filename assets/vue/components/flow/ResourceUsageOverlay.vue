@@ -8,6 +8,11 @@ const props = defineProps<{
   executionStatus?: ExecutionStatus | null;
 }>();
 
+type ResourceUsageEvent = {
+  source?: 'session' | 'execution';
+  usage?: ResourceUsage;
+};
+
 const sessionUsage = ref<ResourceUsage | null>(null);
 const executionUsage = ref<ResourceUsage | null>(props.executionUsage ?? null);
 
@@ -21,15 +26,17 @@ watch(
 const live = useLiveVue();
 
 onMounted(() => {
-  live.handleEvent('resource_usage', (payload: any) => {
-    if (!payload || !payload.usage) return;
+  live.handleEvent('resource_usage', (payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return;
+    const data = payload as ResourceUsageEvent;
+    if (!data.usage || (data.source !== 'session' && data.source !== 'execution')) return;
 
-    if (payload.source === 'session') {
-      sessionUsage.value = payload.usage as ResourceUsage;
+    if (data.source === 'session') {
+      sessionUsage.value = data.usage;
     }
 
-    if (payload.source === 'execution') {
-      executionUsage.value = payload.usage as ResourceUsage;
+    if (data.source === 'execution') {
+      executionUsage.value = data.usage;
     }
   });
 });

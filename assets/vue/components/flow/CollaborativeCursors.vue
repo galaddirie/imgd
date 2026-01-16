@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { computed, ref, watch, onMounted } from 'vue';
 import type { UserPresence } from '@/types/workflow';
 import { generateColor } from '@/lib/color';
 import { useLiveVue } from 'live_vue';
@@ -28,10 +28,11 @@ const live = useLiveVue();
 
 onMounted(() => {
   // Listen for fast cursor updates bypassing the DOM prop cycle
-  live.handleEvent('presence_update', (payload: any) => {
-    // payload is { presences: [...] }
-    if (payload && payload.presences) {
-      localPresences.value = payload.presences;
+  live.handleEvent('presence_update', (payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return;
+    const data = payload as { presences?: UserPresence[] };
+    if (Array.isArray(data.presences)) {
+      localPresences.value = data.presences;
     }
   });
 });
