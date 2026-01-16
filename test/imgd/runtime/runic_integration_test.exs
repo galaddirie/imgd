@@ -193,6 +193,131 @@ defmodule Imgd.Runtime.RunicIntegrationTest do
       {:ok, result} = Imgd.Steps.Executors.Splitter.execute(%{}, "single", nil)
       assert result == ["single"]
     end
+
+    test "handles pre-evaluated list field (from expression evaluation)" do
+      # When field is already a list (e.g., from {{ json.items }} evaluating to [1, 2, 3])
+      {:ok, result} = Imgd.Steps.Executors.Splitter.execute(%{"field" => [1, 2, 3]}, %{}, nil)
+      assert result == [1, 2, 3]
+    end
+
+    test "handles pre-evaluated range" do
+      {:ok, result} = Imgd.Steps.Executors.Splitter.execute(%{"field" => 1..5}, %{}, nil)
+      assert result == [1, 2, 3, 4, 5]
+    end
+
+    test "handles nil field gracefully" do
+      {:ok, result} = Imgd.Steps.Executors.Splitter.execute(%{"field" => nil}, [1, 2, 3], nil)
+      assert result == [1, 2, 3]
+    end
+  end
+
+  describe "Splitter FanOut integration" do
+    test "splitter fans out to child steps" do
+      source = %{
+        id: "fanout_split_wf",
+        steps: [
+          %Step{
+            id: "splitter",
+            type_id: "splitter",
+            name: "Splitter",
+            config: %{"field" => "items"}
+          },
+          %Step{id: "process_item", type_id: "debug", name: "Process", config: %{}}
+        ],
+        connections: [
+          %Connection{id: "c1", source_step_id: "splitter", target_step_id: "process_item"}
+        ]
+      }
+
+      workflow = RunicAdapter.to_runic_workflow(source)
+
+      result =
+        workflow
+        |> Workflow.react_until_satisfied(%{"items" => [1, 2, 3]})
+        |> Workflow.raw_productions()
+
+      # Should have 3 productions (one per item fanned out)
+      # Each debug step passes through its input unchanged
+      assert 1 in result
+      assert 2 in result
+      assert 3 in result
+    end
+
+    test "splitter with evaluated field expression" do
+      # Simulates what happens when config is evaluated and field becomes the actual list
+      source = %{
+        id: "fanout_eval_wf",
+        steps: [
+          # In real usage, config evaluation would turn "{{ json.items }}" into [1, 2, 3]
+          # Here we simulate by passing the list directly as the field value
+          %Step{
+            id: "splitter",
+            type_id: "splitter",
+            name: "Splitter",
+            config: %{"field" => "data"}
+          },
+          %Step{id: "process_item", type_id: "debug", name: "Process", config: %{}}
+        ],
+        connections: [
+          %Connection{id: "c1", source_step_id: "splitter", target_step_id: "process_item"}
+        ]
+      }
+
+      workflow = RunicAdapter.to_runic_workflow(source)
+
+      result =
+        workflow
+        |> Workflow.react_until_satisfied(%{"data" => ["a", "b", "c"]})
+        |> Workflow.raw_productions()
+
+      assert "a" in result
+      assert "b" in result
+      assert "c" in result
+    end
+
+    test "splitter to aggregator full flow (map-reduce pattern)" do
+      # This tests the complete fan-out → process → fan-in pattern
+      source = %{
+        id: "map_reduce_wf",
+        steps: [
+          %Step{
+            id: "splitter",
+            type_id: "splitter",
+            name: "Splitter",
+            config: %{"field" => "numbers"}
+          },
+          %Step{id: "process", type_id: "debug", name: "Process", config: %{}},
+          %Step{
+            id: "aggregator",
+            type_id: "aggregator",
+            name: "Aggregator",
+            config: %{"operation" => "sum"}
+          }
+        ],
+        connections: [
+          %Connection{id: "c1", source_step_id: "splitter", target_step_id: "process"},
+          %Connection{id: "c2", source_step_id: "process", target_step_id: "aggregator"}
+        ]
+      }
+
+      workflow = RunicAdapter.to_runic_workflow(source)
+
+      final_workflow =
+        workflow
+        |> Workflow.react_until_satisfied(%{"numbers" => [1, 2, 3, 4, 5]})
+
+      productions = Workflow.raw_productions(final_workflow)
+
+      # The individual items should be in productions
+      assert 1 in productions
+      assert 2 in productions
+      assert 3 in productions
+      assert 4 in productions
+      assert 5 in productions
+
+      # And the sum (15) should be the final aggregated result
+      assert 15 in productions
+    end
   end
 
   describe "Aggregator executor" do

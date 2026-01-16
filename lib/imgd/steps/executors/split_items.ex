@@ -60,14 +60,7 @@ defmodule Imgd.Steps.Executors.Splitter do
   def execute(config, input, _ctx) do
     field = Map.get(config, "field")
 
-    items =
-      if field && is_binary(field) && field != "" do
-        # Extract from nested field
-        get_nested(input, String.split(field, "."))
-      else
-        # Use input directly
-        input
-      end
+    items = extract_items(field, input)
 
     case items do
       list when is_list(list) ->
@@ -87,6 +80,38 @@ defmodule Imgd.Steps.Executors.Splitter do
         # Wrap single item in list
         {:ok, [other]}
     end
+  end
+
+  # Extract items based on what `field` evaluates to:
+  # - String path: extract from input using dot notation (e.g., "data.items")
+  # - Already a list/enumerable: use directly (e.g., from expression {{ json.arr }})
+  # - Nil/empty: use input directly
+  defp extract_items(nil, input), do: input
+  defp extract_items("", input), do: input
+
+  defp extract_items(field, input) when is_binary(field) do
+    # String path - extract from input using dot notation
+    get_nested(input, String.split(field, "."))
+  end
+
+  defp extract_items(field, _input) when is_list(field) do
+    # Already evaluated to a list - use directly
+    field
+  end
+
+  defp extract_items(%Range{} = range, _input) do
+    # Already a range - use directly
+    range
+  end
+
+  defp extract_items(field, _input) when is_map(field) do
+    # Already a map - use directly
+    field
+  end
+
+  defp extract_items(other, _input) do
+    # Single value that was evaluated - wrap in list will happen in main function
+    other
   end
 
   @impl true

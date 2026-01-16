@@ -27,6 +27,7 @@ defmodule Imgd.Runtime.RunicAdapter do
   require Runic
   alias Runic.Component
   alias Runic.Workflow
+  alias Runic.Workflow.FanOut
   alias Imgd.Runtime.Steps.StepRunner
 
   @type source :: Imgd.Workflows.WorkflowDraft.t() | map()
@@ -105,7 +106,7 @@ defmodule Imgd.Runtime.RunicAdapter do
   def create_component(step, component_name, opts \\ []) do
     case step.type_id do
       "splitter" ->
-        create_splitter(step, component_name)
+        create_splitter(step, component_name, opts)
 
       "aggregator" ->
         create_aggregator(step, component_name)
@@ -135,18 +136,97 @@ defmodule Imgd.Runtime.RunicAdapter do
       |> Map.get(step.id, [])
       |> Enum.uniq()
 
-    case parent_ids do
-      [] ->
-        # Root step - add to workflow root
-        Workflow.add(workflow, component)
+    workflow = connect_component(workflow, component, parent_ids)
 
-      [parent_id] ->
-        Workflow.add(workflow, component, to: parent_id)
+    # For Reduce (aggregator) components, connect to upstream FanOut (splitter) if exists
+    maybe_connect_fan_in(workflow, component)
+  end
 
-      _ ->
-        {workflow, join} = ensure_join(workflow, parent_ids)
-        Workflow.add(workflow, component, to: join)
+  defp connect_component(workflow, component, []) do
+    # Root step - add to workflow root
+    Workflow.add(workflow, component)
+  end
+
+  defp connect_component(workflow, component, [parent_id]) do
+    Workflow.add(workflow, component, to: parent_id)
+  end
+
+  defp connect_component(workflow, component, parent_ids) do
+    {workflow, join} = ensure_join(workflow, parent_ids)
+    Workflow.add(workflow, component, to: join)
+  end
+
+  # Connect a Reduce (aggregator) to its upstream FanOut (splitter) via :fan_in edge
+  defp maybe_connect_fan_in(workflow, %Runic.Workflow.Reduce{fan_in: fan_in}) do
+    # Find any upstream FanOut in the graph
+    case find_upstream_fan_out(workflow, fan_in) do
+      nil ->
+        workflow
+
+      fan_out ->
+        # Draw the :fan_in edge so FanIn knows which FanOut to collect from
+        workflow
+        |> Workflow.draw_connection(fan_out, fan_in, :fan_in)
+        |> track_mapped_path(fan_out, fan_in)
     end
+  end
+
+  defp maybe_connect_fan_in(workflow, _component), do: workflow
+
+  # Find any FanOut upstream of the given FanIn by traversing the graph backwards
+  defp find_upstream_fan_out(workflow, fan_in) do
+    # Get the fan_in's predecessors and traverse backwards to find FanOut
+    do_find_upstream_fan_out(workflow.graph, [fan_in], MapSet.new())
+  end
+
+  defp do_find_upstream_fan_out(_graph, [], _visited), do: nil
+
+  defp do_find_upstream_fan_out(graph, [current | rest], visited) do
+    if MapSet.member?(visited, current) do
+      do_find_upstream_fan_out(graph, rest, visited)
+    else
+      visited = MapSet.put(visited, current)
+
+      case current do
+        %FanOut{} ->
+          current
+
+        _ ->
+          # Get all predecessors (nodes that flow into current)
+          predecessors =
+            graph
+            |> Graph.in_edges(current)
+            |> Enum.filter(&(&1.label == :flow))
+            |> Enum.map(& &1.v1)
+
+          do_find_upstream_fan_out(graph, predecessors ++ rest, visited)
+      end
+    end
+  end
+
+  # Track the path from FanOut to FanIn in the workflow's mapped paths
+  defp track_mapped_path(workflow, fan_out, fan_in) do
+    path =
+      workflow.graph
+      |> Graph.get_shortest_path(fan_out, fan_in)
+
+    path_hashes =
+      Enum.reduce(path || [], MapSet.new(), fn node, mapset ->
+        case node do
+          %{hash: hash} -> MapSet.put(mapset, hash)
+          _ -> mapset
+        end
+      end)
+
+    %Workflow{
+      workflow
+      | mapped:
+          Map.put(
+            workflow.mapped,
+            :mapped_paths,
+            MapSet.union(workflow.mapped[:mapped_paths] || MapSet.new(), path_hashes)
+          )
+    }
   end
 
   defp ensure_join(%Workflow{} = workflow, parent_ids) when is_list(parent_ids) do
@@ -248,13 +328,20 @@ defmodule Imgd.Runtime.RunicAdapter do
   # Private: Component Creation
   # ===========================================================================
 
-  defp create_splitter(_step, component_name) do
-    # Splitter creates a Runic.map that iterates over the input collection
-    # The inner step passes each item through unchanged (for downstream processing)
-    Runic.map(
-      fn item -> item end,
-      name: component_name
-    )
+  defp create_splitter(step, component_name, opts) do
+    # Create a FanOut step that runs the Splitter executor logic
+    # This replaces the previous two-step (extract + map) approach with a single
+    # atomic fan-out component that supports its own work function.
+    work_fn = fn input ->
+      StepRunner.execute_with_context(step, input, opts)
+    end
+
+    %FanOut{
+      name: component_name,
+      work: work_fn,
+      # Ensure unique hash for graph vertex collisions
+      hash: :erlang.phash2({:fan_out, step.id}, 4_294_967_296)
+    }
   end
 
   defp create_aggregator(step, component_name) do
