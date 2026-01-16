@@ -3,6 +3,7 @@ defmodule Imgd.ExecutionsTest do
 
   alias Imgd.Executions
   alias Imgd.Executions.Execution
+  alias Imgd.Executions.StepExecution
   alias Imgd.Workflows
   alias Imgd.Accounts
   alias Imgd.Accounts.Scope
@@ -568,6 +569,81 @@ defmodule Imgd.ExecutionsTest do
       assert_receive {:step_cancelled, %{step_id: "step2", status: :cancelled}}
       assert_receive {:step_cancelled, %{step_id: "step3", status: :cancelled}}
       refute_receive {:step_cancelled, %{step_id: "terminal"}}
+    end
+  end
+
+  describe "step execution batching" do
+    setup do
+      execution = insert(:execution)
+      %{execution: execution}
+    end
+
+    test "record_step_executions_batch/1 persists failed over running", %{execution: execution} do
+      started_at =
+        DateTime.utc_now() |> DateTime.add(-5, :second) |> DateTime.truncate(:microsecond)
+
+      completed_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      error = Execution.format_error({:step_failed, "step-1", :boom})
+
+      events = [
+        %{
+          execution_id: execution.id,
+          step_id: "step-1",
+          step_type_id: "debug",
+          status: :running,
+          input_data: %{"value" => 1},
+          started_at: started_at
+        },
+        %{
+          execution_id: execution.id,
+          step_id: "step-1",
+          status: :failed,
+          error: error,
+          completed_at: completed_at
+        }
+      ]
+
+      assert {:ok, _count} = Executions.record_step_executions_batch(Enum.reverse(events))
+
+      step_execution =
+        Repo.get_by(StepExecution, execution_id: execution.id, step_id: "step-1")
+
+      assert step_execution.status == :failed
+      assert step_execution.input_data == %{"value" => 1}
+      assert step_execution.completed_at == completed_at
+    end
+
+    test "record_step_executions_batch/1 ignores stale running after failure", %{
+      execution: execution
+    } do
+      completed_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      error = Execution.format_error({:step_failed, "step-2", :boom})
+
+      failed =
+        %StepExecution{}
+        |> StepExecution.changeset(%{
+          execution_id: execution.id,
+          step_id: "step-2",
+          step_type_id: "debug",
+          status: :failed,
+          error: error,
+          completed_at: completed_at
+        })
+        |> Repo.insert!()
+
+      running_event = %{
+        execution_id: execution.id,
+        step_id: "step-2",
+        step_type_id: "debug",
+        status: :running,
+        started_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      }
+
+      assert {:ok, _count} = Executions.record_step_executions_batch([running_event])
+
+      reloaded = Repo.get(StepExecution, failed.id)
+      assert reloaded.status == :failed
+      assert reloaded.completed_at == completed_at
     end
   end
 
