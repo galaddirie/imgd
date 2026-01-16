@@ -236,15 +236,32 @@ defmodule Imgd.Runtime.Expression do
       strict_filters: Keyword.get(opts, :strict_filters, true)
     ]
 
-    case Solid.render(compiled, vars, render_opts) do
-      {:ok, iodata, _errors} ->
-        {:ok, IO.iodata_to_binary(iodata)}
+    # Check for naked expression: exactly one object and nothing else
+    # This allows preserving data types (arrays, maps, integers) when the template is just a single variable access
+    case compiled.parsed_template do
+      [%Solid.Object{argument: arg, filters: filters}] ->
+        # Naked expression! Evaluate without stringifying.
+        context = %Solid.Context{vars: vars}
 
-      {:ok, iodata} ->
-        {:ok, IO.iodata_to_binary(iodata)}
+        case Solid.Argument.get(arg, context, filters, render_opts) do
+          {:ok, value, %Solid.Context{errors: []}} ->
+            {:ok, value}
 
-      {:error, errors, _partial} ->
-        {:error, format_render_errors(errors)}
+          {:ok, _value, %Solid.Context{errors: errors}} ->
+            {:error, format_render_errors(errors)}
+        end
+
+      _ ->
+        case Solid.render(compiled, vars, render_opts) do
+          {:ok, iodata, _errors} ->
+            {:ok, IO.iodata_to_binary(iodata)}
+
+          {:ok, iodata} ->
+            {:ok, IO.iodata_to_binary(iodata)}
+
+          {:error, errors, _partial} ->
+            {:error, format_render_errors(errors)}
+        end
     end
   end
 

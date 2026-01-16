@@ -421,7 +421,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           vars = Imgd.Runtime.Expression.Context.build(execution, step_outputs, current_input)
 
           case Imgd.Runtime.Expression.evaluate_with_vars(template, vars) do
-            {:ok, val} -> to_string(val)
+            {:ok, val} -> value_to_display_string(val)
             {:error, reason} -> Map.put(reason, :text, template)
           end
 
@@ -1182,6 +1182,26 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
       _ ->
         socket
+    end
+  end
+
+  # Convert any expression result value to a display-friendly string for live preview
+  defp value_to_display_string(value) do
+    cond do
+      is_binary(value) ->
+        value
+
+      is_number(value) ->
+        to_string(value)
+
+      is_atom(value) ->
+        Atom.to_string(value)
+
+      is_list(value) or is_map(value) ->
+        inspect(value, limit: :infinity, printable_limit: :infinity)
+
+      true ->
+        inspect(value)
     end
   end
 end

@@ -20,7 +20,7 @@ defmodule Imgd.Runtime.ExpressionTest do
       assert {:ok, "Hello Ada"} =
                Expression.evaluate("Hello {{ json.name }}", execution, [])
 
-      assert {:ok, "3"} =
+      assert {:ok, 3} =
                Expression.evaluate("{{ variables.threshold }}", execution, [])
     end
 
@@ -31,7 +31,7 @@ defmodule Imgd.Runtime.ExpressionTest do
         trigger: %Execution.Trigger{type: :manual, data: %{}}
       }
 
-      assert {:ok, "10"} =
+      assert {:ok, 10} =
                Expression.evaluate(
                  "{{ steps.step_1.json }}",
                  execution,
@@ -55,7 +55,7 @@ defmodule Imgd.Runtime.ExpressionTest do
       assert {:ok, "[{\"value\":1},{\"value\":2}]"} =
                Expression.evaluate_with_vars("{{ json | json }}", vars)
 
-      assert {:ok, "1"} =
+      assert {:ok, 1} =
                Expression.evaluate_with_vars("{{ json | dig: \"0.value\" }}", vars)
     end
   end
@@ -72,8 +72,8 @@ defmodule Imgd.Runtime.ExpressionTest do
 
       assert {:ok, result} = Expression.evaluate_deep(data, vars)
       assert result["greeting"] == "Hello Ada"
-      assert result["items"] == ["2", "static"]
-      assert result["nested"]["ok"] == "true"
+      assert result["items"] == [2, "static"]
+      assert result["nested"]["ok"] == true
     end
 
     test "returns an error when any nested expression fails" do
@@ -94,6 +94,47 @@ defmodule Imgd.Runtime.ExpressionTest do
     test "detects Liquid expressions" do
       assert Expression.contains_expression?("Hello {{ name }}")
       refute Expression.contains_expression?("Hello world")
+    end
+  end
+
+  describe "array handling" do
+    test "returns raw array when accessing array field in naked expression" do
+      vars = %{"json" => %{"arr" => [1, 2, 3, 4, 5], "name" => "John"}}
+
+      assert {:ok, result} = Expression.evaluate_with_vars("{{ json.arr }}", vars)
+      assert is_list(result)
+      assert result == [1, 2, 3, 4, 5]
+    end
+
+    test "returns string representation when expression is not naked" do
+      vars = %{"json" => %{"arr" => [1, 2, 3]}}
+
+      assert {:ok, result} = Expression.evaluate_with_vars("List: {{ json.arr }}", vars)
+      assert is_binary(result)
+      # Liquid standard stringification joins array elements
+      assert result == "List: 123"
+    end
+
+    test "can serialize array to JSON" do
+      vars = %{"json" => %{"arr" => [1, 2, 3]}}
+
+      assert {:ok, result} = Expression.evaluate_with_vars("{{ json.arr | json }}", vars)
+      assert result == "[1,2,3]"
+    end
+
+    test "preserves arrays in evaluate_deep with naked expressions" do
+      data = %{"field" => "{{ json.arr }}"}
+      vars = %{"json" => %{"arr" => [1, 2, 3]}}
+
+      assert {:ok, result} = Expression.evaluate_deep(data, vars)
+      assert result["field"] == [1, 2, 3]
+    end
+
+    test "preserves nested structures in naked expressions" do
+      vars = %{"json" => %{"items" => [%{"id" => 1}, %{"id" => 2}]}}
+
+      assert {:ok, result} = Expression.evaluate_with_vars("{{ json.items }}", vars)
+      assert result == [%{"id" => 1}, %{"id" => 2}]
     end
   end
 end
