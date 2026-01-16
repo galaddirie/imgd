@@ -6,11 +6,14 @@
       "ESNext",
       "DOM"
     ],
+    "target": "ES2020",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "noEmit": true,
     "skipLibCheck": true,
+    "downlevelIteration": true,
     "paths": {
+      "@/*": ["./assets/vue/*"],
       "*": [
         "./deps/*",
         "node_modules/*"

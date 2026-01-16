@@ -17,7 +17,6 @@ export const generateColor = (seed: string, offset: number = 0) => {
   return `hsl(${h}, ${s}%, ${l}%)`;
 };
 
-
 /**
  * Convert OKLCH color string to hex
  */
@@ -60,18 +59,26 @@ export const darkenColor = (oklchColor: string, percent: number): string => {
 };
 
 // Matches Imgd.Executions.StepExecution @statuses
-export type NodeStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'skipped' | 'pinned' | 'cancelled'
+export type NodeStatus =
+  | 'pending'
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'pinned'
+  | 'cancelled';
 
 // OKLCH colors inspired by Apache Airflow status colors
 export const colorMap: Record<NodeStatus, string> = {
-  pending: 'oklch(85% 0.080 240)',      // Bright gray - waiting to start
-  queued: 'oklch(78% 0.220 240)',       // Bright blue - in queue
-  running: 'oklch(68% 0.300 230)',      // Blue - actively executing
-  completed: 'oklch(75% 0.250 140)',    // Bright green - finished successfully
-  failed: 'oklch(65% 0.300 15)',        // Bright red - execution failed
-  skipped: 'oklch(70% 0.120 270)',      // Bright gray - intentionally skipped
+  pending: 'oklch(85% 0.080 240)', // Bright gray - waiting to start
+  queued: 'oklch(78% 0.220 240)', // Bright blue - in queue
+  running: 'oklch(68% 0.300 230)', // Blue - actively executing
+  completed: 'oklch(75% 0.250 140)', // Bright green - finished successfully
+  failed: 'oklch(65% 0.300 15)', // Bright red - execution failed
+  skipped: 'oklch(70% 0.120 270)', // Bright gray - intentionally skipped
   pinned: 'oklch(62.7% 0.5525 293.477)', // Bright purple - pinned/important node
-  cancelled: 'oklch(75% 0.100 0)',      // Gray - cancelled
+  cancelled: 'oklch(75% 0.100 0)', // Gray - cancelled
 };
 
 // Human-readable labels for UI display

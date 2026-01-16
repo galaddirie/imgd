@@ -1,4 +1,5 @@
 {
+  "type": "module",
   "dependencies": {
     "@dagrejs/dagre": "^1.1.8",
     "@heroicons/vue": "^2.2.0",
@@ -18,12 +19,30 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
+    "@typescript-eslint/eslint-plugin": "^8.53.0",
+    "@typescript-eslint/parser": "^8.53.0",
     "@vitejs/plugin-vue": "^5.0.4",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "@vue/eslint-config-typescript": "^14.6.0",
     "daisyui": "^5.0.0",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.6.2",
     "phoenix_vite": "file:./deps/phoenix_vite",
+    "prettier": "^3.8.0",
+    "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.4.5",
     "vite": "^6.3.0",
     "vue-tsc": "^2.0.13"
+  },
+  "scripts": {
+    "lint": "eslint assets/ --ext .js,.ts,.vue",
+    "lint:fix": "eslint assets/ --ext .js,.ts,.vue --fix",
+    "format": "prettier --write assets/**/*.{js,ts,vue,css,json,md}",
+    "format:check": "prettier --check assets/**/*.{js,ts,vue,css,json,md}",
+    "typecheck": "vue-tsc --noEmit",
+    "check": "npm run lint && npm run format:check && npm run typecheck",
+    "fix": "npm run lint:fix && npm run format"
   }
 }
