@@ -1,27 +1,6 @@
 defmodule Imgd.Runtime.RunicAdapter do
   @moduledoc """
   Bridges Imgd workflow definitions (Steps/Connections) with the Runic execution engine.
-
-  This adapter handles the conversion of a design-time workflow into a
-  run-time Runic `%Workflow{}` struct, which acts as the single source
-  of truth for execution state.
-
-  ## Design Philosophy
-
-  Runic is NOT just a wrapper - it's the execution substrate. This adapter:
-  - Converts Imgd steps to appropriate Runic components (Steps, Rules, Map, Reduce)
-  - Uses Runic's native graph-building API (`Workflow.add/3`)
-  - Respects Runic's dataflow semantics (joins, fan-out)
-
-  ## Step Type Mapping
-
-  | Imgd Step Kind    | Runic Component        |
-  |-------------------|------------------------|
-  | :action, :trigger | `Runic.step`           |
-  | :transform        | `Runic.step`           |
-  | :control_flow     | `Runic.rule` or custom |
-  | splitter          | `Runic.map`            |
-  | aggregator        | `Runic.reduce`         |
   """
 
   require Runic
@@ -41,29 +20,10 @@ defmodule Imgd.Runtime.RunicAdapter do
           default_compute: term()
         ]
 
-  @doc """
-  Converts an Imgd workflow source (draft or snapshot) into a Runic Workflow.
-
-  ## Options
-
-  - `:execution_id` - The execution ID for context
-  - `:variables` - Workflow-level variables for expressions
-  - `:variables` - Workflow-level variables for experiments
-  - `:metadata` - Execution metadata
-  - `:step_outputs` - Precomputed step outputs (e.g., pinned outputs)
-  - `:default_compute` - Default compute target for all steps
-
-  ## Returns
-
-  A `%Runic.Workflow{}` struct ready for execution via `Workflow.react_until_satisfied/2`.
-  """
   @spec to_runic_workflow(source(), build_opts()) :: Workflow.t()
   def to_runic_workflow(source, opts \\ []) do
-    # Build options for StepRunner creation
-    step_outputs =
-      Keyword.get(opts, :step_outputs, Keyword.get(opts, :pinned_outputs, %{}))
+    step_outputs = Keyword.get(opts, :step_outputs, Keyword.get(opts, :pinned_outputs, %{}))
 
-    # Build graph to compute upstream dependencies
     graph = Imgd.Graph.from_workflow!(source.steps, source.connections, validate: false)
     upstream_lookup = build_upstream_lookup(graph)
 
@@ -79,16 +39,19 @@ defmodule Imgd.Runtime.RunicAdapter do
       default_compute: Keyword.get(opts, :default_compute)
     ]
 
-    # Initialize Runic workflow
     wrk = Workflow.new(name: "execution_#{extract_source_id(source)}")
-
-    # Build lookup for parent relationships
     parent_lookup = build_parent_lookup(source.connections)
-
-    # Sort steps topologically to ensure parents are added before children
     sorted_steps = topological_sort_steps(source.steps, source.connections)
 
-    # Add each step as a Runic component
+    # Build splitter lookup to detect fan-out paths
+    splitter_ids =
+      source.steps
+      |> Enum.filter(&(&1.type_id == "splitter"))
+      |> Enum.map(& &1.id)
+      |> MapSet.new()
+
+    step_opts = Keyword.put(step_opts, :splitter_ids, splitter_ids)
+
     wrk =
       Enum.reduce(sorted_steps, wrk, fn step, acc ->
         add_step_to_workflow(step, acc, parent_lookup, step_opts)
@@ -97,11 +60,6 @@ defmodule Imgd.Runtime.RunicAdapter do
     put_step_metadata(wrk, source.steps)
   end
 
-  @doc """
-  Creates a Runic component from an Imgd step.
-
-  Dispatches to the appropriate Runic primitive based on step type.
-  """
   @spec create_component(Imgd.Workflows.Embeds.Step.t(), String.t(), build_opts()) :: term()
   def create_component(step, component_name, opts \\ []) do
     case step.type_id do
@@ -109,7 +67,8 @@ defmodule Imgd.Runtime.RunicAdapter do
         create_splitter(step, component_name, opts)
 
       "aggregator" ->
-        create_aggregator(step, component_name)
+        # Default to join-style aggregator; fan-out aggregator created in add_step_to_workflow
+        create_join_aggregator(step, component_name)
 
       "condition" ->
         create_condition(step, component_name, opts)
@@ -118,10 +77,74 @@ defmodule Imgd.Runtime.RunicAdapter do
         create_switch(step, component_name, opts)
 
       _ ->
-        # Default: create a Runic step via StepRunner
         StepRunner.create(step, opts)
     end
   end
+
+  # ===========================================================================
+  # Public helpers for aggregation (called from closures via __MODULE__)
+  # ===========================================================================
+
+  @doc false
+  def normalize_aggregator_input(nil), do: []
+
+  def normalize_aggregator_input(input) when is_list(input) do
+    input
+    |> List.flatten()
+    |> Enum.reject(&is_nil/1)
+  end
+
+  def normalize_aggregator_input(input), do: [input]
+
+  @doc false
+  def apply_aggregation("sum", items) do
+    items
+    |> Enum.map(&to_number/1)
+    |> Enum.sum()
+  end
+
+  def apply_aggregation("count", items), do: length(items)
+
+  def apply_aggregation("concat", items) do
+    Enum.map_join(items, "", &to_string/1)
+  end
+
+  def apply_aggregation("first", []), do: nil
+  def apply_aggregation("first", items), do: List.first(items)
+
+  def apply_aggregation("last", []), do: nil
+  def apply_aggregation("last", items), do: List.last(items)
+
+  def apply_aggregation("min", []), do: nil
+  def apply_aggregation("min", items), do: Enum.min(items)
+
+  def apply_aggregation("max", []), do: nil
+  def apply_aggregation("max", items), do: Enum.max(items)
+
+  # Default "collect" - return flattened list
+  def apply_aggregation(_, items), do: items
+
+  @doc false
+  def to_number(n) when is_number(n), do: n
+
+  def to_number(s) when is_binary(s) do
+    case Float.parse(s) do
+      {f, _} -> f
+      :error -> 0
+    end
+  end
+
+  def to_number(_), do: 0
+
+  # Normalize an item that might be a single value or a list (from a Join)
+  @doc false
+  def normalize_item(nil), do: []
+
+  def normalize_item(item) when is_list(item) do
+    item |> List.flatten() |> Enum.reject(&is_nil/1)
+  end
+
+  def normalize_item(item), do: [item]
 
   # ===========================================================================
   # Private: Workflow Building
@@ -129,21 +152,40 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   defp add_step_to_workflow(step, workflow, parent_lookup, step_opts) do
     component_name = step.id
-    component = create_component(step, component_name, step_opts)
 
     parent_ids =
       parent_lookup
       |> Map.get(step.id, [])
       |> Enum.uniq()
 
-    workflow = connect_component(workflow, component, parent_ids)
+    # Determine if this aggregator should use fan-out or join semantics
+    component =
+      if step.type_id == "aggregator" do
+        splitter_ids = Keyword.get(step_opts, :splitter_ids, MapSet.new())
+        upstream_lookup = Keyword.get(step_opts, :upstream_lookup, %{})
+        upstream_ids = Map.get(upstream_lookup, step.id, [])
 
-    # For Reduce (aggregator) components, connect to upstream FanOut (splitter) if exists
+        # Check if there's a splitter anywhere upstream
+        has_upstream_splitter = Enum.any?(upstream_ids, &MapSet.member?(splitter_ids, &1))
+
+        if has_upstream_splitter do
+          # Fan-out context: use Runic.reduce to accumulate ALL items
+          # This works for both single parent (direct fan-out) and multiple parents (join)
+          # The Reduce will accumulate joined facts when there's a Join upstream
+          create_fanout_aggregator(step, component_name)
+        else
+          # No fan-out upstream: use regular step that handles list input from join
+          create_join_aggregator(step, component_name)
+        end
+      else
+        create_component(step, component_name, step_opts)
+      end
+
+    workflow = connect_component(workflow, component, parent_ids)
     maybe_connect_fan_in(workflow, component)
   end
 
   defp connect_component(workflow, component, []) do
-    # Root step - add to workflow root
     Workflow.add(workflow, component)
   end
 
@@ -156,15 +198,12 @@ defmodule Imgd.Runtime.RunicAdapter do
     Workflow.add(workflow, component, to: join)
   end
 
-  # Connect a Reduce (aggregator) to its upstream FanOut (splitter) via :fan_in edge
   defp maybe_connect_fan_in(workflow, %Runic.Workflow.Reduce{fan_in: fan_in}) do
-    # Find any upstream FanOut in the graph
     case find_upstream_fan_out(workflow, fan_in) do
       nil ->
         workflow
 
       fan_out ->
-        # Draw the :fan_in edge so FanIn knows which FanOut to collect from
         workflow
         |> Workflow.draw_connection(fan_out, fan_in, :fan_in)
         |> track_mapped_path(fan_out, fan_in)
@@ -173,9 +212,7 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   defp maybe_connect_fan_in(workflow, _component), do: workflow
 
-  # Find any FanOut upstream of the given FanIn by traversing the graph backwards
   defp find_upstream_fan_out(workflow, fan_in) do
-    # Get the fan_in's predecessors and traverse backwards to find FanOut
     do_find_upstream_fan_out(workflow.graph, [fan_in], MapSet.new())
   end
 
@@ -192,7 +229,6 @@ defmodule Imgd.Runtime.RunicAdapter do
           current
 
         _ ->
-          # Get all predecessors (nodes that flow into current)
           predecessors =
             graph
             |> Graph.in_edges(current)
@@ -204,11 +240,8 @@ defmodule Imgd.Runtime.RunicAdapter do
     end
   end
 
-  # Track the path from FanOut to FanIn in the workflow's mapped paths
   defp track_mapped_path(workflow, fan_out, fan_in) do
-    path =
-      workflow.graph
-      |> Graph.get_shortest_path(fan_out, fan_in)
+    path = workflow.graph |> Graph.get_shortest_path(fan_out, fan_in)
 
     path_hashes =
       Enum.reduce(path || [], MapSet.new(), fn node, mapset ->
@@ -235,21 +268,16 @@ defmodule Imgd.Runtime.RunicAdapter do
     join = Workflow.Join.new(parent_hashes)
 
     case Map.get(workflow.graph.vertices, join.hash) do
-      %Workflow.Join{} = existing_join ->
-        {workflow, existing_join}
-
-      nil ->
-        {Workflow.add_step(workflow, parent_steps, join), join}
+      %Workflow.Join{} = existing_join -> {workflow, existing_join}
+      nil -> {Workflow.add_step(workflow, parent_steps, join), join}
     end
   end
 
   defp extract_source_id(source) do
-    # todo: why?
     Map.get(source, :id) || Map.get(source, :workflow_id) || "unknown"
   end
 
   defp build_parent_lookup(connections) do
-    # Group connections by target_step_id to find parents
     Enum.group_by(connections, & &1.target_step_id, & &1.source_step_id)
   end
 
@@ -263,7 +291,6 @@ defmodule Imgd.Runtime.RunicAdapter do
     step_ids = Enum.map(steps, & &1.id)
     step_map = Map.new(steps, &{&1.id, &1})
 
-    # 1. Initialize in-degrees
     in_degrees = Map.new(step_ids, &{&1, 0})
 
     in_degrees =
@@ -271,20 +298,13 @@ defmodule Imgd.Runtime.RunicAdapter do
         Map.update(acc, conn.target_step_id, 0, &(&1 + 1))
       end)
 
-    # 2. Build adjacency list (parent -> [children])
     adjacency =
       Enum.reduce(connections, %{}, fn conn, acc ->
         Map.update(acc, conn.source_step_id, [conn.target_step_id], &[conn.target_step_id | &1])
       end)
 
-    # 3. Find initial roots (in-degree 0)
-    # We preserve the original relative order of steps when picking roots
     roots = Enum.filter(step_ids, &(Map.get(in_degrees, &1) == 0))
-
-    # 4. Kahn's algorithm
     sorted_ids = do_kahn_sort(roots, in_degrees, adjacency, [])
-
-    # Map back to step structs
     Enum.map(sorted_ids, &Map.get(step_map, &1))
   end
 
@@ -297,13 +317,7 @@ defmodule Imgd.Runtime.RunicAdapter do
       Enum.reduce(children, {rest, in_degrees}, fn child, {r, degs} ->
         new_deg = Map.get(degs, child) - 1
         degs = Map.put(degs, child, new_deg)
-
-        if new_deg == 0 do
-          # Add to queue if all dependencies met
-          {r ++ [child], degs}
-        else
-          {r, degs}
-        end
+        if new_deg == 0, do: {r ++ [child], degs}, else: {r, degs}
       end)
 
     do_kahn_sort(new_rest, new_in_degrees, adjacency, [id | sorted])
@@ -329,18 +343,12 @@ defmodule Imgd.Runtime.RunicAdapter do
   # ===========================================================================
 
   defp create_splitter(step, component_name, opts) do
-    # Create a FanOut step that runs the Splitter executor logic
-    # This replaces the previous two-step (extract + map) approach with a single
-    # atomic fan-out component that supports its own work function.
     work_fn = fn input ->
       result = StepRunner.execute_with_context(step, input, opts)
 
-      # Store fan-out context for downstream step tracking
-      # This enables per-item observability in downstream steps
       if is_list(result) do
         items_total = length(result)
         Process.put(:imgd_fan_out_items_total, items_total)
-        # Reset the per-step item counters for this new fan-out batch
         Process.put(:imgd_step_item_counters, %{})
       end
 
@@ -350,46 +358,68 @@ defmodule Imgd.Runtime.RunicAdapter do
     %FanOut{
       name: component_name,
       work: work_fn,
-      # Ensure unique hash for graph vertex collisions
       hash: :erlang.phash2({:fan_out, step.id}, 4_294_967_296)
     }
   end
 
-  defp create_aggregator(step, component_name) do
-    # Aggregator creates a Runic.reduce
-    # Note: Runic.reduce is a macro that requires inline anonymous functions
+  # Fan-out aggregator: uses Runic.reduce for proper FanIn/FanOut semantics
+  # Handles both direct fan-out items and joined items (which may be lists)
+  defp create_fanout_aggregator(step, component_name) do
     operation = Map.get(step.config, "operation", "collect")
     name = component_name
 
     case operation do
       "sum" ->
-        Runic.reduce(0, fn item, acc -> acc + (item || 0) end, name: name)
+        Runic.reduce(0, fn item, acc ->
+          # Handle both single values and lists (from joins)
+          items = __MODULE__.normalize_item(item)
+          Enum.reduce(items, acc, fn i, a -> a + (__MODULE__.to_number(i) || 0) end)
+        end, name: name)
 
       "count" ->
-        Runic.reduce(0, fn _item, acc -> acc + 1 end, name: name)
+        Runic.reduce(0, fn item, acc ->
+          items = __MODULE__.normalize_item(item)
+          acc + length(items)
+        end, name: name)
 
       "concat" ->
-        Runic.reduce("", fn item, acc -> acc <> to_string(item) end, name: name)
+        Runic.reduce("", fn item, acc ->
+          items = __MODULE__.normalize_item(item)
+          acc <> Enum.map_join(items, "", &to_string/1)
+        end, name: name)
 
       "first" ->
         Runic.reduce(
           nil,
           fn
-            item, nil -> item
-            _item, acc -> acc
+            item, nil ->
+              items = __MODULE__.normalize_item(item)
+              List.first(items)
+
+            _item, acc ->
+              acc
           end,
           name: name
         )
 
       "last" ->
-        Runic.reduce(nil, fn item, _acc -> item end, name: name)
+        Runic.reduce(nil, fn item, _acc ->
+          items = __MODULE__.normalize_item(item)
+          List.last(items) || List.first(items)
+        end, name: name)
 
       "min" ->
         Runic.reduce(
           nil,
-          fn
-            item, nil -> item
-            item, acc -> min(item, acc)
+          fn item, acc ->
+            items = __MODULE__.normalize_item(item)
+            item_min = Enum.min(items, fn -> nil end)
+
+            case {acc, item_min} do
+              {nil, val} -> val
+              {val, nil} -> val
+              {a, b} -> min(a, b)
+            end
           end,
           name: name
         )
@@ -397,20 +427,49 @@ defmodule Imgd.Runtime.RunicAdapter do
       "max" ->
         Runic.reduce(
           nil,
-          fn
-            item, nil -> item
-            item, acc -> max(item, acc)
+          fn item, acc ->
+            items = __MODULE__.normalize_item(item)
+            item_max = Enum.max(items, fn -> nil end)
+
+            case {acc, item_max} do
+              {nil, val} -> val
+              {val, nil} -> val
+              {a, b} -> max(a, b)
+            end
           end,
           name: name
         )
 
+      # Default "collect" - accumulate all items into a flat list
       _ ->
-        Runic.reduce([], fn item, acc -> [item | acc] end, name: name)
+        Runic.reduce([], fn item, acc ->
+          # Flatten joined items and append to maintain order
+          items = __MODULE__.normalize_item(item)
+          acc ++ items
+        end, name: name)
     end
   end
 
+  # Join aggregator: handles pre-combined list input from Join nodes (no fan-out upstream)
+  defp create_join_aggregator(step, component_name) do
+    operation = Map.get(step.config, "operation", "collect")
+    step_id = step.id
+
+    # Must inline the fn directly - Runic.step is a macro
+    runic_step =
+      Runic.step(
+        fn input ->
+          items = __MODULE__.normalize_aggregator_input(input)
+          __MODULE__.apply_aggregation(operation, items)
+        end,
+        name: component_name
+      )
+
+    unique_hash = :erlang.phash2({runic_step.hash, step_id}, 4_294_967_296)
+    %{runic_step | hash: unique_hash}
+  end
+
   defp create_condition(step, component_name, opts) do
-    # Condition creates a Runic.rule
     condition_expr = Map.get(step.config, "condition", "true")
 
     Runic.rule(
@@ -421,12 +480,9 @@ defmodule Imgd.Runtime.RunicAdapter do
   end
 
   defp create_switch(step, _component_name, opts) do
-    # Switch creates multiple rules, but for now we create a step that
-    # outputs a tagged tuple for routing
     StepRunner.create(step, opts)
   end
 
-  # Condition evaluation helper
   defp evaluate_condition(expr, input, opts) when is_binary(expr) do
     vars = %{
       "json" => input,
