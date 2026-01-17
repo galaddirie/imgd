@@ -505,13 +505,8 @@ defmodule Imgd.Runtime.RunicAdapter do
   defp create_splitter(step, component_name, opts) do
     work_fn = fn input ->
       result = StepRunner.execute_with_context(step, input, opts)
-
-      if is_list(result) do
-        items_total = length(result)
-        Process.put(:imgd_fan_out_items_total, items_total)
-        Process.put(:imgd_step_item_counters, %{})
-      end
-
+      # The FanOut invokable sets item_index and items_total on each Fact
+      # No need for global process state tracking
       result
     end
 

@@ -123,8 +123,10 @@ defmodule Imgd.Runtime.Hooks.Observability do
     step_type_id = get_step_type_id(step, workflow)
     original_step_id = get_original_step_id(step, workflow)
 
-    # Check if we're in a fan-out context and get/set the item index for this step
-    {item_index, items_total} = get_fan_out_item_context(original_step_id, workflow, step)
+    # Use the fact's item context directly instead of global process state
+    # Each fact carries its own item_index and items_total from its originating FanOut
+    item_index = fact.item_index
+    items_total = fact.items_total
 
     # Store the current fan-out context for the after_step_telemetry hook
     if item_index do
@@ -316,50 +318,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
   defp get_original_step_id(step, workflow) do
     get_step_metadata(step, workflow)[:step_id] || get_step_name(step)
-  end
-
-  # Get the fan-out item context for a step (item_index, items_total)
-  # Returns {item_index, items_total} if in fan-out context, {nil, nil} otherwise
-  defp get_fan_out_item_context(step_id, workflow, step) do
-    items_total = Process.get(:imgd_fan_out_items_total)
-
-    if items_total && in_fan_out_path?(workflow, step) do
-      # Get the per-step item counters map
-      counters = Process.get(:imgd_step_item_counters, %{})
-
-      # Get current index for this step (defaults to 0)
-      current_index = Map.get(counters, step_id, 0)
-
-      # Increment the counter for next time this step processes an item
-      Process.put(:imgd_step_item_counters, Map.put(counters, step_id, current_index + 1))
-
-      {current_index, items_total}
-    else
-      {nil, nil}
-    end
-  end
-
-  # Check if this step is in a fan-out path (between a FanOut and FanIn)
-  # Excludes FanIn/Reduce steps since they aggregate, not process individual items
-  defp in_fan_out_path?(workflow, step) do
-    # Exclude aggregator steps - they produce one output, not N
-    case step do
-      %Runic.Workflow.FanIn{} ->
-        false
-
-      %Runic.Workflow.Reduce{} ->
-        false
-
-      %Runic.Workflow.FanOut{} ->
-        # FanOut itself is the splitter - it produces N items, not processes them
-        false
-
-      _ ->
-        mapped_paths = workflow.mapped[:mapped_paths] || MapSet.new()
-        step_hash = Map.get(step, :hash)
-
-        step_hash && MapSet.member?(mapped_paths, step_hash)
-    end
   end
 
   # Workflow metadata helpers
