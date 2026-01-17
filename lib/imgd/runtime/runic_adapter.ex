@@ -59,7 +59,8 @@ defmodule Imgd.Runtime.RunicAdapter do
 
     wrk
     |> put_step_metadata(source.steps)
-    |> track_all_fan_out_paths()  # Track ALL fan-out paths for observability
+    # Track ALL fan-out paths for observability
+    |> track_all_fan_out_paths()
   end
 
   @spec create_component(Imgd.Workflows.Embeds.Step.t(), String.t(), build_opts()) :: term()
@@ -270,13 +271,7 @@ defmodule Imgd.Runtime.RunicAdapter do
   # Fan-out Path Tracking (for observability - item_index/items_total)
   # ===========================================================================
 
-  @doc """
-  Traverses the workflow graph to find ALL steps downstream of each FanOut node.
-  This ensures item_index/items_total are tracked for ALL branches, not just
-  the shortest path to an aggregator.
-
-  This is called AFTER the workflow is fully built, so all edges exist.
-  """
+  @doc false
   defp track_all_fan_out_paths(workflow) do
     # Find all FanOut nodes in the graph
     fan_outs =
@@ -295,11 +290,7 @@ defmodule Imgd.Runtime.RunicAdapter do
     end)
   end
 
-  @doc """
-  Finds all node hashes that are downstream of a given node.
-  Stops traversal at FanIn/Reduce nodes (aggregators) but includes all branches.
-  Includes ALL node types with hashes (Steps, Joins, etc.) to match original behavior.
-  """
+  @doc false
   defp find_all_downstream_hashes(graph, start_node) do
     do_find_downstream_hashes(graph, [start_node], MapSet.new(), MapSet.new())
   end

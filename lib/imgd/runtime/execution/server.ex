@@ -10,6 +10,7 @@ defmodule Imgd.Runtime.Execution.Server do
   alias Imgd.Runtime.RunicAdapter
   alias Imgd.Runtime.Events
   alias Imgd.Runtime.Hooks.Observability
+  alias Imgd.Runtime.ProductionsCounter
   alias Imgd.Runtime.ResourceUsage
   alias Imgd.Executions
   alias Imgd.Executions.Execution
@@ -149,12 +150,21 @@ defmodule Imgd.Runtime.Execution.Server do
     # Always flush buffered step events before dying
     flush_step_executions(execution_id)
 
+    # Clean up production counter if execution_id exists
+    case execution_id do
+      nil -> :ok
+      id -> ProductionsCounter.clear(id)
+    end
+
     :ok
   end
 
   @impl true
   def handle_info(:run, state) do
     state = ensure_resource_usage_start(state)
+
+    # Initialize production counter for this execution
+    ProductionsCounter.init(state.execution_id)
 
     # Transition to running in DB if pending
     if state.status == :pending do
@@ -182,6 +192,9 @@ defmodule Imgd.Runtime.Execution.Server do
         new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
         finalize_execution(new_state)
 
+        # Finalize production counting (clears state)
+        production_counts = ProductionsCounter.finalize(state.execution_id)
+
         # Flush step events to DB
         flush_step_executions(state.execution_id)
 
@@ -191,7 +204,8 @@ defmodule Imgd.Runtime.Execution.Server do
         # Emit completion event
         Events.emit(:execution_completed, new_state.execution_id, %{
           status: :completed,
-          resource_usage: usage
+          resource_usage: usage,
+          production_counts: production_counts
         })
 
         {:stop, :normal, new_state}
@@ -338,6 +352,9 @@ defmodule Imgd.Runtime.Execution.Server do
     state = ensure_resource_usage_start(state)
     {usage, state} = finalize_resource_usage(state)
 
+    # Finalize production counting even on failure
+    production_counts = ProductionsCounter.finalize(state.execution_id)
+
     error_map = Execution.format_error({:step_failed, step_id, reason})
     completed_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
@@ -394,7 +411,8 @@ defmodule Imgd.Runtime.Execution.Server do
     Events.emit(:execution_failed, state.execution_id, %{
       status: :failed,
       error: error_map,
-      resource_usage: usage
+      resource_usage: usage,
+      production_counts: production_counts
     })
 
     # Flush step events to DB

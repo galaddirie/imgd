@@ -15,15 +15,6 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
     :ok
   end
 
-  describe "count_output_items/1" do
-    test "counts list outputs and handles nil" do
-      assert Observability.count_output_items([1, 2, 3]) == 3
-      assert Observability.count_output_items([]) == 0
-      assert Observability.count_output_items(nil) == 0
-      assert Observability.count_output_items("single") == 1
-    end
-  end
-
   describe "attach_all_hooks/2" do
     setup do
       # Create user, scope, workflow and execution
@@ -78,7 +69,8 @@ defmodule Imgd.Runtime.Hooks.ObservabilityTest do
 
       assert_receive {:step_completed, payload}
       assert payload.step_id == "list_step"
-      assert payload.output_item_count == 3
+      # Regular step returning a list counts as 1 production
+      assert payload.output_item_count == 1
     end
   end
 

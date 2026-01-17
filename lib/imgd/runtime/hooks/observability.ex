@@ -6,46 +6,30 @@ defmodule Imgd.Runtime.Hooks.Observability do
   - Structured logging at step entry/exit
   - Telemetry events for metrics collection
   - PubSub events for real-time UI updates
+  - Production-aware item counting
 
   ## Usage
 
       workflow
       |> Observability.attach_all_hooks(execution_id: "exec_123")
 
+  ## Production Counting
+
+  Item counts are tracked via `Imgd.Runtime.ProductionsCounter` which
+  understands Runic's production semantics:
+
+  - FanOut steps: count = number of items produced (list length)
+  - FanIn/Reduce steps: count = 1 (single aggregated result)
+  - Regular steps: count = 1 (single output)
+  - Skipped steps: count = 0
   """
 
   require Logger
   alias Runic.Workflow
   alias Imgd.Runtime.StepExecutionState
+  alias Imgd.Runtime.ProductionsCounter
 
   @type hook_opts :: [execution_id: String.t(), workflow_id: String.t()]
-
-  @doc """
-  Counts the number of items produced by a step.
-
-  For splitter steps: returns the length of the output list (multiple items)
-  For aggregator steps: returns 1 (single aggregated result)
-  For other steps: returns 1 (single output)
-  For nil/skipped: returns 0
-
-  ## Examples
-
-      iex> count_output_items([1, 2, 3])
-      3
-
-      iex> count_output_items("single")
-      1
-
-      iex> count_output_items([])
-      0
-
-      iex> count_output_items(nil)
-      0
-  """
-  @spec count_output_items(term()) :: non_neg_integer()
-  def count_output_items(value) do
-    do_count_output_items(value)
-  end
 
   @doc """
   Attaches all observability hooks to a Runic workflow.
@@ -54,6 +38,9 @@ defmodule Imgd.Runtime.Hooks.Observability do
   def attach_all_hooks(workflow, opts \\ []) do
     execution_id = Keyword.get(opts, :execution_id, "unknown")
     workflow_id = Keyword.get(opts, :workflow_id, "unknown")
+
+    # Initialize production counter for this execution
+    ProductionsCounter.init(execution_id)
 
     # Store context in workflow metadata for access in hooks
     workflow = put_hook_context(workflow, execution_id, workflow_id)
@@ -152,6 +139,7 @@ defmodule Imgd.Runtime.Hooks.Observability do
       |> put_step_start_time(step_name, start_time)
       |> put_step_started_at(step_name, started_at)
       |> put_step_input_data(step_name, fact.value)
+      |> put_step_semantic_type(step_name, classify_step_type(step))
 
     # Buffer the "started" event instead of persisting immediately
     push_step_event(%{
@@ -209,8 +197,18 @@ defmodule Imgd.Runtime.Hooks.Observability do
     item_index = if fan_out_ctx, do: fan_out_ctx[:item_index], else: nil
     items_total = if fan_out_ctx, do: fan_out_ctx[:items_total], else: nil
 
-    # Count output items - splitter steps can produce multiple items
-    output_item_count = do_count_output_items(result_fact.value)
+    # Get the semantic step type for production counting
+    semantic_type = get_step_semantic_type(workflow, step_name)
+
+    # Record production and get count using ProductionsCounter
+    output_item_count =
+      if skipped? do
+        ProductionsCounter.record(execution_id, original_step_id, nil, step_type: semantic_type)
+      else
+        ProductionsCounter.record(execution_id, original_step_id, result_fact.value,
+          step_type: semantic_type
+        )
+      end
 
     input_data = get_step_input_data(workflow, step_name)
     started_at = get_step_started_at(workflow, step_name)
@@ -272,6 +270,29 @@ defmodule Imgd.Runtime.Hooks.Observability do
   end
 
   # ===========================================================================
+  # Step Type Classification
+  # ===========================================================================
+
+  @doc """
+  Classifies a Runic component into its semantic production type.
+
+  This determines how output item counting should work:
+  - :fan_out - Produces N items from 1 input (splitter)
+  - :fan_in - Consumes N items, produces 1 (aggregator via FanIn)
+  - :reduce - Consumes N items, produces 1 (aggregator via Reduce)
+  - :regular - 1:1 input to output
+  """
+  @spec classify_step_type(term()) :: ProductionsCounter.step_type()
+  def classify_step_type(step) do
+    case step do
+      %Runic.Workflow.FanOut{} -> :fan_out
+      %Runic.Workflow.FanIn{} -> :fan_in
+      %Runic.Workflow.Reduce{} -> :reduce
+      _ -> :regular
+    end
+  end
+
+  # ===========================================================================
   # Helpers
   # ===========================================================================
 
@@ -296,12 +317,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp get_original_step_id(step, workflow) do
     get_step_metadata(step, workflow)[:step_id] || get_step_name(step)
   end
-
-  @spec do_count_output_items(term()) :: non_neg_integer()
-  defp do_count_output_items(nil), do: 0
-  defp do_count_output_items([]), do: 0
-  defp do_count_output_items(value) when is_list(value), do: length(value)
-  defp do_count_output_items(_), do: 1
 
   # Get the fan-out item context for a step (item_index, items_total)
   # Returns {item_index, items_total} if in fan-out context, {nil, nil} otherwise
@@ -390,6 +405,17 @@ defmodule Imgd.Runtime.Hooks.Observability do
     workflow
     |> Map.get(:__step_inputs__, %{})
     |> Map.get(step_name)
+  end
+
+  defp put_step_semantic_type(workflow, step_name, semantic_type) do
+    types = Map.get(workflow, :__step_semantic_types__, %{})
+    Map.put(workflow, :__step_semantic_types__, Map.put(types, step_name, semantic_type))
+  end
+
+  defp get_step_semantic_type(workflow, step_name) do
+    workflow
+    |> Map.get(:__step_semantic_types__, %{})
+    |> Map.get(step_name, :regular)
   end
 
   # ===========================================================================
