@@ -57,7 +57,9 @@ defmodule Imgd.Runtime.RunicAdapter do
         add_step_to_workflow(step, acc, parent_lookup, step_opts)
       end)
 
-    put_step_metadata(wrk, source.steps)
+    wrk
+    |> put_step_metadata(source.steps)
+    |> track_all_fan_out_paths()  # Track ALL fan-out paths for observability
   end
 
   @spec create_component(Imgd.Workflows.Embeds.Step.t(), String.t(), build_opts()) :: term()
@@ -170,8 +172,6 @@ defmodule Imgd.Runtime.RunicAdapter do
 
         if has_upstream_splitter do
           # Fan-out context: use Runic.reduce to accumulate ALL items
-          # This works for both single parent (direct fan-out) and multiple parents (join)
-          # The Reduce will accumulate joined facts when there's a Join upstream
           create_fanout_aggregator(step, component_name)
         else
           # No fan-out upstream: use regular step that handles list input from join
@@ -198,12 +198,15 @@ defmodule Imgd.Runtime.RunicAdapter do
     Workflow.add(workflow, component, to: join)
   end
 
+  # IMPORTANT: Keep ORIGINAL behavior - this is critical for Runic's FanIn/FanOut pairing
   defp maybe_connect_fan_in(workflow, %Runic.Workflow.Reduce{fan_in: fan_in}) do
     case find_upstream_fan_out(workflow, fan_in) do
       nil ->
         workflow
 
       fan_out ->
+        # Draw the :fan_in edge AND track the path (original behavior)
+        # Both steps are critical for Runic to work correctly
         workflow
         |> Workflow.draw_connection(fan_out, fan_in, :fan_in)
         |> track_mapped_path(fan_out, fan_in)
@@ -211,6 +214,30 @@ defmodule Imgd.Runtime.RunicAdapter do
   end
 
   defp maybe_connect_fan_in(workflow, _component), do: workflow
+
+  # Original path tracking - finds shortest path from FanOut to FanIn
+  # This is called per-aggregator during workflow construction
+  defp track_mapped_path(workflow, fan_out, fan_in) do
+    path = workflow.graph |> Graph.get_shortest_path(fan_out, fan_in)
+
+    path_hashes =
+      Enum.reduce(path || [], MapSet.new(), fn node, mapset ->
+        case node do
+          %{hash: hash} -> MapSet.put(mapset, hash)
+          _ -> mapset
+        end
+      end)
+
+    %Workflow{
+      workflow
+      | mapped:
+          Map.put(
+            workflow.mapped,
+            :mapped_paths,
+            MapSet.union(workflow.mapped[:mapped_paths] || MapSet.new(), path_hashes)
+          )
+    }
+  end
 
   defp find_upstream_fan_out(workflow, fan_in) do
     do_find_upstream_fan_out(workflow.graph, [fan_in], MapSet.new())
@@ -240,27 +267,88 @@ defmodule Imgd.Runtime.RunicAdapter do
     end
   end
 
-  defp track_mapped_path(workflow, fan_out, fan_in) do
-    path = workflow.graph |> Graph.get_shortest_path(fan_out, fan_in)
+  # ===========================================================================
+  # Fan-out Path Tracking (for observability - item_index/items_total)
+  # ===========================================================================
 
-    path_hashes =
-      Enum.reduce(path || [], MapSet.new(), fn node, mapset ->
-        case node do
-          %{hash: hash} -> MapSet.put(mapset, hash)
-          _ -> mapset
-        end
-      end)
+  @doc """
+  Traverses the workflow graph to find ALL steps downstream of each FanOut node.
+  This ensures item_index/items_total are tracked for ALL branches, not just
+  the shortest path to an aggregator.
 
-    %Workflow{
-      workflow
-      | mapped:
-          Map.put(
-            workflow.mapped,
-            :mapped_paths,
-            MapSet.union(workflow.mapped[:mapped_paths] || MapSet.new(), path_hashes)
-          )
-    }
+  This is called AFTER the workflow is fully built, so all edges exist.
+  """
+  defp track_all_fan_out_paths(workflow) do
+    # Find all FanOut nodes in the graph
+    fan_outs =
+      workflow.graph
+      |> Graph.vertices()
+      |> Enum.filter(&match?(%FanOut{}, &1))
+
+    # For each FanOut, find all downstream nodes and add their hashes to mapped_paths
+    Enum.reduce(fan_outs, workflow, fn fan_out, wf ->
+      downstream_hashes = find_all_downstream_hashes(wf.graph, fan_out)
+
+      existing_paths = wf.mapped[:mapped_paths] || MapSet.new()
+      new_paths = MapSet.union(existing_paths, downstream_hashes)
+
+      %Workflow{wf | mapped: Map.put(wf.mapped, :mapped_paths, new_paths)}
+    end)
   end
+
+  @doc """
+  Finds all node hashes that are downstream of a given node.
+  Stops traversal at FanIn/Reduce nodes (aggregators) but includes all branches.
+  Includes ALL node types with hashes (Steps, Joins, etc.) to match original behavior.
+  """
+  defp find_all_downstream_hashes(graph, start_node) do
+    do_find_downstream_hashes(graph, [start_node], MapSet.new(), MapSet.new())
+  end
+
+  defp do_find_downstream_hashes(_graph, [], _visited, acc), do: acc
+
+  defp do_find_downstream_hashes(graph, [current | rest], visited, acc) do
+    if MapSet.member?(visited, current) do
+      do_find_downstream_hashes(graph, rest, visited, acc)
+    else
+      visited = MapSet.put(visited, current)
+
+      # Add hash for ANY node with a hash field (matches original track_mapped_path behavior)
+      acc =
+        case current do
+          %{hash: hash} when not is_nil(hash) ->
+            MapSet.put(acc, hash)
+
+          _ ->
+            acc
+        end
+
+      # Get successors - stop at FanIn/Reduce (aggregators don't propagate fan-out context)
+      successors =
+        case current do
+          %Runic.Workflow.FanIn{} ->
+            # Stop here - aggregator boundary
+            []
+
+          %Runic.Workflow.Reduce{} ->
+            # Stop here - aggregator boundary
+            []
+
+          _ ->
+            # Continue traversal through all outgoing flow edges
+            graph
+            |> Graph.out_edges(current)
+            |> Enum.filter(&(&1.label == :flow))
+            |> Enum.map(& &1.v2)
+        end
+
+      do_find_downstream_hashes(graph, successors ++ rest, visited, acc)
+    end
+  end
+
+  # ===========================================================================
+  # Rest of the module (unchanged from original)
+  # ===========================================================================
 
   defp ensure_join(%Workflow{} = workflow, parent_ids) when is_list(parent_ids) do
     parent_steps = Enum.map(parent_ids, &Workflow.get_component!(workflow, &1))
@@ -363,7 +451,6 @@ defmodule Imgd.Runtime.RunicAdapter do
   end
 
   # Fan-out aggregator: uses Runic.reduce for proper FanIn/FanOut semantics
-  # Handles both direct fan-out items and joined items (which may be lists)
   defp create_fanout_aggregator(step, component_name) do
     operation = Map.get(step.config, "operation", "collect")
     name = component_name
@@ -375,7 +462,6 @@ defmodule Imgd.Runtime.RunicAdapter do
           Runic.reduce(
             0,
             fn item, acc ->
-              # Handle both single values and lists (from joins)
               items = __MODULE__.normalize_item(item)
               Enum.reduce(items, acc, fn i, a -> a + (__MODULE__.to_number(i) || 0) end)
             end,
@@ -463,7 +549,6 @@ defmodule Imgd.Runtime.RunicAdapter do
           Runic.reduce(
             [],
             fn item, acc ->
-              # Flatten joined items and append to maintain order
               items = __MODULE__.normalize_item(item)
               acc ++ items
             end,
@@ -471,12 +556,8 @@ defmodule Imgd.Runtime.RunicAdapter do
           )
       end
 
-    # CRITICAL FIX: Make hash unique by incorporating step_id
-    # This prevents graph vertex collisions when multiple aggregators
-    # have the same operation (e.g., two "collect" aggregators)
+    # Make hash unique by incorporating step_id to avoid graph vertex collisions
     unique_hash = :erlang.phash2({reduce.hash, step_id}, 4_294_967_296)
-
-    # Update both the Reduce and its FanIn to use the unique hash
     unique_fan_in = %{reduce.fan_in | hash: unique_hash}
     %{reduce | hash: unique_hash, fan_in: unique_fan_in}
   end
@@ -486,7 +567,6 @@ defmodule Imgd.Runtime.RunicAdapter do
     operation = Map.get(step.config, "operation", "collect")
     step_id = step.id
 
-    # Must inline the fn directly - Runic.step is a macro
     runic_step =
       Runic.step(
         fn input ->
