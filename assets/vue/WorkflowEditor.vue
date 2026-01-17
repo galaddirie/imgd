@@ -201,7 +201,7 @@ const nodeTypes = {
 };
 
 const edgeTypes = {
-  custom: markRaw(CustomEdge),
+  custom: markRaw(CustomEdge as any),
 };
 
 const clickTimer = ref<ReturnType<typeof setTimeout> | null>(null);
@@ -316,7 +316,7 @@ watch(
   { deep: true }
 );
 
-onNodesChange((changes: NodeChange[]) => {
+onNodesChange(((changes: NodeChange[]) => {
   if (isSyncingDraft.value) return;
 
   const nextChanges: NodeChange[] = [];
@@ -334,9 +334,9 @@ onNodesChange((changes: NodeChange[]) => {
 
   const nextNodes = applyNodeChanges(nextChanges);
   setNodes(nextNodes);
-});
+}) as any);
 
-onEdgesChange((changes: EdgeChange[]) => {
+onEdgesChange(((changes: EdgeChange[]) => {
   if (isSyncingDraft.value) return;
 
   const nextChanges: EdgeChange[] = [];
@@ -357,7 +357,7 @@ onEdgesChange((changes: EdgeChange[]) => {
 
   const nextEdges = applyEdgeChanges(nextChanges);
   setEdges(nextEdges);
-});
+}) as any);
 
 // =============================================================================
 // Derived state

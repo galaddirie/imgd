@@ -337,10 +337,13 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false);
               :class="[
                 data.itemStats.failed > 0 ? 'text-error' : '',
                 data.itemStats.running > 0 ? 'text-info' : '',
-                data.itemStats.completed === data.itemStats.itemsTotal ? 'text-success' : ''
+                data.itemStats.completed === data.itemStats.itemsTotal ? 'text-success' : '',
               ]"
             >
-              {{ data.itemStats.completed + data.itemStats.failed }}/{{ data.itemStats.itemsTotal }} items
+              {{ data.itemStats.completed + data.itemStats.failed }}/{{
+                data.itemStats.itemsTotal
+              }}
+              items
             </span>
             <ExclamationCircleIcon v-if="data.itemStats.failed > 0" class="text-error size-3" />
           </template>

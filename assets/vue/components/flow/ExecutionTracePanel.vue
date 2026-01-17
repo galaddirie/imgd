@@ -103,10 +103,14 @@ const traces = computed<TraceEntry[]>(() => {
     return props.stepExecutions.map(se => {
       const baseName = props.stepNameById?.[se.step_id] || se.step_id;
       // Append item number for multi-item steps
-      const stepName = se.items_total && se.items_total > 1 && se.item_index !== null && se.item_index !== undefined
-        ? `${baseName} #${se.item_index + 1}`
-        : baseName;
-      
+      const stepName =
+        se.items_total &&
+        se.items_total > 1 &&
+        se.item_index !== null &&
+        se.item_index !== undefined
+          ? `${baseName} #${se.item_index + 1}`
+          : baseName;
+
       return {
         id: se.id,
         step_id: se.step_id,

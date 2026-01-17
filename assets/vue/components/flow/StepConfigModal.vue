@@ -3,7 +3,22 @@ import { ref, computed, watch } from 'vue';
 import { watchDebounced } from '@vueuse/core';
 import type { Node } from '@vue-flow/core';
 import ExpressionPreviewError from './ExpressionPreviewError.vue';
-import type { EditorState, Execution, StepExecution, StepNodeData, StepType } from '@/types/workflow';
+import type {
+  EditorState,
+  Execution,
+  StepExecution,
+  StepNodeData,
+  StepType,
+} from '@/types/workflow';
+
+interface ErrorPayload {
+  type: 'parse_error' | 'render_error';
+  message?: string;
+  errors?: string[];
+  line?: number;
+  column?: number;
+  text: string;
+}
 import {
   ArrowRightOnRectangleIcon,
   BoltIcon,
@@ -51,7 +66,7 @@ const editName = ref('');
 watch(
   [() => props.node, () => props.isOpen],
   ([newNode, open]) => {
-    if (open && newNode) {
+    if (open && newNode && newNode.data) {
       const config = newNode.data.config || {};
       const modes: Record<string, 'literal' | 'expression'> = {};
       const values: Record<string, unknown> = {};
@@ -78,7 +93,7 @@ watchDebounced(
     if (!props.isOpen || !props.node) return;
 
     Object.entries(newValues).forEach(([key, value]) => {
-      if (fieldModes.value[key] === 'expression' && typeof value === 'string') {
+      if (fieldModes.value[key] === 'expression' && typeof value === 'string' && props.node) {
         emit('preview_expression', {
           step_id: props.node.id,
           field_key: key,
@@ -109,7 +124,7 @@ const toggleMode = (field: string) => {
 type FieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json';
 
 const fields = computed(() => {
-  if (!props.node) return [];
+  if (!props.node || !props.node.data) return [];
 
   const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
   const config = props.node.data.config || {};
@@ -187,19 +202,22 @@ const itemStats = computed(() => {
 const selectedItemIndex = ref<number | null>(null);
 
 // Reset selected item when step changes
-watch(() => props.node?.id, () => {
-  selectedItemIndex.value = null;
-});
+watch(
+  () => props.node?.id,
+  () => {
+    selectedItemIndex.value = null;
+  }
+);
 
 const activeStepExecution = computed(() => {
   const executions = stepExecutionsForStep.value;
   if (executions.length === 0) return null;
-  
+
   // If multi-item and an item is selected, return that item's execution
   if (isMultiItemStep.value && selectedItemIndex.value !== null) {
     return executions.find(e => e.item_index === selectedItemIndex.value) || executions[0];
   }
-  
+
   // Otherwise return the first (or only) execution
   return executions[0];
 });
@@ -470,7 +488,7 @@ const toggleWebhookListening = () => {
             </div>
             <p class="text-base-content/50 mt-1 flex items-center gap-1.5 text-xs font-medium">
               <span class="bg-success h-1.5 w-1.5 rounded-full"></span>
-              {{ node?.data.type_id }} Step
+              {{ node?.data?.type_id }} Step
             </p>
           </div>
         </div>
@@ -841,7 +859,14 @@ const toggleWebhookListening = () => {
                     <template v-if="fieldModes[field.key] === 'literal'">
                       <textarea
                         v-if="field.type === 'textarea' || field.type === 'json'"
-                        v-model="fieldValues[field.key]"
+                        v-model="
+                          fieldValues[field.key] as
+                            | string
+                            | number
+                            | readonly string[]
+                            | null
+                            | undefined
+                        "
                         class="textarea textarea-bordered bg-base-200/10 border-base-300 focus:border-primary min-h-[100px] w-full rounded-xl font-mono text-xs"
                         :placeholder="
                           field.type === 'json'
@@ -851,7 +876,14 @@ const toggleWebhookListening = () => {
                       ></textarea>
                       <input
                         v-else
-                        v-model="fieldValues[field.key]"
+                        v-model="
+                          fieldValues[field.key] as
+                            | string
+                            | number
+                            | readonly string[]
+                            | null
+                            | undefined
+                        "
                         :type="field.type === 'number' ? 'number' : 'text'"
                         class="input input-md bg-base-200/20 border-base-300 focus:border-primary w-full rounded-xl text-sm font-medium"
                       />
@@ -859,7 +891,14 @@ const toggleWebhookListening = () => {
                     <template v-else>
                       <div class="space-y-3">
                         <textarea
-                          v-model="fieldValues[field.key]"
+                          v-model="
+                            fieldValues[field.key] as
+                              | string
+                              | number
+                              | readonly string[]
+                              | null
+                              | undefined
+                          "
                           class="textarea bg-base-100 border-secondary/10 focus:border-secondary/40 focus:ring-secondary/5 min-h-[80px] w-full rounded-xl border-2 font-mono text-[13px] focus:ring-4"
                           placeholder="{{ steps.PreviousStep.json.field }}"
                         ></textarea>
@@ -885,7 +924,9 @@ const toggleWebhookListening = () => {
                                 previewValueFor(field.key) !== null
                               "
                             >
-                              <ExpressionPreviewError :error="previewValueFor(field.key)" />
+                              <ExpressionPreviewError
+                                :error="previewValueFor(field.key) as ErrorPayload"
+                              />
                             </template>
                             <template v-else>
                               {{
@@ -953,16 +994,19 @@ const toggleWebhookListening = () => {
                       {{ itemStats.itemsTotal }} items processed
                     </span>
                     <div class="flex items-center gap-2 text-xs">
-                      <span v-if="itemStats.completed > 0" class="text-success flex items-center gap-1">
-                        <span class="inline-block size-2 rounded-full bg-success"></span>
+                      <span
+                        v-if="itemStats.completed > 0"
+                        class="text-success flex items-center gap-1"
+                      >
+                        <span class="bg-success inline-block size-2 rounded-full"></span>
                         {{ itemStats.completed }} completed
                       </span>
                       <span v-if="itemStats.failed > 0" class="text-error flex items-center gap-1">
-                        <span class="inline-block size-2 rounded-full bg-error"></span>
+                        <span class="bg-error inline-block size-2 rounded-full"></span>
                         {{ itemStats.failed }} failed
                       </span>
                       <span v-if="itemStats.running > 0" class="text-info flex items-center gap-1">
-                        <span class="inline-block size-2 rounded-full bg-info"></span>
+                        <span class="bg-info inline-block size-2 rounded-full"></span>
                         {{ itemStats.running }} running
                       </span>
                     </div>
@@ -1004,7 +1048,10 @@ const toggleWebhookListening = () => {
               </section>
 
               <!-- Item Header (when viewing specific item) -->
-              <div v-if="isMultiItemStep && selectedItemIndex !== null" class="flex items-center gap-2 text-sm">
+              <div
+                v-if="isMultiItemStep && selectedItemIndex !== null"
+                class="flex items-center gap-2 text-sm"
+              >
                 <span class="text-base-content/60">Viewing item</span>
                 <span class="font-bold">#{{ selectedItemIndex + 1 }}</span>
                 <span class="text-base-content/40">of {{ itemStats?.itemsTotal }}</span>

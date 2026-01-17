@@ -56,9 +56,27 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
 
   // Compute item stats for multi-item steps
   const stepItemStatsByStepId = computed<
-    Record<string, { isMultiItem: boolean; itemsTotal: number; completed: number; failed: number; running: number }>
+    Record<
+      string,
+      {
+        isMultiItem: boolean;
+        itemsTotal: number;
+        completed: number;
+        failed: number;
+        running: number;
+      }
+    >
   >(() => {
-    const map: Record<string, { isMultiItem: boolean; itemsTotal: number; completed: number; failed: number; running: number }> = {};
+    const map: Record<
+      string,
+      {
+        isMultiItem: boolean;
+        itemsTotal: number;
+        completed: number;
+        failed: number;
+        running: number;
+      }
+    > = {};
     for (const [stepId, executions] of Object.entries(stepExecutionsByStepId.value)) {
       const firstExec = executions[0];
       const itemsTotal = firstExec?.items_total ?? executions.length;
@@ -171,9 +189,10 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           category: stepType?.category,
           step_kind: stepType?.step_kind,
           status: displayStatus,
-          stats: stepExecution && totalDurationUs !== undefined
-            ? { duration_us: totalDurationUs, out: stepExecution.output_item_count }
-            : undefined,
+          stats:
+            stepExecution && totalDurationUs !== undefined
+              ? { duration_us: totalDurationUs, out: stepExecution.output_item_count }
+              : undefined,
           itemStats: stepItemStats,
           hasInput: stepType?.step_kind !== 'trigger',
           hasOutput: true,
