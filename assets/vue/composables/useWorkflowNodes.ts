@@ -102,6 +102,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       const stepType = stepTypes[step.type_id];
       const stepExecution = stepExecutions[step.id];
       const stepItemStats = itemStats[step.id];
+      const allStepExecutions = stepExecutionsByStepId.value[step.id] || [];
       const isPinned = editorState?.pinned_outputs?.[step.id] !== undefined;
       const isDisabled = editorState?.disabled_steps?.includes(step.id);
       const lockedBy = editorState?.step_locks?.[step.id];
@@ -130,6 +131,32 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         }
       }
 
+      // Calculate total duration for multi-item steps
+      let totalDurationUs: number | undefined;
+      if (allStepExecutions.length > 0) {
+        if (allStepExecutions.length === 1) {
+          // Single-item step - use the backend-calculated duration
+          totalDurationUs = allStepExecutions[0].duration_us;
+        } else {
+          // Multi-item step - calculate total duration from earliest start to latest completion
+          const startedAts = allStepExecutions
+            .map(exec => exec.started_at)
+            .filter(Boolean)
+            .map(start => new Date(start!));
+
+          const completedAts = allStepExecutions
+            .map(exec => exec.completed_at)
+            .filter(Boolean)
+            .map(complete => new Date(complete!));
+
+          if (startedAts.length > 0 && completedAts.length > 0) {
+            const earliestStart = new Date(Math.min(...startedAts.map(d => d.getTime())));
+            const latestComplete = new Date(Math.max(...completedAts.map(d => d.getTime())));
+            totalDurationUs = (latestComplete.getTime() - earliestStart.getTime()) * 1000; // Convert to microseconds
+          }
+        }
+      }
+
       return {
         id: step.id,
         type: 'step',
@@ -144,8 +171,8 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           category: stepType?.category,
           step_kind: stepType?.step_kind,
           status: displayStatus,
-          stats: stepExecution
-            ? { duration_us: stepExecution.duration_us, out: stepExecution.output_item_count }
+          stats: stepExecution && totalDurationUs !== undefined
+            ? { duration_us: totalDurationUs, out: stepExecution.output_item_count }
             : undefined,
           itemStats: stepItemStats,
           hasInput: stepType?.step_kind !== 'trigger',
