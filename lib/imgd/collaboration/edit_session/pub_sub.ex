@@ -17,7 +17,6 @@ defmodule Imgd.Collaboration.EditSession.PubSub do
   - `{:operation_applied, operation}` - An edit operation was applied
   - `{:sync_state, state}` - Full state sync for reconnection
   - `{:webhook_test_execution, %{execution_id: execution_id}}` - Test webhook execution created
-  - `{:resource_usage, usage}` - Resource usage sample for the session
 
   Presence:
   - `{:presence_diff, diff}` - Phoenix.Presence diff
@@ -238,13 +237,5 @@ defmodule Imgd.Collaboration.EditSession.PubSub do
       session_topic(workflow_id),
       {:webhook_test_execution, %{execution_id: execution_id}}
     )
-  end
-
-  @doc """
-  Broadcast a resource usage sample for the session.
-  """
-  @spec broadcast_resource_usage(String.t(), map()) :: :ok
-  def broadcast_resource_usage(workflow_id, usage) do
-    Phoenix.PubSub.broadcast(@pubsub, session_topic(workflow_id), {:resource_usage, usage})
   end
 end

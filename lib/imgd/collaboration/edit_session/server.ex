@@ -16,13 +16,11 @@ defmodule Imgd.Collaboration.EditSession.Server do
   alias Imgd.Collaboration.{EditorState, EditOperation}
   alias Imgd.Collaboration.EditSession.{Operations, Persistence, Presence, PubSub}
   alias Imgd.Workflows
-  alias Imgd.Runtime.ResourceUsage
 
   @idle_timeout :timer.minutes(30)
   @persist_interval :timer.seconds(5)
   @max_op_buffer 1000
   @webhook_test_timeout :timer.minutes(10)
-  @resource_usage_interval_ms 100
 
   defmodule State do
     @moduledoc false
@@ -36,9 +34,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
       :dirty,
       :persist_timer,
       :idle_timer,
-      :webhook_test_timer,
-      :resource_usage_timer,
-      :resource_usage_last
+      :webhook_test_timer
     ]
   end
 
@@ -139,14 +135,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
         persist_timer = Process.send_after(self(), :persist, @persist_interval)
         idle_timer = Process.send_after(self(), :idle_timeout, @idle_timeout)
 
-        resource_usage_timer =
-          Process.send_after(self(), :emit_resource_usage, @resource_usage_interval_ms)
-
         state = %{
           state
           | persist_timer: persist_timer,
-            idle_timer: idle_timer,
-            resource_usage_timer: resource_usage_timer
+            idle_timer: idle_timer
         }
 
         {:ok, state}
@@ -264,34 +256,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
     end
 
     {:noreply, state}
-  end
-
-  def handle_info(:emit_resource_usage, state) do
-    sample = ResourceUsage.sample(self())
-
-    _usage =
-      case sample do
-        nil ->
-          nil
-
-        _ ->
-          ResourceUsage.with_rate(sample, state.resource_usage_last)
-      end
-
-    # Disabled resource usage broadcasting for now
-    # if usage do
-    #   PubSub.broadcast_resource_usage(state.workflow_id, usage)
-    # end
-
-    resource_usage_timer =
-      Process.send_after(self(), :emit_resource_usage, @resource_usage_interval_ms)
-
-    {:noreply,
-     %{
-       state
-       | resource_usage_timer: resource_usage_timer,
-         resource_usage_last: sample
-     }}
   end
 
   def handle_info(:idle_timeout, state) do

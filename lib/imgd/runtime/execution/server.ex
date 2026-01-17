@@ -11,10 +11,8 @@ defmodule Imgd.Runtime.Execution.Server do
   alias Imgd.Runtime.Events
   alias Imgd.Runtime.Hooks.Observability
   alias Imgd.Runtime.ProductionsCounter
-  alias Imgd.Runtime.ResourceUsage
   alias Imgd.Executions
   alias Imgd.Executions.Execution
-  alias Imgd.Executions.PubSub, as: ExecutionPubSub
   import Ecto.Query, warn: false
   alias Imgd.Repo
 
@@ -25,9 +23,7 @@ defmodule Imgd.Runtime.Execution.Server do
       :status,
       :metadata,
       :runtime_opts,
-      :trigger_data,
-      :resource_usage_start,
-      resource_usage_reported: false
+      :trigger_data
     ]
   end
 
@@ -138,10 +134,8 @@ defmodule Imgd.Runtime.Execution.Server do
     end
 
     case state do
-      %State{} = typed_state when not is_nil(execution_id) ->
-        typed_state = ensure_resource_usage_start(typed_state)
-        {usage, _state} = finalize_resource_usage(typed_state)
-        _ = maybe_persist_execution_resource_usage(execution_id, usage)
+      %State{} when not is_nil(execution_id) ->
+        :ok
 
       _ ->
         :ok
@@ -161,8 +155,6 @@ defmodule Imgd.Runtime.Execution.Server do
 
   @impl true
   def handle_info(:run, state) do
-    state = ensure_resource_usage_start(state)
-
     # Initialize production counter for this execution
     ProductionsCounter.init(state.execution_id)
 
@@ -198,13 +190,9 @@ defmodule Imgd.Runtime.Execution.Server do
         # Flush step events to DB
         flush_step_executions(state.execution_id)
 
-        {usage, new_state} = finalize_resource_usage(new_state)
-        _ = maybe_persist_execution_resource_usage(new_state.execution_id, usage)
-
         # Emit completion event
         Events.emit(:execution_completed, new_state.execution_id, %{
           status: :completed,
-          resource_usage: usage,
           production_counts: production_counts
         })
 
@@ -349,9 +337,6 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp handle_failure(state, step_id, reason) do
-    state = ensure_resource_usage_start(state)
-    {usage, state} = finalize_resource_usage(state)
-
     # Finalize production counting even on failure
     production_counts = ProductionsCounter.finalize(state.execution_id)
 
@@ -405,13 +390,10 @@ defmodule Imgd.Runtime.Execution.Server do
     })
     |> Repo.update!()
 
-    _ = maybe_persist_execution_resource_usage(state.execution_id, usage)
-
     # Emit execution failed event
     Events.emit(:execution_failed, state.execution_id, %{
       status: :failed,
       error: error_map,
-      resource_usage: usage,
       production_counts: production_counts
     })
 
@@ -475,29 +457,6 @@ defmodule Imgd.Runtime.Execution.Server do
     end
   end
 
-  defp ensure_resource_usage_start(%State{resource_usage_start: nil} = state) do
-    %{state | resource_usage_start: ResourceUsage.sample(self())}
-  end
-
-  defp ensure_resource_usage_start(state), do: state
-
-  defp finalize_resource_usage(%State{resource_usage_reported: true} = state) do
-    {nil, state}
-  end
-
-  defp finalize_resource_usage(%State{} = state) do
-    usage =
-      case {state.resource_usage_start, ResourceUsage.sample(self())} do
-        {%{} = start_sample, %{} = end_sample} ->
-          ResourceUsage.summarize(start_sample, end_sample)
-
-        _ ->
-          nil
-      end
-
-    {usage, %{state | resource_usage_reported: true}}
-  end
-
   defp pending_stop_reason do
     case Process.info(self(), :messages) do
       {:messages, messages} ->
@@ -523,39 +482,6 @@ defmodule Imgd.Runtime.Execution.Server do
     case completed_at do
       %DateTime{} = dt -> DateTime.compare(dt, cancelled_at) in [:gt, :eq]
       _ -> false
-    end
-  end
-
-  defp maybe_persist_execution_resource_usage(_execution_id, nil), do: :ok
-
-  defp maybe_persist_execution_resource_usage(execution_id, usage) do
-    case Repo.get(Execution, execution_id) do
-      nil ->
-        :ok
-
-      %Execution{} = execution ->
-        metadata = execution.metadata || %Execution.Metadata{}
-        extras = metadata.extras || %{}
-        tags = metadata.tags || %{}
-
-        metadata_attrs = %{
-          trace_id: metadata.trace_id,
-          correlation_id: metadata.correlation_id,
-          triggered_by: metadata.triggered_by,
-          parent_execution_id: metadata.parent_execution_id,
-          tags: tags,
-          extras: Map.put(extras, "resource_usage", usage)
-        }
-
-        case execution
-             |> Execution.changeset(%{metadata: metadata_attrs})
-             |> Repo.update() do
-          {:ok, updated_execution} ->
-            ExecutionPubSub.broadcast_execution_updated(updated_execution)
-
-          {:error, _} ->
-            :ok
-        end
     end
   end
 end
