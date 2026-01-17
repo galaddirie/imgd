@@ -249,6 +249,7 @@ defmodule Imgd.Steps.Registry do
       Imgd.Steps.Executors.Math,
       Imgd.Steps.Executors.Aggregator,
       Imgd.Steps.Executors.Splitter,
+      Imgd.Steps.Executors.Join,
       Imgd.Steps.Executors.WebhookTrigger,
       Imgd.Steps.Executors.ScheduleTrigger,
       Imgd.Steps.Executors.RespondToWebhook,

@@ -27,6 +27,9 @@ defmodule Imgd.Runtime.RunicAdapter do
     graph = Imgd.Graph.from_workflow!(source.steps, source.connections, validate: false)
     upstream_lookup = build_upstream_lookup(graph)
 
+    # Build step map for looking up step data by ID
+    step_map = Map.new(source.steps, &{&1.id, &1})
+
     step_opts = [
       execution_id: Keyword.get(opts, :execution_id),
       workflow_id: extract_source_id(source),
@@ -50,7 +53,13 @@ defmodule Imgd.Runtime.RunicAdapter do
       |> Enum.map(& &1.id)
       |> MapSet.new()
 
-    step_opts = Keyword.put(step_opts, :splitter_ids, splitter_ids)
+    # Build fan-out path lookup: step_id => fan_out_step_id (which splitter it's downstream of)
+    fan_out_path_lookup = build_fan_out_path_lookup(graph, splitter_ids, step_map)
+
+    step_opts =
+      step_opts
+      |> Keyword.put(:splitter_ids, splitter_ids)
+      |> Keyword.put(:fan_out_path_lookup, fan_out_path_lookup)
 
     wrk =
       Enum.reduce(sorted_steps, wrk, fn step, acc ->
@@ -59,7 +68,6 @@ defmodule Imgd.Runtime.RunicAdapter do
 
     wrk
     |> put_step_metadata(source.steps)
-    # Track ALL fan-out paths for observability
     |> track_all_fan_out_paths()
   end
 
@@ -73,6 +81,9 @@ defmodule Imgd.Runtime.RunicAdapter do
         # Default to join-style aggregator; fan-out aggregator created in add_step_to_workflow
         create_join_aggregator(step, component_name)
 
+      "join" ->
+        create_explicit_join(step, component_name, opts)
+
       "condition" ->
         create_condition(step, component_name, opts)
 
@@ -81,6 +92,54 @@ defmodule Imgd.Runtime.RunicAdapter do
 
       _ ->
         StepRunner.create(step, opts)
+    end
+  end
+
+  # ===========================================================================
+  # Fan-out Path Lookup
+  # ===========================================================================
+
+  # Build a map of step_id => fan_out_step_id for all steps downstream of a splitter
+  defp build_fan_out_path_lookup(graph, splitter_ids, step_map) do
+    Enum.reduce(splitter_ids, %{}, fn splitter_id, acc ->
+      downstream_ids = find_downstream_until_aggregator(graph, splitter_id, step_map)
+
+      Enum.reduce(downstream_ids, acc, fn step_id, inner_acc ->
+        # If a step is downstream of multiple splitters, keep the nearest one
+        # For now, just use the first one found
+        Map.put_new(inner_acc, step_id, splitter_id)
+      end)
+    end)
+  end
+
+  defp find_downstream_until_aggregator(graph, start_id, step_map) do
+    do_find_downstream(graph, [start_id], MapSet.new(), MapSet.new(), step_map)
+  end
+
+  defp do_find_downstream(_graph, [], _visited, acc, _step_map), do: MapSet.to_list(acc)
+
+  defp do_find_downstream(graph, [current | rest], visited, acc, step_map) do
+    if MapSet.member?(visited, current) do
+      do_find_downstream(graph, rest, visited, acc, step_map)
+    else
+      visited = MapSet.put(visited, current)
+
+      # Get step info to check if it's an aggregator
+      is_aggregator =
+        case Map.get(step_map, current) do
+          %{type_id: "aggregator"} -> true
+          _ -> false
+        end
+
+      if is_aggregator do
+        # Don't traverse past aggregators, but do include them
+        do_find_downstream(graph, rest, visited, MapSet.put(acc, current), step_map)
+      else
+        # Add current to accumulator and continue traversal
+        acc = MapSet.put(acc, current)
+        children = Imgd.Graph.children(graph, current)
+        do_find_downstream(graph, children ++ rest, visited, acc, step_map)
+      end
     end
   end
 
@@ -182,20 +241,22 @@ defmodule Imgd.Runtime.RunicAdapter do
         create_component(step, component_name, step_opts)
       end
 
-    workflow = connect_component(workflow, component, parent_ids)
+    workflow = connect_component(workflow, component, parent_ids, step_opts)
     maybe_connect_fan_in(workflow, component)
   end
 
-  defp connect_component(workflow, component, []) do
+  defp connect_component(workflow, component, [], _step_opts) do
     Workflow.add(workflow, component)
   end
 
-  defp connect_component(workflow, component, [parent_id]) do
+  defp connect_component(workflow, component, [parent_id], _step_opts) do
     Workflow.add(workflow, component, to: parent_id)
   end
 
-  defp connect_component(workflow, component, parent_ids) do
-    {workflow, join} = ensure_join(workflow, parent_ids)
+  defp connect_component(workflow, component, parent_ids, step_opts) do
+    fan_out_path_lookup = Keyword.get(step_opts, :fan_out_path_lookup, %{})
+
+    {workflow, join} = ensure_join(workflow, parent_ids, fan_out_path_lookup)
     Workflow.add(workflow, component, to: join)
   end
 
@@ -205,8 +266,6 @@ defmodule Imgd.Runtime.RunicAdapter do
         workflow
 
       fan_out ->
-        # Draw the :fan_in edge AND track the path (original behavior)
-        # Both steps are critical for Runic to work correctly
         workflow
         |> Workflow.draw_connection(fan_out, fan_in, :fan_in)
         |> track_mapped_path(fan_out, fan_in)
@@ -215,8 +274,6 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   defp maybe_connect_fan_in(workflow, _component), do: workflow
 
-  # Original path tracking - finds shortest path from FanOut to FanIn
-  # This is called per-aggregator during workflow construction
   defp track_mapped_path(workflow, fan_out, fan_in) do
     path = workflow.graph |> Graph.get_shortest_path(fan_out, fan_in)
 
@@ -273,13 +330,11 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   @doc false
   defp track_all_fan_out_paths(workflow) do
-    # Find all FanOut nodes in the graph
     fan_outs =
       workflow.graph
       |> Graph.vertices()
       |> Enum.filter(&match?(%FanOut{}, &1))
 
-    # For each FanOut, find all downstream nodes and add their hashes to mapped_paths
     Enum.reduce(fan_outs, workflow, fn fan_out, wf ->
       downstream_hashes = find_all_downstream_hashes(wf.graph, fan_out)
 
@@ -303,7 +358,6 @@ defmodule Imgd.Runtime.RunicAdapter do
     else
       visited = MapSet.put(visited, current)
 
-      # Add hash for ANY node with a hash field (matches original track_mapped_path behavior)
       acc =
         case current do
           %{hash: hash} when not is_nil(hash) ->
@@ -313,19 +367,15 @@ defmodule Imgd.Runtime.RunicAdapter do
             acc
         end
 
-      # Get successors - stop at FanIn/Reduce (aggregators don't propagate fan-out context)
       successors =
         case current do
           %Runic.Workflow.FanIn{} ->
-            # Stop here - aggregator boundary
             []
 
           %Runic.Workflow.Reduce{} ->
-            # Stop here - aggregator boundary
             []
 
           _ ->
-            # Continue traversal through all outgoing flow edges
             graph
             |> Graph.out_edges(current)
             |> Enum.filter(&(&1.label == :flow))
@@ -337,13 +387,45 @@ defmodule Imgd.Runtime.RunicAdapter do
   end
 
   # ===========================================================================
-  # Rest of the module (unchanged from original)
+  # Join Creation
   # ===========================================================================
 
-  defp ensure_join(%Workflow{} = workflow, parent_ids) when is_list(parent_ids) do
+  defp ensure_join(%Workflow{} = workflow, parent_ids, fan_out_path_lookup)
+       when is_list(parent_ids) do
     parent_steps = Enum.map(parent_ids, &Workflow.get_component!(workflow, &1))
     parent_hashes = Enum.map(parent_steps, &Component.hash/1)
-    join = Workflow.Join.new(parent_hashes)
+
+    # Build fan_out_sources map for fan-out aware joining
+    fan_out_sources =
+      parent_ids
+      |> Enum.zip(parent_hashes)
+      |> Enum.reduce(%{}, fn {parent_id, parent_hash}, acc ->
+        case Map.get(fan_out_path_lookup, parent_id) do
+          nil ->
+            acc
+
+          fan_out_id ->
+            # Get the hash of the fan-out component
+            case Workflow.get_component(workflow, fan_out_id) do
+              nil ->
+                acc
+
+              fan_out_component ->
+                Map.put(acc, parent_hash, Component.hash(fan_out_component))
+            end
+        end
+      end)
+
+    # Determine if this is a fan-out aware join
+    join =
+      if map_size(fan_out_sources) > 0 do
+        Workflow.Join.new(parent_hashes,
+          fan_out_sources: fan_out_sources,
+          mode: :zip_nil
+        )
+      else
+        Workflow.Join.new(parent_hashes)
+      end
 
     case Map.get(workflow.graph.vertices, join.hash) do
       %Workflow.Join{} = existing_join -> {workflow, existing_join}
@@ -546,7 +628,6 @@ defmodule Imgd.Runtime.RunicAdapter do
           )
       end
 
-    # Make hash unique by incorporating step_id to avoid graph vertex collisions
     unique_hash = :erlang.phash2({reduce.hash, step_id}, 4_294_967_296)
     unique_fan_in = %{reduce.fan_in | hash: unique_hash}
     %{reduce | hash: unique_hash, fan_in: unique_fan_in}
@@ -568,6 +649,59 @@ defmodule Imgd.Runtime.RunicAdapter do
 
     unique_hash = :erlang.phash2({runic_step.hash, step_id}, 4_294_967_296)
     %{runic_step | hash: unique_hash}
+  end
+
+  # Explicit join step: user-configurable join behavior
+  defp create_explicit_join(step, component_name, _opts) do
+    mode = Map.get(step.config, "mode", "zip_nil")
+    flatten? = Map.get(step.config, "flatten", false)
+
+    runic_step =
+      Runic.step(
+        fn input ->
+          result = apply_join_mode(mode, input)
+
+          if flatten? do
+            List.flatten(result)
+          else
+            result
+          end
+        end,
+        name: component_name
+      )
+
+    unique_hash = :erlang.phash2({runic_step.hash, step.id}, 4_294_967_296)
+    %{runic_step | hash: unique_hash}
+  end
+
+  defp apply_join_mode("wait_all", input) when is_list(input) do
+    List.flatten(input, [])
+  end
+
+  defp apply_join_mode("zip_nil", input) when is_list(input) do
+    Runic.Workflow.Join.apply_mode(:zip_nil, normalize_branch_input(input))
+  end
+
+  defp apply_join_mode("zip_shortest", input) when is_list(input) do
+    Runic.Workflow.Join.apply_mode(:zip_shortest, normalize_branch_input(input))
+  end
+
+  defp apply_join_mode("zip_cycle", input) when is_list(input) do
+    Runic.Workflow.Join.apply_mode(:zip_cycle, normalize_branch_input(input))
+  end
+
+  defp apply_join_mode("cartesian", input) when is_list(input) do
+    Runic.Workflow.Join.apply_mode(:cartesian, normalize_branch_input(input))
+  end
+
+  defp apply_join_mode(_mode, input), do: input
+
+  defp normalize_branch_input(input) when is_list(input) do
+    if Enum.all?(input, &is_list/1) do
+      input
+    else
+      [input]
+    end
   end
 
   defp create_condition(step, component_name, opts) do
