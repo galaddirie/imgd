@@ -15,7 +15,7 @@ defmodule Imgd.Workers.ExecutionWorkerTest do
   end
 
   describe "maybe_schedule_next/1" do
-    test "schedules next run for :schedule triggers", %{workflow: workflow, version: version} do
+    test "schedules next run for :schedule triggers", %{workflow: workflow} do
       # 1. Create a "completed" execution that just finished (triggered by schedule)
       execution =
         insert(:execution,

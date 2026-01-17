@@ -333,7 +333,18 @@ defmodule Imgd.Runtime.RunicAdapter do
     # This replaces the previous two-step (extract + map) approach with a single
     # atomic fan-out component that supports its own work function.
     work_fn = fn input ->
-      StepRunner.execute_with_context(step, input, opts)
+      result = StepRunner.execute_with_context(step, input, opts)
+
+      # Store fan-out context for downstream step tracking
+      # This enables per-item observability in downstream steps
+      if is_list(result) do
+        items_total = length(result)
+        Process.put(:imgd_fan_out_items_total, items_total)
+        # Reset the per-step item counters for this new fan-out batch
+        Process.put(:imgd_step_item_counters, %{})
+      end
+
+      result
     end
 
     %FanOut{

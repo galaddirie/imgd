@@ -49,23 +49,6 @@ defmodule Imgd.Runtime.StepSkipIntegrationTest do
     assert Process.get(:imgd_step_skipped) == true
 
     # 4. Now verify Observability consumes the flag and persists
-    # We need to manually call the after hook since we aren't running Runic engine here
-    # Result of skip is nil
-    fact = %{value: nil}
-
-    # We need to mock the workflow map for observability helpers
-    workflow_map = %{
-      :__step_types__ => %{"manual_trigger" => "manual_input"},
-      # No pre-existing ID implies "create new one" strategy of `record_completed_by_step`
-      :__step_exec_ids__ => %{}
-      # In reality, `before_step_telemetry` would have created a "running" record.
-      # Let's skip that for now and rely on `record_step_execution_completed_by_step`
-      # which falls back to latest active or errors.
-    }
-
-    # We need a running step execution for it to update.
-    # The workflow run below will create it via before_step_telemetry hooks.
-
     # Re-set flag because we consumed it (or simulate it again)
     Process.put(:imgd_step_skipped, true)
 

@@ -1,9 +1,6 @@
 defmodule Imgd.Runtime.UpstreamRestrictionTest do
   use Imgd.DataCase, async: false
 
-  alias Imgd.Runtime.RunicAdapter
-  alias Imgd.Runtime.Steps.StepRunner
-  alias Imgd.Runtime.Expression
   alias Imgd.Workflows.Embeds.{Step, Connection}
 
   describe "context restriction in execution" do
@@ -23,9 +20,6 @@ defmodule Imgd.Runtime.UpstreamRestrictionTest do
         %Connection{id: "2", source_step_id: "step_a", target_step_id: "step_c"}
       ]
 
-      # Mock workflow source
-      source = %{steps: steps, connections: connections, id: "wf-1"}
-
       # Build Runic workflow to get upstream_lookup
       # Note: we don't actually run Runic here, we just want to see how StepRunner builds context
       graph = Imgd.Graph.from_workflow!(steps, connections)
@@ -41,12 +35,6 @@ defmodule Imgd.Runtime.UpstreamRestrictionTest do
         "step_c" => %{"result" => "from_c"}
       }
 
-      # Test for Step B
-      opts_b = [
-        upstream_lookup: upstream_lookup,
-        step_outputs: all_outputs
-      ]
-
       # We manually call build_context (private in StepRunner, but we can test it indirectly via evaluate_config if we exposed it,
       # or just test the side effect. Actually, let's just test StepRunner.execute_with_context if we can mock the executor)
 
@@ -58,16 +46,6 @@ defmodule Imgd.Runtime.UpstreamRestrictionTest do
 
       # I'll add a helper to StepRunner or just use :erlang.apply if I'm desperate,
       # but better to test the behavior.
-
-      # If Step B has a config expression referencing Step C, it should fail to resolve.
-      step_b = Enum.find(steps, &(&1.id == "step_b"))
-
-      step_b_with_expr = %{
-        step_b
-        | config: %{
-            "val" => "{{ steps['Step A'].json.result }} {{ steps['Step C'].json.result }}"
-          }
-      }
 
       # Build context as StepRunner would
       # Note: StepRunner.execute_with_context is public

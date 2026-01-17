@@ -100,15 +100,25 @@ const formatTraceTimestamp = (execution: StepExecution): string => {
 // Computed traces from props or mock
 const traces = computed<TraceEntry[]>(() => {
   if (props.stepExecutions.length > 0) {
-    return props.stepExecutions.map(se => ({
-      id: se.id,
-      step_id: se.step_id,
-      step_name: props.stepNameById?.[se.step_id] || se.step_id,
-      status: se.status,
-      duration_us: se.duration_us,
-      timestamp: formatTraceTimestamp(se),
-      error: se.error ? JSON.stringify(se.error) : undefined,
-    }));
+    return props.stepExecutions.map(se => {
+      const baseName = props.stepNameById?.[se.step_id] || se.step_id;
+      // Append item number for multi-item steps
+      const stepName = se.items_total && se.items_total > 1 && se.item_index !== null && se.item_index !== undefined
+        ? `${baseName} #${se.item_index + 1}`
+        : baseName;
+      
+      return {
+        id: se.id,
+        step_id: se.step_id,
+        step_name: stepName,
+        status: se.status,
+        duration_us: se.duration_us,
+        timestamp: formatTraceTimestamp(se),
+        error: se.error ? JSON.stringify(se.error) : undefined,
+        item_index: se.item_index,
+        items_total: se.items_total,
+      };
+    });
   }
 
   if (props.execution) {

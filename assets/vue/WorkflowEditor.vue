@@ -318,7 +318,7 @@ watch(
   { deep: true }
 );
 
-onNodesChange((...changes: NodeChange[]) => {
+onNodesChange((changes: NodeChange[]) => {
   if (isSyncingDraft.value) return;
 
   const nextChanges: NodeChange[] = [];
@@ -338,7 +338,7 @@ onNodesChange((...changes: NodeChange[]) => {
   setNodes(nextNodes);
 });
 
-onEdgesChange((...changes: EdgeChange[]) => {
+onEdgesChange((changes: EdgeChange[]) => {
   if (isSyncingDraft.value) return;
 
   const nextChanges: EdgeChange[] = [];

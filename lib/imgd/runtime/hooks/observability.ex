@@ -136,6 +136,16 @@ defmodule Imgd.Runtime.Hooks.Observability do
     step_type_id = get_step_type_id(step, workflow)
     original_step_id = get_original_step_id(step, workflow)
 
+    # Check if we're in a fan-out context and get/set the item index for this step
+    {item_index, items_total} = get_fan_out_item_context(original_step_id, workflow, step)
+
+    # Store the current fan-out context for the after_step_telemetry hook
+    if item_index do
+      Process.put(:imgd_fan_out_context, %{item_index: item_index, items_total: items_total})
+    else
+      Process.delete(:imgd_fan_out_context)
+    end
+
     # Store start time and input for duration and complete payloads
     workflow =
       workflow
@@ -150,6 +160,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
       step_type_id: step_type_id || "unknown",
       status: :running,
       input_data: fact.value,
+      item_index: item_index,
+      items_total: items_total,
       started_at: started_at
     })
 
@@ -158,6 +170,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
       state =
         StepExecutionState.started(execution_id, original_step_id, fact.value,
           step_type_id: step_type_id,
+          item_index: item_index,
+          items_total: items_total,
           started_at: started_at
         )
 
@@ -190,6 +204,11 @@ defmodule Imgd.Runtime.Hooks.Observability do
     skipped? = Process.get(:imgd_step_skipped, false)
     Process.delete(:imgd_step_skipped)
 
+    # Get fan-out context if we're processing an item in a fan-out batch
+    fan_out_ctx = Process.get(:imgd_fan_out_context)
+    item_index = if fan_out_ctx, do: fan_out_ctx[:item_index], else: nil
+    items_total = if fan_out_ctx, do: fan_out_ctx[:items_total], else: nil
+
     # Count output items - splitter steps can produce multiple items
     output_item_count = do_count_output_items(result_fact.value)
 
@@ -205,6 +224,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
       input_data: input_data,
       output_data: result_fact.value,
       output_item_count: output_item_count,
+      item_index: item_index,
+      items_total: items_total,
       started_at: started_at,
       completed_at: DateTime.utc_now()
     })
@@ -219,6 +240,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
       state_opts = [
         step_type_id: step_type_id,
         duration_us: duration_us,
+        item_index: item_index,
+        items_total: items_total,
         started_at: started_at,
         completed_at: DateTime.utc_now(),
         output_item_count: output_item_count
@@ -279,6 +302,50 @@ defmodule Imgd.Runtime.Hooks.Observability do
   defp do_count_output_items([]), do: 0
   defp do_count_output_items(value) when is_list(value), do: length(value)
   defp do_count_output_items(_), do: 1
+
+  # Get the fan-out item context for a step (item_index, items_total)
+  # Returns {item_index, items_total} if in fan-out context, {nil, nil} otherwise
+  defp get_fan_out_item_context(step_id, workflow, step) do
+    items_total = Process.get(:imgd_fan_out_items_total)
+
+    if items_total && in_fan_out_path?(workflow, step) do
+      # Get the per-step item counters map
+      counters = Process.get(:imgd_step_item_counters, %{})
+
+      # Get current index for this step (defaults to 0)
+      current_index = Map.get(counters, step_id, 0)
+
+      # Increment the counter for next time this step processes an item
+      Process.put(:imgd_step_item_counters, Map.put(counters, step_id, current_index + 1))
+
+      {current_index, items_total}
+    else
+      {nil, nil}
+    end
+  end
+
+  # Check if this step is in a fan-out path (between a FanOut and FanIn)
+  # Excludes FanIn/Reduce steps since they aggregate, not process individual items
+  defp in_fan_out_path?(workflow, step) do
+    # Exclude aggregator steps - they produce one output, not N
+    case step do
+      %Runic.Workflow.FanIn{} ->
+        false
+
+      %Runic.Workflow.Reduce{} ->
+        false
+
+      %Runic.Workflow.FanOut{} ->
+        # FanOut itself is the splitter - it produces N items, not processes them
+        false
+
+      _ ->
+        mapped_paths = workflow.mapped[:mapped_paths] || MapSet.new()
+        step_hash = Map.get(step, :hash)
+
+        step_hash && MapSet.member?(mapped_paths, step_hash)
+    end
+  end
 
   # Workflow metadata helpers
   defp put_hook_context(workflow, execution_id, workflow_id) do

@@ -29,12 +29,48 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     return map;
   });
 
-  const stepExecutionByStepId = computed<Record<string, StepExecution | undefined>>(() => {
-    const map: Record<string, StepExecution> = {};
+  // Group all step executions by step_id (for multi-item fan-out steps)
+  const stepExecutionsByStepId = computed<Record<string, StepExecution[]>>(() => {
+    const map: Record<string, StepExecution[]> = {};
     for (const stepExecution of options.stepExecutions()) {
       if (!map[stepExecution.step_id]) {
-        map[stepExecution.step_id] = stepExecution;
+        map[stepExecution.step_id] = [];
       }
+      map[stepExecution.step_id].push(stepExecution);
+    }
+    // Sort by item_index within each group
+    for (const stepId in map) {
+      map[stepId].sort((a, b) => (a.item_index ?? -1) - (b.item_index ?? -1));
+    }
+    return map;
+  });
+
+  // Get the "primary" step execution for status display (first one, or single-item step)
+  const stepExecutionByStepId = computed<Record<string, StepExecution | undefined>>(() => {
+    const map: Record<string, StepExecution | undefined> = {};
+    for (const [stepId, executions] of Object.entries(stepExecutionsByStepId.value)) {
+      map[stepId] = executions[0];
+    }
+    return map;
+  });
+
+  // Compute item stats for multi-item steps
+  const stepItemStatsByStepId = computed<
+    Record<string, { isMultiItem: boolean; itemsTotal: number; completed: number; failed: number; running: number }>
+  >(() => {
+    const map: Record<string, { isMultiItem: boolean; itemsTotal: number; completed: number; failed: number; running: number }> = {};
+    for (const [stepId, executions] of Object.entries(stepExecutionsByStepId.value)) {
+      const firstExec = executions[0];
+      const itemsTotal = firstExec?.items_total ?? executions.length;
+      const isMultiItem = itemsTotal > 1 || executions.length > 1;
+
+      map[stepId] = {
+        isMultiItem,
+        itemsTotal,
+        completed: executions.filter(e => e.status === 'completed').length,
+        failed: executions.filter(e => e.status === 'failed').length,
+        running: executions.filter(e => e.status === 'running').length,
+      };
     }
     return map;
   });
@@ -57,6 +93,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const steps = options.workflow().draft?.steps || [];
     const stepTypes = stepTypeById.value;
     const stepExecutions = stepExecutionByStepId.value;
+    const itemStats = stepItemStatsByStepId.value;
     const editorState = options.editorState();
     const presences = options.presences();
     const currentUserId = options.currentUserId();
@@ -64,6 +101,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     return steps.map(step => {
       const stepType = stepTypes[step.type_id];
       const stepExecution = stepExecutions[step.id];
+      const stepItemStats = itemStats[step.id];
       const isPinned = editorState?.pinned_outputs?.[step.id] !== undefined;
       const isDisabled = editorState?.disabled_steps?.includes(step.id);
       const lockedBy = editorState?.step_locks?.[step.id];
@@ -79,6 +117,19 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           };
         });
 
+      // For multi-item steps, determine overall status from item stats
+      let displayStatus = stepExecution?.status;
+      if (stepItemStats?.isMultiItem) {
+        if (stepItemStats.failed > 0 && stepItemStats.completed > 0) {
+          // Partial failure - some completed, some failed
+          displayStatus = 'failed';
+        } else if (stepItemStats.running > 0) {
+          displayStatus = 'running';
+        } else if (stepItemStats.completed === stepItemStats.itemsTotal) {
+          displayStatus = 'completed';
+        }
+      }
+
       return {
         id: step.id,
         type: 'step',
@@ -92,10 +143,11 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           icon: stepType?.icon,
           category: stepType?.category,
           step_kind: stepType?.step_kind,
-          status: stepExecution?.status,
+          status: displayStatus,
           stats: stepExecution
             ? { duration_us: stepExecution.duration_us, out: stepExecution.output_item_count }
             : undefined,
+          itemStats: stepItemStats,
           hasInput: stepType?.step_kind !== 'trigger',
           hasOutput: true,
           disabled: isDisabled,
@@ -107,5 +159,5 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     });
   });
 
-  return { nodes, transientPositions };
+  return { nodes, transientPositions, stepExecutionsByStepId };
 }

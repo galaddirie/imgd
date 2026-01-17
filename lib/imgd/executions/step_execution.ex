@@ -16,6 +16,8 @@ defmodule Imgd.Executions.StepExecution do
              :input_data,
              :output_data,
              :output_item_count,
+             :item_index,
+             :items_total,
              :error,
              :attempt,
              :retry_of_id,
@@ -54,6 +56,9 @@ defmodule Imgd.Executions.StepExecution do
           status: status(),
           input_data: map() | nil,
           output_data: map() | nil,
+          output_item_count: non_neg_integer() | nil,
+          item_index: non_neg_integer() | nil,
+          items_total: non_neg_integer() | nil,
           error: map() | nil,
           metadata: map(),
           queued_at: DateTime.t() | nil,
@@ -80,6 +85,13 @@ defmodule Imgd.Executions.StepExecution do
     field :output_item_count, :integer
     field :error, :map
 
+    # Fan-out item tracking
+    # NULL = single-item step (backwards compatible)
+    # 0, 1, 2, ... = individual item within a fan-out batch
+    field :item_index, :integer
+    # Total items in batch (set on all records in a fan-out)
+    field :items_total, :integer
+
     # Extensible metadata (retry backoff info, queue details, etc.)
     field :metadata, :map, default: %{}
 
@@ -105,6 +117,8 @@ defmodule Imgd.Executions.StepExecution do
       :input_data,
       :output_data,
       :output_item_count,
+      :item_index,
+      :items_total,
       :error,
       :metadata,
       :queued_at,
@@ -170,6 +184,15 @@ defmodule Imgd.Executions.StepExecution do
   @doc "Returns true if this is a retry attempt."
   def retry?(%__MODULE__{attempt: attempt}) when attempt > 1, do: true
   def retry?(%__MODULE__{}), do: false
+
+  @doc "Returns true if this step execution is part of a fan-out batch."
+  def fan_out_item?(%__MODULE__{item_index: nil}), do: false
+  def fan_out_item?(%__MODULE__{item_index: _}), do: true
+
+  @doc "Returns true if this is a multi-item step (items_total > 1)."
+  def multi_item?(%__MODULE__{items_total: nil}), do: false
+  def multi_item?(%__MODULE__{items_total: n}) when n > 1, do: true
+  def multi_item?(%__MODULE__{}), do: false
 
   defp validate_status_transition(%Changeset{} = changeset) do
     case Changeset.fetch_change(changeset, :status) do

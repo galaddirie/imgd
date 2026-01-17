@@ -17,6 +17,7 @@ defmodule ImgdWeb.ExecutionLive.Show do
       {:ok, execution} ->
         if execution.workflow_id == workflow_id do
           step_executions = sort_step_executions(execution.step_executions)
+          item_stats = build_item_stats(step_executions)
 
           socket =
             socket
@@ -25,6 +26,8 @@ defmodule ImgdWeb.ExecutionLive.Show do
             |> assign(:execution, execution)
             |> assign(:execution_id, execution.id)
             |> assign(:step_executions_count, length(step_executions))
+            |> assign(:item_stats_by_step_id, item_stats.by_step_id)
+            |> assign(:item_stats_summary, item_stats.summary)
             |> assign(:step_executions_data, step_executions)
             |> assign_raw_execution_data(execution, step_executions)
             |> stream(:step_executions, step_executions, reset: true)
@@ -140,6 +143,15 @@ defmodule ImgdWeb.ExecutionLive.Show do
                 <div class="flex items-center gap-1">
                   <.icon name="hero-clock" class="size-4" />
                   <span>Started {format_relative_time(@execution.started_at)}</span>
+                </div>
+                <div class="flex items-center gap-2 rounded-full border border-base-200 bg-base-100 px-3 py-1 text-[11px] font-semibold text-base-content/70">
+                  Item runs {@item_stats_summary.total_item_runs}
+                </div>
+                <div
+                  :if={@item_stats_summary.multi_item_steps > 0}
+                  class="flex items-center gap-2 rounded-full border border-base-200 bg-base-100 px-3 py-1 text-[11px] font-semibold text-base-content/70"
+                >
+                  Multi-item steps {@item_stats_summary.multi_item_steps}
                 </div>
                 <div class="text-[11px] font-mono uppercase tracking-wide">
                   {@execution.id}
@@ -355,13 +367,22 @@ defmodule ImgdWeb.ExecutionLive.Show do
                   <div class="text-xs text-base-content/60">
                     {step.step_type_id || "Unknown step type"}
                   </div>
-                  <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
+              <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
                     <span class={[
                       "inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset",
                       status_pill_class(step.status)
                     ]}>
                       {humanize(step.status)}
                     </span>
+                <span :if={step.item_index != nil} class="rounded-full border border-base-200 bg-base-100 px-2 py-1 text-[10px] font-semibold text-base-content/70">
+                  Item {step.item_index + 1}<%= if step.items_total do %>/{step.items_total}<% end %>
+                </span>
+                <span
+                  :if={step.item_index == nil && @item_stats_by_step_id[step.step_id] && @item_stats_by_step_id[step.step_id].items_total > 1}
+                  class="rounded-full border border-base-200 bg-base-100 px-2 py-1 text-[10px] font-semibold text-base-content/70"
+                >
+                  Items {@item_stats_by_step_id[step.step_id].completed + @item_stats_by_step_id[step.step_id].failed}/{@item_stats_by_step_id[step.step_id].items_total}
+                </span>
                     <span>
                       Duration {format_duration(StepExecution.duration_us(step))}
                     </span>
@@ -455,8 +476,12 @@ defmodule ImgdWeb.ExecutionLive.Show do
     step_executions =
       Executions.list_step_executions(socket.assigns.current_scope, socket.assigns.execution)
 
+    item_stats = build_item_stats(step_executions)
+
     socket
     |> assign(:step_executions_count, length(step_executions))
+    |> assign(:item_stats_by_step_id, item_stats.by_step_id)
+    |> assign(:item_stats_summary, item_stats.summary)
     |> assign(:step_executions_data, step_executions)
     |> assign_raw_execution_data(socket.assigns.execution, step_executions)
     |> stream(:step_executions, sort_step_executions(step_executions), reset: true)
@@ -671,6 +696,8 @@ defmodule ImgdWeb.ExecutionLive.Show do
       :input_data,
       :output_data,
       :output_item_count,
+      :item_index,
+      :items_total,
       :error,
       :attempt,
       :retry_of_id,
@@ -681,6 +708,40 @@ defmodule ImgdWeb.ExecutionLive.Show do
       :inserted_at,
       :updated_at
     ])
+  end
+
+  defp build_item_stats(step_executions) do
+    by_step_id =
+      step_executions
+      |> Enum.group_by(& &1.step_id)
+      |> Enum.into(%{}, fn {step_id, executions} ->
+        items_total =
+          executions
+          |> Enum.find_value(fn se -> se.items_total end) ||
+            if(length(executions) > 1, do: length(executions), else: 1)
+
+        completed = Enum.count(executions, &(&1.status == :completed))
+        failed = Enum.count(executions, &(&1.status == :failed))
+        running = Enum.count(executions, &(&1.status == :running))
+        skipped = Enum.count(executions, &(&1.status == :skipped))
+
+        {step_id,
+         %{
+           items_total: items_total,
+           completed: completed,
+           failed: failed,
+           running: running,
+           skipped: skipped,
+           count: length(executions)
+         }}
+      end)
+
+    summary = %{
+      total_item_runs: length(step_executions),
+      multi_item_steps: Enum.count(by_step_id, fn {_id, stats} -> stats.items_total > 1 end)
+    }
+
+    %{by_step_id: by_step_id, summary: summary}
   end
 
   defp pinned_data(%Execution{} = execution) do

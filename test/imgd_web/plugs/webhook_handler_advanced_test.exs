@@ -72,18 +72,17 @@ defmodule ImgdWeb.Plugs.WebhookHandlerAdvancedTest do
   end
 
   describe "Response Modes" do
-    test "on_completion returns workflow output", %{conn: conn, user: user} do
+    test "on_completion returns workflow output", %{user: user} do
       # Note: This test assumes the execution actually completes.
       # Since we're in a test, the ExecutionWorker might be async or we need to mock the runtime.
       # But our handler calls ExecutionWorker.run_sync which monitors the PID.
       # In a real test environment, the supervisor starts the server.
 
-      %{workflow: workflow} =
-        setup_workflow(user, %{
-          "path" => "sync-hook",
-          "http_method" => "POST",
-          "response_mode" => "on_completion"
-        })
+      setup_workflow(user, %{
+        "path" => "sync-hook",
+        "http_method" => "POST",
+        "response_mode" => "on_completion"
+      })
 
       # We need to ensure the execution completes and has output.
       # Since we're testing the handler's WAIT logic, we might need a concurrent process to fulfill it

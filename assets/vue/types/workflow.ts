@@ -97,6 +97,14 @@ export interface StepNodeData {
     bytes?: number;
     out?: number;
   };
+  // Fan-out item stats for multi-item steps
+  itemStats?: {
+    isMultiItem: boolean;
+    itemsTotal: number;
+    completed: number;
+    failed: number;
+    running: number;
+  };
   hasInput: boolean;
   hasOutput: boolean;
   disabled?: boolean;
@@ -185,6 +193,11 @@ export interface StepExecution {
   input_data?: Record<string, unknown>;
   output_data?: Record<string, unknown>;
   output_item_count?: number;
+  // Fan-out item tracking
+  // null/undefined = single-item step, 0+ = fan-out item index
+  item_index?: number | null;
+  // Total items in batch (set on all records in a fan-out)
+  items_total?: number | null;
   error?: string;
   attempt: number;
   retry_of_id?: string;
@@ -204,6 +217,8 @@ export interface TraceEntry {
   duration_us?: number;
   timestamp?: string;
   error?: string;
+  item_index?: number | null;
+  items_total?: number | null;
 }
 
 // =============================================================================

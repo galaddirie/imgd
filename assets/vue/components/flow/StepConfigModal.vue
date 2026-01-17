@@ -153,9 +153,55 @@ const toggleSection = (id: string) => {
   expandedSections.value[id] = !expandedSections.value[id];
 };
 
+// All step executions for the current step (for multi-item fan-out steps)
+const stepExecutionsForStep = computed(() => {
+  if (!props.node || !props.stepExecutions) return [];
+  return props.stepExecutions
+    .filter(se => se.step_id === props.node?.id)
+    .sort((a, b) => (a.item_index ?? -1) - (b.item_index ?? -1));
+});
+
+// Check if this is a multi-item step
+const isMultiItemStep = computed(() => {
+  const executions = stepExecutionsForStep.value;
+  if (executions.length === 0) return false;
+  const first = executions[0];
+  return (first.items_total ?? 0) > 1 || executions.length > 1;
+});
+
+// Item stats for summary display
+const itemStats = computed(() => {
+  const executions = stepExecutionsForStep.value;
+  if (executions.length === 0) return null;
+  const first = executions[0];
+  return {
+    itemsTotal: first.items_total ?? executions.length,
+    completed: executions.filter(e => e.status === 'completed').length,
+    failed: executions.filter(e => e.status === 'failed').length,
+    running: executions.filter(e => e.status === 'running').length,
+    skipped: executions.filter(e => e.status === 'skipped').length,
+  };
+});
+
+// Currently selected item index for drilldown (null = show summary)
+const selectedItemIndex = ref<number | null>(null);
+
+// Reset selected item when step changes
+watch(() => props.node?.id, () => {
+  selectedItemIndex.value = null;
+});
+
 const activeStepExecution = computed(() => {
-  if (!props.node || !props.stepExecutions) return null;
-  return props.stepExecutions.find(se => se.step_id === props.node?.id) || null;
+  const executions = stepExecutionsForStep.value;
+  if (executions.length === 0) return null;
+  
+  // If multi-item and an item is selected, return that item's execution
+  if (isMultiItemStep.value && selectedItemIndex.value !== null) {
+    return executions.find(e => e.item_index === selectedItemIndex.value) || executions[0];
+  }
+  
+  // Otherwise return the first (or only) execution
+  return executions[0];
 });
 
 const toRecord = (value: unknown): Record<string, unknown> | null => {
@@ -899,6 +945,81 @@ const toggleWebhookListening = () => {
             class="custom-scrollbar mx-auto h-full max-w-4xl space-y-8 p-4"
           >
             <div v-if="activeStepExecution" class="space-y-8 pb-20">
+              <!-- Multi-Item Summary Bar -->
+              <section v-if="isMultiItemStep && itemStats" class="bg-base-200/50 rounded-2xl p-4">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-4">
+                    <span class="text-base-content/60 text-sm font-medium">
+                      {{ itemStats.itemsTotal }} items processed
+                    </span>
+                    <div class="flex items-center gap-2 text-xs">
+                      <span v-if="itemStats.completed > 0" class="text-success flex items-center gap-1">
+                        <span class="inline-block size-2 rounded-full bg-success"></span>
+                        {{ itemStats.completed }} completed
+                      </span>
+                      <span v-if="itemStats.failed > 0" class="text-error flex items-center gap-1">
+                        <span class="inline-block size-2 rounded-full bg-error"></span>
+                        {{ itemStats.failed }} failed
+                      </span>
+                      <span v-if="itemStats.running > 0" class="text-info flex items-center gap-1">
+                        <span class="inline-block size-2 rounded-full bg-info"></span>
+                        {{ itemStats.running }} running
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    v-if="selectedItemIndex !== null"
+                    @click="selectedItemIndex = null"
+                    class="btn btn-xs btn-ghost"
+                  >
+                    Show All
+                  </button>
+                </div>
+
+                <!-- Item List -->
+                <div class="mt-4 flex flex-wrap gap-2">
+                  <button
+                    v-for="se in stepExecutionsForStep"
+                    :key="se.id"
+                    @click="selectedItemIndex = se.item_index ?? 0"
+                    :class="[
+                      'btn btn-xs gap-1',
+                      selectedItemIndex === se.item_index ? 'btn-primary' : 'btn-ghost',
+                      se.status === 'failed' ? 'border-error/50' : '',
+                      se.status === 'completed' ? 'border-success/30' : '',
+                    ]"
+                  >
+                    <span
+                      :class="[
+                        'inline-block size-2 rounded-full',
+                        se.status === 'completed' ? 'bg-success' : '',
+                        se.status === 'failed' ? 'bg-error' : '',
+                        se.status === 'running' ? 'bg-info animate-pulse' : '',
+                        se.status === 'skipped' ? 'bg-base-content/30' : '',
+                      ]"
+                    ></span>
+                    #{{ (se.item_index ?? 0) + 1 }}
+                  </button>
+                </div>
+              </section>
+
+              <!-- Item Header (when viewing specific item) -->
+              <div v-if="isMultiItemStep && selectedItemIndex !== null" class="flex items-center gap-2 text-sm">
+                <span class="text-base-content/60">Viewing item</span>
+                <span class="font-bold">#{{ selectedItemIndex + 1 }}</span>
+                <span class="text-base-content/40">of {{ itemStats?.itemsTotal }}</span>
+                <span
+                  :class="[
+                    'badge badge-sm',
+                    activeStepExecution.status === 'completed' ? 'badge-success' : '',
+                    activeStepExecution.status === 'failed' ? 'badge-error' : '',
+                    activeStepExecution.status === 'running' ? 'badge-info' : '',
+                  ]"
+                >
+                  {{ activeStepExecution.status }}
+                </span>
+              </div>
+
               <section>
                 <div class="mb-3 flex items-center justify-between">
                   <h4 class="text-base-content/40 text-xs font-bold tracking-widest uppercase">

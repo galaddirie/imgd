@@ -657,7 +657,8 @@ defmodule Imgd.Executions do
         safe_repo(fn ->
           entries
           |> Enum.group_by(fn entry ->
-            {entry.execution_id, entry.step_id, entry.attempt || 1}
+            # Include item_index in grouping key to keep fan-out items separate
+            {entry.execution_id, entry.step_id, entry.item_index, entry.attempt || 1}
           end)
           |> Enum.reduce_while({:ok, 0}, fn {_key, grouped_entries}, {:ok, count} ->
             case persist_step_execution_entries(grouped_entries, now) do
@@ -679,9 +680,10 @@ defmodule Imgd.Executions do
     [first | _] = entries
     execution_id = Map.get(first, :execution_id)
     step_id = Map.get(first, :step_id)
+    item_index = Map.get(first, :item_index)
     attempt = Map.get(first, :attempt) || 1
 
-    existing = fetch_latest_step_execution(execution_id, step_id, attempt)
+    existing = fetch_latest_step_execution(execution_id, step_id, item_index, attempt)
     merged = merge_step_entries([existing | entries], now)
 
     if valid_step_entry?(merged) do
@@ -749,6 +751,8 @@ defmodule Imgd.Executions do
           input_data: pick_input_data(normalized),
           output_data: pick_output_data(normalized),
           output_item_count: pick_output_item_count(normalized),
+          item_index: pick_first_non_nil(normalized, :item_index),
+          items_total: pick_first_non_nil(normalized, :items_total),
           error: pick_error(normalized),
           metadata: merge_metadata(normalized),
           queued_at: queued_at,
@@ -769,6 +773,8 @@ defmodule Imgd.Executions do
       input_data: Serializer.wrap_for_db(merged.input_data),
       output_data: Serializer.wrap_for_db(merged.output_data),
       output_item_count: merged.output_item_count,
+      item_index: merged[:item_index],
+      items_total: merged[:items_total],
       error: merged.error,
       metadata: merged.metadata || %{},
       queued_at: merged.queued_at,
@@ -788,6 +794,8 @@ defmodule Imgd.Executions do
       input_data: step_execution.input_data,
       output_data: step_execution.output_data,
       output_item_count: step_execution.output_item_count,
+      item_index: step_execution.item_index,
+      items_total: step_execution.items_total,
       error: step_execution.error,
       metadata: step_execution.metadata,
       queued_at: step_execution.queued_at,
@@ -807,6 +815,8 @@ defmodule Imgd.Executions do
       input_data: fetch_step_value(entry, :input_data),
       output_data: fetch_step_value(entry, :output_data),
       output_item_count: fetch_step_value(entry, :output_item_count),
+      item_index: fetch_step_value(entry, :item_index),
+      items_total: fetch_step_value(entry, :items_total),
       error: fetch_step_value(entry, :error),
       metadata: normalize_metadata(fetch_step_value(entry, :metadata)),
       queued_at: normalize_datetime(fetch_step_value(entry, :queued_at)),
@@ -1017,19 +1027,29 @@ defmodule Imgd.Executions do
     end)
   end
 
-  defp fetch_latest_step_execution(nil, _step_id, _attempt), do: nil
+  defp fetch_latest_step_execution(nil, _step_id, _item_index, _attempt), do: nil
 
-  defp fetch_latest_step_execution(execution_id, step_id, attempt) do
+  defp fetch_latest_step_execution(execution_id, step_id, item_index, attempt) do
     case Ecto.UUID.cast(execution_id) do
       {:ok, uuid} ->
-        from(se in StepExecution,
-          where:
-            se.execution_id == ^uuid and se.step_id == ^step_id and
-              se.attempt == ^attempt,
-          order_by: [desc: se.inserted_at],
-          limit: 1
-        )
-        |> Repo.one()
+        query =
+          from(se in StepExecution,
+            where:
+              se.execution_id == ^uuid and se.step_id == ^step_id and
+                se.attempt == ^attempt,
+            order_by: [desc: se.inserted_at],
+            limit: 1
+          )
+
+        # Add item_index filter - use is_nil for NULL matching
+        query =
+          if is_nil(item_index) do
+            from(se in query, where: is_nil(se.item_index))
+          else
+            from(se in query, where: se.item_index == ^item_index)
+          end
+
+        Repo.one(query)
 
       :error ->
         nil
