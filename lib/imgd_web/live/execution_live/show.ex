@@ -659,7 +659,10 @@ defmodule ImgdWeb.ExecutionLive.Show do
   defp workflow_raw(nil), do: nil
 
   defp workflow_raw(workflow) do
-    Map.take(workflow, [
+    # Load published version and draft if not already loaded
+    workflow = Imgd.Repo.preload(workflow, [:published_version, :draft])
+
+    base_workflow = Map.take(workflow, [
       :id,
       :name,
       :description,
@@ -671,6 +674,38 @@ defmodule ImgdWeb.ExecutionLive.Show do
       :inserted_at,
       :updated_at
     ])
+
+    # Include full workflow definition from published version or draft
+    definition =
+      case workflow.published_version do
+        %{} = published_version ->
+          %{
+            version_tag: published_version.version_tag,
+            steps: published_version.steps,
+            connections: published_version.connections,
+            source_hash: published_version.source_hash,
+            published_at: published_version.published_at,
+            source: "published"
+          }
+
+        nil ->
+          case workflow.draft do
+            %{} = draft ->
+              %{
+                version_tag: nil,
+                steps: draft.steps,
+                connections: draft.connections,
+                source_hash: nil,
+                published_at: nil,
+                source: "draft"
+              }
+
+            _ ->
+              nil
+          end
+      end
+
+    Map.put(base_workflow, :definition, definition)
   end
 
   defp execution_raw(%Execution{} = execution) do
