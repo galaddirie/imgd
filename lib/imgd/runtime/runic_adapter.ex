@@ -367,87 +367,118 @@ defmodule Imgd.Runtime.RunicAdapter do
   defp create_fanout_aggregator(step, component_name) do
     operation = Map.get(step.config, "operation", "collect")
     name = component_name
+    step_id = step.id
 
-    case operation do
-      "sum" ->
-        Runic.reduce(0, fn item, acc ->
-          # Handle both single values and lists (from joins)
-          items = __MODULE__.normalize_item(item)
-          Enum.reduce(items, acc, fn i, a -> a + (__MODULE__.to_number(i) || 0) end)
-        end, name: name)
-
-      "count" ->
-        Runic.reduce(0, fn item, acc ->
-          items = __MODULE__.normalize_item(item)
-          acc + length(items)
-        end, name: name)
-
-      "concat" ->
-        Runic.reduce("", fn item, acc ->
-          items = __MODULE__.normalize_item(item)
-          acc <> Enum.map_join(items, "", &to_string/1)
-        end, name: name)
-
-      "first" ->
-        Runic.reduce(
-          nil,
-          fn
-            item, nil ->
+    reduce =
+      case operation do
+        "sum" ->
+          Runic.reduce(
+            0,
+            fn item, acc ->
+              # Handle both single values and lists (from joins)
               items = __MODULE__.normalize_item(item)
-              List.first(items)
+              Enum.reduce(items, acc, fn i, a -> a + (__MODULE__.to_number(i) || 0) end)
+            end,
+            name: name
+          )
 
-            _item, acc ->
-              acc
-          end,
-          name: name
-        )
+        "count" ->
+          Runic.reduce(
+            0,
+            fn item, acc ->
+              items = __MODULE__.normalize_item(item)
+              acc + length(items)
+            end,
+            name: name
+          )
 
-      "last" ->
-        Runic.reduce(nil, fn item, _acc ->
-          items = __MODULE__.normalize_item(item)
-          List.last(items) || List.first(items)
-        end, name: name)
+        "concat" ->
+          Runic.reduce(
+            "",
+            fn item, acc ->
+              items = __MODULE__.normalize_item(item)
+              acc <> Enum.map_join(items, "", &to_string/1)
+            end,
+            name: name
+          )
 
-      "min" ->
-        Runic.reduce(
-          nil,
-          fn item, acc ->
-            items = __MODULE__.normalize_item(item)
-            item_min = Enum.min(items, fn -> nil end)
+        "first" ->
+          Runic.reduce(
+            nil,
+            fn
+              item, nil ->
+                items = __MODULE__.normalize_item(item)
+                List.first(items)
 
-            case {acc, item_min} do
-              {nil, val} -> val
-              {val, nil} -> val
-              {a, b} -> min(a, b)
-            end
-          end,
-          name: name
-        )
+              _item, acc ->
+                acc
+            end,
+            name: name
+          )
 
-      "max" ->
-        Runic.reduce(
-          nil,
-          fn item, acc ->
-            items = __MODULE__.normalize_item(item)
-            item_max = Enum.max(items, fn -> nil end)
+        "last" ->
+          Runic.reduce(
+            nil,
+            fn item, _acc ->
+              items = __MODULE__.normalize_item(item)
+              List.last(items) || List.first(items)
+            end,
+            name: name
+          )
 
-            case {acc, item_max} do
-              {nil, val} -> val
-              {val, nil} -> val
-              {a, b} -> max(a, b)
-            end
-          end,
-          name: name
-        )
+        "min" ->
+          Runic.reduce(
+            nil,
+            fn item, acc ->
+              items = __MODULE__.normalize_item(item)
+              item_min = Enum.min(items, fn -> nil end)
 
-      # Default "collect" - accumulate all items into a flat list
-      _ ->
-        Runic.reduce([], fn item, acc ->
-          # Flatten joined items and append to maintain order
-          items = __MODULE__.normalize_item(item)
-          acc ++ items
-        end, name: name)
-    end
+              case {acc, item_min} do
+                {nil, val} -> val
+                {val, nil} -> val
+                {a, b} -> min(a, b)
+              end
+            end,
+            name: name
+          )
+
+        "max" ->
+          Runic.reduce(
+            nil,
+            fn item, acc ->
+              items = __MODULE__.normalize_item(item)
+              item_max = Enum.max(items, fn -> nil end)
+
+              case {acc, item_max} do
+                {nil, val} -> val
+                {val, nil} -> val
+                {a, b} -> max(a, b)
+              end
+            end,
+            name: name
+          )
+
+        # Default "collect" - accumulate all items into a flat list
+        _ ->
+          Runic.reduce(
+            [],
+            fn item, acc ->
+              # Flatten joined items and append to maintain order
+              items = __MODULE__.normalize_item(item)
+              acc ++ items
+            end,
+            name: name
+          )
+      end
+
+    # CRITICAL FIX: Make hash unique by incorporating step_id
+    # This prevents graph vertex collisions when multiple aggregators
+    # have the same operation (e.g., two "collect" aggregators)
+    unique_hash = :erlang.phash2({reduce.hash, step_id}, 4_294_967_296)
+
+    # Update both the Reduce and its FanIn to use the unique hash
+    unique_fan_in = %{reduce.fan_in | hash: unique_hash}
+    %{reduce | hash: unique_hash, fan_in: unique_fan_in}
   end
 
   # Join aggregator: handles pre-combined list input from Join nodes (no fan-out upstream)
