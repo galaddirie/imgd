@@ -662,18 +662,19 @@ defmodule ImgdWeb.ExecutionLive.Show do
     # Load published version and draft if not already loaded
     workflow = Imgd.Repo.preload(workflow, [:published_version, :draft])
 
-    base_workflow = Map.take(workflow, [
-      :id,
-      :name,
-      :description,
-      :status,
-      :public,
-      :current_version_tag,
-      :published_version_id,
-      :user_id,
-      :inserted_at,
-      :updated_at
-    ])
+    base_workflow =
+      Map.take(workflow, [
+        :id,
+        :name,
+        :description,
+        :status,
+        :public,
+        :current_version_tag,
+        :published_version_id,
+        :user_id,
+        :inserted_at,
+        :updated_at
+      ])
 
     # Include full workflow definition from published version or draft
     definition =
