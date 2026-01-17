@@ -965,10 +965,14 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   defp normalize_step_payload(payload, execution_id, event) do
     step_id = fetch_payload_value(payload, :step_id)
     payload_execution_id = fetch_payload_value(payload, :execution_id) || execution_id
+    item_index = fetch_payload_value(payload, :item_index)
+    attempt = fetch_payload_value(payload, :attempt) || 1
 
     if step_id && payload_execution_id && payload_execution_id == execution_id do
       %{
-        id: fetch_payload_value(payload, :id) || "#{payload_execution_id}:#{step_id}",
+        id:
+          fetch_payload_value(payload, :id) ||
+            step_execution_id(payload_execution_id, step_id, item_index, attempt),
         execution_id: payload_execution_id,
         step_id: step_id,
         step_type_id: fetch_payload_value(payload, :step_type_id),
@@ -976,8 +980,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         input_data: fetch_payload_value(payload, :input_data),
         output_data: fetch_payload_value(payload, :output_data),
         output_item_count: fetch_payload_value(payload, :output_item_count),
+        item_index: item_index,
+        items_total: fetch_payload_value(payload, :items_total),
         error: fetch_payload_value(payload, :error),
-        attempt: fetch_payload_value(payload, :attempt) || 1,
+        attempt: attempt,
+        retry_of_id: fetch_payload_value(payload, :retry_of_id),
         queued_at: fetch_payload_value(payload, :queued_at),
         started_at: fetch_payload_value(payload, :started_at),
         completed_at: fetch_payload_value(payload, :completed_at),
@@ -1000,11 +1007,32 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   defp default_step_status(:step_cancelled), do: :cancelled
   defp default_step_status(_event), do: :pending
 
+  defp step_execution_id(execution_id, step_id, nil, attempt) do
+    "#{execution_id}:#{step_id}:#{attempt}"
+  end
+
+  defp step_execution_id(execution_id, step_id, item_index, attempt) do
+    "#{execution_id}:#{step_id}:#{item_index}:#{attempt}"
+  end
+
   defp upsert_step_execution(step_executions, step_execution) do
     step_id = Map.get(step_execution, :step_id)
+    item_index = Map.get(step_execution, :item_index)
+    attempt = Map.get(step_execution, :attempt) || 1
+
+    step_executions =
+      if is_nil(item_index) do
+        step_executions
+      else
+        Enum.reject(step_executions, fn existing ->
+          Map.get(existing, :step_id) == step_id and is_nil(Map.get(existing, :item_index))
+        end)
+      end
 
     case Enum.find_index(step_executions, fn existing ->
-           Map.get(existing, :step_id) == step_id
+           Map.get(existing, :step_id) == step_id and
+             Map.get(existing, :item_index) == item_index and
+             (Map.get(existing, :attempt) || 1) == attempt
          end) do
       nil ->
         step_executions ++ [step_execution]

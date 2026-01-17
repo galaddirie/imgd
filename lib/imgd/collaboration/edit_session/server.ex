@@ -269,7 +269,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
   def handle_info(:emit_resource_usage, state) do
     sample = ResourceUsage.sample(self())
 
-    usage =
+    _usage =
       case sample do
         nil ->
           nil
@@ -278,9 +278,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
           ResourceUsage.with_rate(sample, state.resource_usage_last)
       end
 
-    if usage do
-      PubSub.broadcast_resource_usage(state.workflow_id, usage)
-    end
+    # Disabled resource usage broadcasting for now
+    # if usage do
+    #   PubSub.broadcast_resource_usage(state.workflow_id, usage)
+    # end
 
     resource_usage_timer =
       Process.send_after(self(), :emit_resource_usage, @resource_usage_interval_ms)

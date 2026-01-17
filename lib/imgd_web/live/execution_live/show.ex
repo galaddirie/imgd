@@ -367,22 +367,34 @@ defmodule ImgdWeb.ExecutionLive.Show do
                   <div class="text-xs text-base-content/60">
                     {step.step_type_id || "Unknown step type"}
                   </div>
-              <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
+                  <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
                     <span class={[
                       "inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset",
                       status_pill_class(step.status)
                     ]}>
                       {humanize(step.status)}
                     </span>
-                <span :if={step.item_index != nil} class="rounded-full border border-base-200 bg-base-100 px-2 py-1 text-[10px] font-semibold text-base-content/70">
-                  Item {step.item_index + 1}<%= if step.items_total do %>/{step.items_total}<% end %>
-                </span>
-                <span
-                  :if={step.item_index == nil && @item_stats_by_step_id[step.step_id] && @item_stats_by_step_id[step.step_id].items_total > 1}
-                  class="rounded-full border border-base-200 bg-base-100 px-2 py-1 text-[10px] font-semibold text-base-content/70"
-                >
-                  Items {@item_stats_by_step_id[step.step_id].completed + @item_stats_by_step_id[step.step_id].failed}/{@item_stats_by_step_id[step.step_id].items_total}
-                </span>
+                    <span
+                      :if={step.item_index != nil}
+                      class="rounded-full border border-base-200 bg-base-100 px-2 py-1 text-[10px] font-semibold text-base-content/70"
+                    >
+                      Item {step.item_index + 1}
+                      <%= if step.items_total do %>
+                        /{step.items_total}
+                      <% end %>
+                    </span>
+                    <span
+                      :if={
+                        step.item_index == nil && @item_stats_by_step_id[step.step_id] &&
+                          @item_stats_by_step_id[step.step_id].items_total > 1
+                      }
+                      class="rounded-full border border-base-200 bg-base-100 px-2 py-1 text-[10px] font-semibold text-base-content/70"
+                    >
+                      Items {@item_stats_by_step_id[step.step_id].completed +
+                        @item_stats_by_step_id[step.step_id].failed}/{@item_stats_by_step_id[
+                        step.step_id
+                      ].items_total}
+                    </span>
                     <span>
                       Duration {format_duration(StepExecution.duration_us(step))}
                     </span>
