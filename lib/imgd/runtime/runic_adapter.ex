@@ -198,7 +198,6 @@ defmodule Imgd.Runtime.RunicAdapter do
     Workflow.add(workflow, component, to: join)
   end
 
-  # IMPORTANT: Keep ORIGINAL behavior - this is critical for Runic's FanIn/FanOut pairing
   defp maybe_connect_fan_in(workflow, %Runic.Workflow.Reduce{fan_in: fan_in}) do
     case find_upstream_fan_out(workflow, fan_in) do
       nil ->
