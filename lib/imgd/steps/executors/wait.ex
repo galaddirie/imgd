@@ -66,12 +66,7 @@ defmodule Imgd.Steps.Executors.Wait do
 
     Logger.info("Wait step: sleeping for #{milliseconds}ms (#{duration} #{unit})")
 
-    receive do
-      {:EXIT, _from, reason} ->
-        exit(reason)
-    after
-      milliseconds -> :ok
-    end
+    Process.sleep(milliseconds)
 
     {:ok, input}
   end
