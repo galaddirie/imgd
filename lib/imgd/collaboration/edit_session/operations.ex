@@ -403,6 +403,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
       group
       |> maybe_update(:name, changes)
       |> maybe_update(:position, changes)
+      |> maybe_update(:color, changes)
       |> maybe_update(:collapsed, changes)
       |> maybe_update(:output_step_id, changes)
     end)
@@ -620,6 +621,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
       step_ids: step_ids,
       output_step_id: output_step_id,
       position: field(data, :position) || %{},
+      color: field(data, :color),
       collapsed: field(data, :collapsed) || false
     }
   end

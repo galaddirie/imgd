@@ -51,6 +51,7 @@ export interface NodeGroup {
   step_ids: string[];
   output_step_id: string;
   position: { x?: number; y?: number; width?: number; height?: number };
+  color?: string | null;
   collapsed: boolean;
 }
 
@@ -137,6 +138,8 @@ export interface GroupNodeData {
   name: string;
   step_ids: string[];
   collapsed: boolean;
+  color?: string;
+  onUpdate?: (groupId: string, changes: { name?: string; color?: string }) => void;
 }
 
 export type WorkflowNodeData = StepNodeData | GroupNodeData;

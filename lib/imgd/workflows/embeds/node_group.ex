@@ -12,6 +12,7 @@ defmodule Imgd.Workflows.Embeds.NodeGroup do
              :step_ids,
              :output_step_id,
              :position,
+             :color,
              :collapsed
            ]}
   use Ecto.Schema
@@ -25,6 +26,7 @@ defmodule Imgd.Workflows.Embeds.NodeGroup do
           step_ids: [String.t()],
           output_step_id: String.t(),
           position: map(),
+          color: String.t() | nil,
           collapsed: boolean()
         }
 
@@ -33,12 +35,13 @@ defmodule Imgd.Workflows.Embeds.NodeGroup do
     field :step_ids, {:array, :string}, default: []
     field :output_step_id, :string
     field :position, :map, default: %{}
+    field :color, :string
     field :collapsed, :boolean, default: false
   end
 
   def changeset(group, attrs) do
     group
-    |> cast(attrs, [:id, :name, :step_ids, :output_step_id, :position, :collapsed])
+    |> cast(attrs, [:id, :name, :step_ids, :output_step_id, :position, :color, :collapsed])
     |> validate_required([:id, :name, :step_ids, :output_step_id])
     |> validate_output_step_in_group()
   end

@@ -301,6 +301,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         name: Map.get(params, "name", "Group"),
         step_ids: step_ids,
         position: normalize_group_position(Map.get(params, "position", %{})),
+        color: Map.get(params, "color"),
         collapsed: Map.get(params, "collapsed", false)
       }
 

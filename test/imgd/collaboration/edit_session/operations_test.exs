@@ -489,6 +489,7 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
             id: "group_1",
             name: "Group 1",
             step_ids: ["step_1", "step_2"],
+            color: "#22c55e",
             position: %{x: 100, y: 100, width: 300, height: 200}
           },
           step_positions: %{
@@ -502,6 +503,7 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       assert [%NodeGroup{} = group] = new_draft.groups
       assert group.step_ids == ["step_1", "step_2"]
       assert group.output_step_id in group.step_ids
+      assert group.color == "#22c55e"
 
       step_1 = Enum.find(new_draft.steps, &(&1.id == "step_1"))
       step_2 = Enum.find(new_draft.steps, &(&1.id == "step_2"))
@@ -542,6 +544,38 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
 
       step_2 = Enum.find(new_draft.steps, &(&1.id == "step_2"))
       assert step_2.position == %{x: 24, y: 32}
+    end
+
+    test "applies update_group operation for name and color" do
+      draft = %WorkflowDraft{
+        workflow_id: Ecto.UUID.generate(),
+        steps: [
+          %Step{id: "step_1", type_id: "http_request", name: "HTTP Request"}
+        ],
+        connections: [],
+        groups: [
+          %NodeGroup{
+            id: "group_1",
+            name: "Group 1",
+            step_ids: ["step_1"],
+            output_step_id: "step_1",
+            color: "#14b8a6"
+          }
+        ]
+      }
+
+      operation = %{
+        type: :update_group,
+        payload: %{
+          group_id: "group_1",
+          changes: %{name: "Renamed Group", color: "#f59e0b"}
+        }
+      }
+
+      assert {:ok, new_draft} = Operations.apply(draft, operation)
+      group = Enum.find(new_draft.groups, &(&1.id == "group_1"))
+      assert group.name == "Renamed Group"
+      assert group.color == "#f59e0b"
     end
 
     test "applies remove_group operation and offsets step positions" do

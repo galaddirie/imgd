@@ -34,6 +34,7 @@ import { useWorkflowGraph } from './composables/useWorkflowGraph';
 import { useWorkflowNodes } from './composables/useWorkflowNodes';
 import {
   CURSOR_THROTTLE_MS,
+  DEFAULT_GROUP_COLOR,
   DEFAULT_GROUP_DIMENSIONS,
   DEFAULT_NODE_DIMENSIONS,
   DEFAULT_VIEWPORT,
@@ -117,6 +118,7 @@ const emit = defineEmits<{
     payload: {
       name?: string;
       step_ids: string[];
+      color?: string;
       position: { x: number; y: number; width: number; height: number };
       step_positions?: Record<string, XYPosition>;
     }
@@ -130,6 +132,7 @@ const emit = defineEmits<{
         position?: { x?: number; y?: number; width?: number; height?: number };
         collapsed?: boolean;
         output_step_id?: string;
+        color?: string;
       };
     }
   ): void;
@@ -255,6 +258,7 @@ const { nodes } = useWorkflowNodes({
   presences: () => props.presences,
   currentUserId: () => props.currentUserId,
   onRunNode: stepId => handleRunNode(stepId),
+  onUpdateGroup: (groupId, changes) => emit('update_group', { group_id: groupId, changes }),
 });
 
 const { edges } = useWorkflowEdges({
@@ -717,6 +721,7 @@ const createGroupFromSelection = () => {
   emit('add_group', {
     name: buildGroupName(),
     step_ids: stepIds,
+    color: DEFAULT_GROUP_COLOR,
     position: bounds,
     step_positions: stepPositions,
   });

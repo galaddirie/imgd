@@ -2,7 +2,7 @@ import { computed } from 'vue';
 import type { Node, XYPosition } from '@vue-flow/core';
 
 import { generateColor } from '@/lib/color';
-import { DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
+import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
 import type {
   Workflow,
   StepType,
@@ -22,6 +22,7 @@ interface UseWorkflowNodesOptions {
   presences: () => UserPresence[];
   currentUserId: () => string | undefined;
   onRunNode?: (stepId: string) => void;
+  onUpdateGroup?: (groupId: string, changes: { name?: string; color?: string }) => void;
 }
 
 export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
@@ -133,6 +134,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         typeof position.height === 'number' && position.height > 0
           ? position.height
           : DEFAULT_GROUP_DIMENSIONS.height;
+      const color = group.color || DEFAULT_GROUP_COLOR;
 
       for (const stepId of group.step_ids || []) {
         groupByStepId.set(stepId, group.id);
@@ -150,6 +152,8 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           name: group.name || 'Group',
           step_ids: group.step_ids || [],
           collapsed: !!group.collapsed,
+          color,
+          onUpdate: options.onUpdateGroup,
         },
         style: {
           width: `${width}px`,
