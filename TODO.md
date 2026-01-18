@@ -1,9 +1,7 @@
 # TODO
 
 ### Core / Platform
-- [ ] build workflow node groups ( basically a way for organizing a workflow but  can be used to manage memory, acts like a sub workflow node in a larger workflow) but without registering it as a workflow in the database. the execution context will be local and nodes in the workflow outside the group will not be able to access the context of the group. except for the final output of the group which will be available to the parent workflow.
 - [ ] Credentials system
-- [ ] we need better ways to inteferface and declare workflow initial inputs, and its final outputs. this way we can have type safety and validation of the inputs and outputs. Nodes shouldnt be force to have a single input or output type/ interface schema. we could have multiple branches of inputs and outputs with different types and schemas. so how does this work. 
 - [ ] Sub-workflows
 - [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)
     - [ ] Add variable trigger nodes (ex. variable changed)
