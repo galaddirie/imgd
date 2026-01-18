@@ -155,18 +155,15 @@ defmodule Imgd.Runtime.Hooks.Observability do
       started_at: started_at
     })
 
-    # Async broadcast for UI updates
-    Task.start(fn ->
-      state =
-        StepExecutionState.started(execution_id, original_step_id, fact.value,
-          step_type_id: step_type_id,
-          item_index: item_index,
-          items_total: items_total,
-          started_at: started_at
-        )
+    state =
+      StepExecutionState.started(execution_id, original_step_id, fact.value,
+        step_type_id: step_type_id,
+        item_index: item_index,
+        items_total: items_total,
+        started_at: started_at
+      )
 
-      Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, state)
-    end)
+    Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, state)
 
     workflow
   end
@@ -235,38 +232,35 @@ defmodule Imgd.Runtime.Hooks.Observability do
       Process.put(:imgd_accumulated_outputs, Map.put(acc_outputs, step_name, result_fact.value))
     end
 
-    # Async broadcast for UI updates
-    Task.start(fn ->
-      state_opts = [
-        step_type_id: step_type_id,
-        duration_us: duration_us,
-        item_index: item_index,
-        items_total: items_total,
-        started_at: started_at,
-        completed_at: DateTime.utc_now(),
-        output_item_count: output_item_count
-      ]
+    state_opts = [
+      step_type_id: step_type_id,
+      duration_us: duration_us,
+      item_index: item_index,
+      items_total: items_total,
+      started_at: started_at,
+      completed_at: DateTime.utc_now(),
+      output_item_count: output_item_count
+    ]
 
-      state =
-        if skipped? do
-          StepExecutionState.skipped(execution_id, original_step_id, input_data, state_opts)
-        else
-          StepExecutionState.completed(
-            execution_id,
-            original_step_id,
-            input_data,
-            result_fact.value,
-            state_opts
-          )
-        end
+    state =
+      if skipped? do
+        StepExecutionState.skipped(execution_id, original_step_id, input_data, state_opts)
+      else
+        StepExecutionState.completed(
+          execution_id,
+          original_step_id,
+          input_data,
+          result_fact.value,
+          state_opts
+        )
+      end
 
-      Imgd.Executions.PubSub.broadcast_step(
-        if(skipped?, do: :step_skipped, else: :step_completed),
-        execution_id,
-        nil,
-        state
-      )
-    end)
+    Imgd.Executions.PubSub.broadcast_step(
+      if(skipped?, do: :step_skipped, else: :step_completed),
+      execution_id,
+      nil,
+      state
+    )
 
     workflow
   end

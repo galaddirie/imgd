@@ -1028,18 +1028,52 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
       index ->
         existing = Enum.at(step_executions, index)
+        resolved_status = resolve_step_status(existing, step_execution)
 
         # Merge but preserve existing values if new ones are nil
         updated =
           Enum.reduce(step_execution, existing, fn {k, v}, acc ->
-            if is_nil(v) do
+            if k == :status or is_nil(v) do
               acc
             else
               Map.put(acc, k, v)
             end
           end)
+          |> Map.put(:status, resolved_status)
 
         List.replace_at(step_executions, index, updated)
+    end
+  end
+
+  defp resolve_step_status(existing, incoming) do
+    existing_status = Map.get(existing, :status)
+    incoming_status = Map.get(incoming, :status)
+    existing_rank = step_status_rank(existing_status)
+    incoming_rank = step_status_rank(incoming_status)
+
+    cond do
+      is_nil(existing_status) -> incoming_status
+      is_nil(incoming_status) -> existing_status
+      incoming_rank < existing_rank -> existing_status
+      true -> incoming_status
+    end
+  end
+
+  defp step_status_rank(status) do
+    case status do
+      :pending -> 0
+      "pending" -> 0
+      :running -> 1
+      "running" -> 1
+      :completed -> 2
+      "completed" -> 2
+      :skipped -> 2
+      "skipped" -> 2
+      :failed -> 3
+      "failed" -> 3
+      :cancelled -> 3
+      "cancelled" -> 3
+      _ -> -1
     end
   end
 
