@@ -153,6 +153,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           execution={@execution}
           stepExecutions={@step_executions}
           v-on:add_step={JS.push("add_step")}
+          v-on:duplicate_steps={JS.push("duplicate_steps")}
           v-on:move_step={JS.push("move_step")}
           v-on:update_step={JS.push("update_step")}
           v-on:remove_step={JS.push("remove_step")}
@@ -201,6 +202,43 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     }
 
     apply_operation(socket, :add_step, %{step: step})
+  end
+
+  @impl true
+  def handle_event("duplicate_steps", %{"step_ids" => step_ids} = params, socket) do
+    step_ids = step_ids |> List.wrap() |> Enum.uniq()
+
+    draft = socket.assigns.workflow.draft
+    steps = if(draft, do: draft.steps || [], else: [])
+    connections = if(draft, do: draft.connections || [], else: [])
+
+    if step_ids == [] or steps == [] do
+      {:noreply, socket}
+    else
+      position_by_step_id = Map.get(params, "position_by_step_id", %{})
+
+      {new_steps, id_map} =
+        build_duplicate_steps(steps, step_ids, position_by_step_id)
+
+      new_connections = build_duplicate_connections(connections, step_ids, id_map)
+
+      operations =
+        Enum.map(new_steps, fn step -> {:add_step, %{step: step}} end) ++
+          Enum.map(new_connections, fn connection ->
+            {:add_connection, %{connection: connection}}
+          end)
+
+      case apply_operations(socket, operations) do
+        :ok ->
+          new_step_ids = Enum.map(new_steps, &fetch_field(&1, :id))
+          socket = push_event(socket, "duplicate_selection", %{step_ids: new_step_ids})
+          {:noreply, socket}
+
+        {:error, reason} ->
+          Logger.warning("duplicate_steps failed: #{inspect(reason)}")
+          {:noreply, put_flash(socket, :error, "Unable to duplicate steps")}
+      end
+    end
   end
 
   @impl true
@@ -657,6 +695,123 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # =============================================================================
   # Private Helpers
   # =============================================================================
+
+  defp apply_operations(_socket, []), do: :ok
+
+  defp apply_operations(socket, operations) do
+    Enum.reduce_while(operations, :ok, fn {type, payload}, :ok ->
+      operation = build_operation(socket, type, payload)
+
+      case Server.apply_operation(socket.assigns.workflow.id, operation) do
+        {:ok, _result} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp build_operation(socket, type, payload) do
+    %{
+      id: UUID.generate(),
+      type: type,
+      payload: payload,
+      user_id: socket.assigns.current_user_id,
+      client_seq: nil
+    }
+  end
+
+  defp build_duplicate_steps(steps, step_ids, position_by_step_id) do
+    step_lookup = Map.new(steps, fn step -> {fetch_field(step, :id), step} end)
+
+    {new_steps, id_map, _existing_steps} =
+      Enum.reduce(step_ids, {[], %{}, steps}, fn step_id, {acc, id_map, existing_steps} ->
+        case Map.get(step_lookup, step_id) do
+          nil ->
+            {acc, id_map, existing_steps}
+
+          step ->
+            base_name = fetch_field(step, :name) || "Step"
+
+            {unique_name, new_step_id} =
+              Workflows.generate_unique_step_identity(existing_steps, base_name)
+
+            new_step = %{
+              id: new_step_id,
+              type_id: fetch_field(step, :type_id),
+              name: unique_name,
+              config: fetch_field(step, :config) || %{},
+              position:
+                resolve_duplicate_position(
+                  position_by_step_id,
+                  step_id,
+                  fetch_field(step, :position)
+                ),
+              notes: fetch_field(step, :notes)
+            }
+
+            {[new_step | acc], Map.put(id_map, step_id, new_step_id), [new_step | existing_steps]}
+        end
+      end)
+
+    {Enum.reverse(new_steps), id_map}
+  end
+
+  defp build_duplicate_connections(connections, step_ids, id_map) do
+    selected_ids = MapSet.new(step_ids)
+
+    connections
+    |> Enum.reduce([], fn conn, acc ->
+      target_id = fetch_field(conn, :target_step_id)
+
+      if MapSet.member?(selected_ids, target_id) do
+        source_id = fetch_field(conn, :source_step_id)
+        new_target = Map.get(id_map, target_id)
+        new_source = Map.get(id_map, source_id, source_id)
+
+        if new_target && new_source do
+          [
+            %{
+              id: UUID.generate(),
+              source_step_id: new_source,
+              target_step_id: new_target,
+              source_output: fetch_field(conn, :source_output) || "main",
+              target_input: fetch_field(conn, :target_input) || "main"
+            }
+            | acc
+          ]
+        else
+          acc
+        end
+      else
+        acc
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp resolve_duplicate_position(position_by_step_id, step_id, fallback_position) do
+    case fetch_field(position_by_step_id, step_id) do
+      %{} = position -> normalize_position(position)
+      _ -> offset_position(fallback_position)
+    end
+  end
+
+  defp normalize_position(position) when is_map(position) do
+    %{
+      x: fetch_field(position, :x) || 0,
+      y: fetch_field(position, :y) || 0
+    }
+  end
+
+  defp offset_position(position) do
+    normalized = normalize_position(position || %{})
+    %{x: normalized.x + 50, y: normalized.y + 50}
+  end
+
+  defp fetch_field(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, to_string(key))
+  end
+
+  defp fetch_field(_map, _key), do: nil
 
   defp apply_operation(socket, type, payload) do
     operation = %{

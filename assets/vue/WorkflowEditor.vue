@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, markRaw, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, markRaw, watch, nextTick } from 'vue';
+import { useLiveVue } from 'live_vue';
 import type {
   Node,
   Edge,
@@ -102,6 +103,10 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: 'add_step', payload: { type_id: string; position: { x: number; y: number } }): void;
+  (
+    e: 'duplicate_steps',
+    payload: { step_ids: string[]; position_by_step_id: Record<string, XYPosition> }
+  ): void;
   (e: 'update_step', payload: { step_id: string; changes: Partial<Step> }): void;
   (e: 'remove_step', payload: { step_id: string }): void;
   (e: 'move_step', payload: { step_id: string; position: { x: number; y: number } }): void;
@@ -144,6 +149,7 @@ const emit = defineEmits<{
 // =============================================================================
 
 const store = useClientStore();
+const live = useLiveVue();
 
 const {
   onPaneClick,
@@ -176,6 +182,20 @@ const isUpdatingSelection = ref(false);
 onMounted(() => {
   isMounted.value = true;
   syncDraftState();
+  window.addEventListener('keydown', handleGlobalKeydown);
+  live.handleEvent('duplicate_selection', payload => {
+    if (!payload || typeof payload !== 'object') return;
+    const data = payload as { step_ids?: string[] };
+    if (!Array.isArray(data.step_ids) || data.step_ids.length === 0) return;
+    pendingDuplicateSelection.value = data.step_ids;
+    nextTick(() => {
+      applyPendingDuplicateSelection();
+    });
+  });
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown);
 });
 
 const { layout, previousDirection } = useLayout();
@@ -206,6 +226,10 @@ const edgeTypes = {
 
 const clickTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const canvasRef = ref<HTMLElement | null>(null);
+const DUPLICATE_OFFSET: XYPosition = { x: 50, y: 50 };
+const clipboard = ref<{ stepIds: string[] } | null>(null);
+const clipboardPasteCount = ref(0);
+const pendingDuplicateSelection = ref<string[] | null>(null);
 
 // Consolidated interaction tracking (mouse + transient dragging)
 const emitInteraction = useThrottleFn(
@@ -297,6 +321,13 @@ watch(
   }
 );
 
+watch(
+  () => getNodes.value.map(node => node.id),
+  () => {
+    applyPendingDuplicateSelection();
+  }
+);
+
 const syncDraftState = async () => {
   if (!isMounted.value) return;
   isSyncingDraft.value = true;
@@ -378,6 +409,7 @@ const selectedCount = computed(() => getSelectedNodes.value.length);
 const tidyLabel = computed(() =>
   selectedCount.value > 1 ? 'Tidy Up Selection' : 'Tidy Up Workflow'
 );
+const canPaste = computed(() => (clipboard.value?.stepIds.length ?? 0) > 0);
 
 const isExecutionFailed = computed(() => props.execution?.status === 'failed');
 
@@ -422,7 +454,13 @@ const contextMenuItems = computed<MenuItem[]>(() => {
 
   return [
     { id: 'add-step', label: 'Add Step', icon: PlusIcon },
-    { id: 'paste', label: 'Paste', icon: ClipboardDocumentIcon, shortcut: '⌘V', disabled: true },
+    {
+      id: 'paste',
+      label: 'Paste',
+      icon: ClipboardDocumentIcon,
+      shortcut: '⌘V',
+      disabled: !canPaste.value,
+    },
     { id: 'divider-1', label: '', divider: true },
     { id: 'select-all', label: 'Select All', shortcut: '⌘A' },
     { id: 'tidy-layout', label: tidyLabel.value, icon: ArrowPathIcon },
@@ -577,6 +615,132 @@ const handleLayout = () => {
   applyLayoutPositions(normalizedLayout);
 };
 
+// =============================================================================
+// Clipboard & Duplication
+// =============================================================================
+
+const resolveActiveNodeIds = (fallbackNodeId?: string | null) => {
+  const selectedIds = getSelectedNodes.value.map(node => node.id);
+  if (selectedIds.length) return Array.from(new Set(selectedIds));
+  if (fallbackNodeId) return [fallbackNodeId];
+  if (store.selectedNodeId) return [store.selectedNodeId];
+  return [];
+};
+
+const buildPositionByStepId = (stepIds: string[], offset: XYPosition) => {
+  const nodeById = new Map(getNodes.value.map(node => [node.id, node]));
+  const positions: Record<string, XYPosition> = {};
+
+  for (const stepId of stepIds) {
+    const node = nodeById.get(stepId);
+    if (!node) continue;
+    positions[stepId] = {
+      x: node.position.x + offset.x,
+      y: node.position.y + offset.y,
+    };
+  }
+
+  return positions;
+};
+
+const emitDuplicateSteps = (stepIds: string[], offset: XYPosition) => {
+  if (!stepIds.length) return;
+  const positionByStepId = buildPositionByStepId(stepIds, offset);
+  emit('duplicate_steps', { step_ids: stepIds, position_by_step_id: positionByStepId });
+};
+
+const handleCopySteps = (stepIds: string[]) => {
+  if (!stepIds.length) return;
+  clipboard.value = { stepIds };
+  clipboardPasteCount.value = 0;
+};
+
+const handlePasteSteps = () => {
+  const stepIds = clipboard.value?.stepIds ?? [];
+  if (!stepIds.length) return;
+  clipboardPasteCount.value += 1;
+  emitDuplicateSteps(stepIds, {
+    x: DUPLICATE_OFFSET.x * clipboardPasteCount.value,
+    y: DUPLICATE_OFFSET.y * clipboardPasteCount.value,
+  });
+};
+
+const handleDuplicateSteps = (stepIds: string[]) => {
+  emitDuplicateSteps(stepIds, DUPLICATE_OFFSET);
+};
+
+const handleCutSteps = (stepIds: string[]) => {
+  if (!stepIds.length) return;
+  handleCopySteps(stepIds);
+  stepIds.forEach(requestNodeRemoval);
+};
+
+const applyDuplicateSelection = (stepIds: string[]) => {
+  if (!stepIds.length) return;
+  const idSet = new Set(stepIds);
+
+  isUpdatingSelection.value = true;
+  store.selectNode(stepIds.length === 1 ? stepIds[0] : null);
+
+  const nextNodes = getNodes.value.map(node => ({
+    ...node,
+    selected: idSet.has(node.id),
+  }));
+
+  setNodes(nextNodes);
+
+  nextTick(() => {
+    isUpdatingSelection.value = false;
+  });
+};
+
+const applyPendingDuplicateSelection = () => {
+  const pending = pendingDuplicateSelection.value;
+  if (!pending || pending.length === 0) return;
+
+  const existingIds = new Set(getNodes.value.map(node => node.id));
+  const allAvailable = pending.every(id => existingIds.has(id));
+  if (!allAvailable) return;
+
+  pendingDuplicateSelection.value = null;
+  applyDuplicateSelection(pending);
+};
+
+const isEditableTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select';
+};
+
+const handleGlobalKeydown = (event: KeyboardEvent) => {
+  if (event.repeat || isEditableTarget(event.target)) return;
+  if (!event.metaKey && !event.ctrlKey) return;
+
+  const key = event.key.toLowerCase();
+  if (key === 'c') {
+    const stepIds = resolveActiveNodeIds();
+    if (!stepIds.length) return;
+    event.preventDefault();
+    handleCopySteps(stepIds);
+    return;
+  }
+
+  if (key === 'v') {
+    if (!canPaste.value) return;
+    event.preventDefault();
+    handlePasteSteps();
+    return;
+  }
+
+  if (key === 'x') {
+    const stepIds = resolveActiveNodeIds();
+    if (!stepIds.length) return;
+    event.preventDefault();
+    handleCutSteps(stepIds);
+  }
+};
+
 const handleNodeClick = (event: { node: Node<StepNodeData> }) => {
   const node = event.node;
 
@@ -659,15 +823,16 @@ const handleContextMenuSelect = (itemId: string) => {
       if (nodeId) requestNodeRemoval(nodeId);
       break;
     case 'duplicate':
-      if (nodeId) {
-        const node = nodes.value.find(n => n.id === nodeId);
-        if (node && node.data?.type_id) {
-          emit('add_step', {
-            type_id: node.data.type_id,
-            position: { x: node.position.x + 50, y: node.position.y + 50 },
-          });
-        }
-      }
+      handleDuplicateSteps(resolveActiveNodeIds(nodeId));
+      break;
+    case 'copy':
+      handleCopySteps(resolveActiveNodeIds(nodeId));
+      break;
+    case 'cut':
+      handleCutSteps(resolveActiveNodeIds(nodeId));
+      break;
+    case 'paste':
+      handlePasteSteps();
       break;
     case 'toggle-disable':
       if (nodeId) {
