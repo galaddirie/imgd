@@ -115,6 +115,7 @@ export interface StepNodeData {
     name: string;
     color: string;
   }>;
+  onRunNode?: (stepId: string) => void;
 }
 
 export interface EdgeData {

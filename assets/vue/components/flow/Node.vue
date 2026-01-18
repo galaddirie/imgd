@@ -29,6 +29,7 @@ import {
   CheckIcon,
   ExclamationCircleIcon,
   ClockIcon,
+  PlayIcon,
   ForwardIcon,
   PauseIcon,
   BookmarkIcon,
@@ -238,6 +239,17 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false);
 
 <template>
   <div class="relative inline-flex">
+    <!-- Run Node Button -->
+    <button
+      class="absolute -top-3 left-1/2 z-20 flex size-6 -translate-x-1/2 items-center justify-center rounded-full border border-base-300 bg-base-100 shadow-sm transition hover:-translate-y-0.5 hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50"
+      :disabled="data.disabled"
+      aria-label="Run node"
+      title="Run node"
+      @click.stop="data.onRunNode?.(props.id)"
+    >
+      <PlayIcon class="text-base-content/70 size-3.5" />
+    </button>
+
     <!-- Input Handle -->
     <div
       v-if="showInputHandle"

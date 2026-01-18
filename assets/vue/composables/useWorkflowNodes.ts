@@ -18,6 +18,7 @@ interface UseWorkflowNodesOptions {
   editorState: () => EditorState | undefined;
   presences: () => UserPresence[];
   currentUserId: () => string | undefined;
+  onRunNode?: (stepId: string) => void;
 }
 
 export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
@@ -115,6 +116,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const editorState = options.editorState();
     const presences = options.presences();
     const currentUserId = options.currentUserId();
+    const onRunNode = options.onRunNode;
 
     return steps.map(step => {
       const stepType = stepTypes[step.type_id];
@@ -200,6 +202,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           pinned: isPinned,
           locked_by: lockedBy,
           selected_by: selectedBy,
+          onRunNode,
         } satisfies StepNodeData,
       };
     });

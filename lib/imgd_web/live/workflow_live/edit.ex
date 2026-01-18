@@ -167,6 +167,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:disable_step={JS.push("disable_step")}
           v-on:enable_step={JS.push("enable_step")}
           v-on:run_test={JS.push("run_test")}
+          v-on:run_node={JS.push("run_node")}
           v-on:cancel_execution={JS.push("cancel_execution")}
           v-on:preview_expression={JS.push("preview_expression")}
           v-on:toggle_webhook_test={JS.push("toggle_webhook_test")}
@@ -360,6 +361,17 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
       {:error, reason, socket} ->
         {:noreply, put_flash(socket, :error, "Failed to start test: #{reason}")}
+    end
+  end
+
+  @impl true
+  def handle_event("run_node", %{"step_id" => step_id}, socket) do
+    case start_partial_execution(socket, step_id) do
+      {:ok, socket} ->
+        {:noreply, put_flash(socket, :info, "Partial execution started")}
+
+      {:error, reason, socket} ->
+        {:noreply, put_flash(socket, :error, "Failed to run node: #{reason}")}
     end
   end
 
@@ -923,14 +935,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         execution_type: :preview,
         trigger: %{type: :manual, data: trigger_data},
         metadata: %{
-          extras: %{
-            preview: true,
-            request: %{
-              "request_id" => "mock-request-" <> UUID.generate(),
-              "headers" => %{"user-agent" => "Imgd Editor (Preview)"},
-              "body" => %{}
-            }
-          }
+          extras:
+            build_editor_execution_extras(%{
+              preview: true
+            })
         }
       }
 
@@ -972,6 +980,74 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
+  defp start_partial_execution(socket, step_id) do
+    socket = unsubscribe_execution(socket)
+
+    workflow = socket.assigns.workflow
+    scope = socket.assigns.current_scope
+
+    {draft, editor_state} =
+      fetch_session_state(
+        workflow.id,
+        workflow.draft,
+        socket.assigns.editor_state
+      )
+
+    workflow = %{workflow | draft: draft}
+
+    socket =
+      socket
+      |> assign(:workflow, workflow)
+      |> assign(:editor_state, editor_state)
+
+    if is_nil(draft) do
+      {:error, "workflow draft missing", socket}
+    else
+      preview_draft = build_preview_draft(draft, editor_state)
+
+      with {:ok, partial_draft} <- build_partial_draft(preview_draft, step_id),
+           {:ok, execution} <-
+             create_partial_execution(workflow.id, scope, partial_draft, step_id) do
+        try do
+          with :ok <- subscribe_execution(scope, execution.id),
+               {:ok, _pid} <-
+                 start_execution_process(execution.id,
+                   step_outputs: editor_state.pinned_outputs || %{},
+                   source: partial_draft
+                 ) do
+            step_executions = build_initial_step_executions(execution.id, partial_draft.steps)
+
+            socket =
+              socket
+              |> assign(:execution, execution)
+              |> assign(:execution_id, execution.id)
+              |> assign(:step_executions, step_executions)
+
+            {:ok, socket}
+          else
+            {:error, reason} ->
+              _ = Executions.update_execution_status(scope, execution, :failed, error: reason)
+              {:error, format_execution_error(reason), socket}
+          end
+        rescue
+          e ->
+            Logger.error("Crash during partial execution setup: #{inspect(e)}",
+              stacktrace: __STACKTRACE__
+            )
+
+            _ = Executions.update_execution_status(scope, execution, :failed, error: e)
+            {:error, "Crash during setup: #{inspect(e)}", socket}
+        end
+      else
+        {:error, :step_not_found} ->
+          {:error, "step not found or disabled", socket}
+
+        {:error, reason} ->
+          {:error, format_execution_error(reason), socket}
+      end
+    end
+  end
+
   defp find_trigger_data(draft) do
     # Find the first manual_input step and extract its trigger_data config
     manual_input_step =
@@ -994,6 +1070,25 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
+  defp create_partial_execution(workflow_id, scope, draft, step_id) do
+    trigger_data = find_trigger_data(draft)
+
+    attrs = %{
+      workflow_id: workflow_id,
+      execution_type: :partial,
+      trigger: %{type: :manual, data: trigger_data},
+      metadata: %{
+        extras:
+          build_editor_execution_extras(%{
+            partial: true,
+            target_step_id: step_id
+          })
+      }
+    }
+
+    Executions.create_execution(scope, attrs)
+  end
+
   defp build_preview_draft(draft, %EditorState{} = editor_state) do
     disabled_steps = editor_state.disabled_steps || MapSet.new()
 
@@ -1011,6 +1106,29 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       end)
 
     %{draft | steps: steps, connections: connections}
+  end
+
+  defp build_partial_draft(draft, step_id) do
+    steps = draft.steps || []
+    connections = draft.connections || []
+    graph = Imgd.Graph.from_workflow!(steps, connections, validate: false)
+
+    if Imgd.Graph.has_vertex?(graph, step_id) do
+      upstream = Imgd.Graph.upstream(graph, step_id)
+      keep_ids = MapSet.new([step_id | upstream])
+
+      filtered_steps = Enum.filter(steps, &MapSet.member?(keep_ids, &1.id))
+
+      filtered_connections =
+        Enum.filter(connections, fn conn ->
+          MapSet.member?(keep_ids, conn.source_step_id) and
+            MapSet.member?(keep_ids, conn.target_step_id)
+        end)
+
+      {:ok, %{draft | steps: filtered_steps, connections: filtered_connections}}
+    else
+      {:error, :step_not_found}
+    end
   end
 
   defp build_initial_step_executions(execution_id, steps) do
@@ -1036,6 +1154,18 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         inserted_at: now
       }
     end)
+  end
+
+  defp build_editor_execution_extras(extra_attrs) when is_map(extra_attrs) do
+    Map.merge(%{request: build_mock_request()}, extra_attrs)
+  end
+
+  defp build_mock_request do
+    %{
+      "request_id" => "mock-request-" <> UUID.generate(),
+      "headers" => %{"user-agent" => "Imgd Editor (Preview)"},
+      "body" => %{}
+    }
   end
 
   defp subscribe_execution(scope, execution_id) do

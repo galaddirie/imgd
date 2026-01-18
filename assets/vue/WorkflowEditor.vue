@@ -125,6 +125,7 @@ const emit = defineEmits<{
   (e: 'disable_step', payload: { step_id: string; mode: 'skip' | 'exclude' }): void;
   (e: 'enable_step', payload: { step_id: string }): void;
   (e: 'run_test', payload?: { step_ids?: string[] }): void;
+  (e: 'run_node', payload: { step_id: string }): void;
   (e: 'cancel_execution'): void;
   (e: 'save_workflow'): void;
   (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void;
@@ -200,6 +201,8 @@ onBeforeUnmount(() => {
 
 const { layout, previousDirection } = useLayout();
 
+const handleRunNode = (stepId: string) => emit('run_node', { step_id: stepId });
+
 const { nodes } = useWorkflowNodes({
   workflow: () => props.workflow,
   stepTypes: () => props.stepTypes,
@@ -207,6 +210,7 @@ const { nodes } = useWorkflowNodes({
   editorState: () => props.editorState,
   presences: () => props.presences,
   currentUserId: () => props.currentUserId,
+  onRunNode: stepId => handleRunNode(stepId),
 });
 
 const { edges } = useWorkflowEdges({
@@ -861,6 +865,7 @@ const handleContextMenuSelect = (itemId: string) => {
       handleLayout();
       break;
     case 'run-from':
+      if (nodeId) handleRunNode(nodeId);
       break;
   }
 
