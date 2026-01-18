@@ -15,7 +15,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
   import Imgd.ChangesetHelpers
 
   alias Imgd.Workflows.Workflow
-  alias Imgd.Workflows.Embeds.{Step, Connection}
+  alias Imgd.Workflows.Embeds.{Step, Connection, NodeGroup}
   alias Imgd.Accounts.User
 
   @type t :: %__MODULE__{
@@ -24,6 +24,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
           source_hash: String.t(),
           steps: [Step.t()],
           connections: [Connection.t()],
+          groups: [NodeGroup.t()],
           changelog: String.t() | nil,
           published_at: DateTime.t() | nil,
           published_by: Ecto.UUID.t() | nil,
@@ -42,6 +43,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
 
     embeds_many :steps, Step, on_replace: :delete
     embeds_many :connections, Connection, on_replace: :delete
+    embeds_many :groups, NodeGroup, on_replace: :delete
 
     field :changelog, :string
 
@@ -66,6 +68,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
     ])
     |> cast_embed(:steps, required: true)
     |> cast_embed(:connections)
+    |> cast_embed(:groups)
     |> validate_required([:version_tag, :workflow_id, :source_hash])
     |> validate_version_tag()
     |> validate_hex_hash(:source_hash, length: 64)
@@ -85,11 +88,12 @@ defmodule Imgd.Workflows.WorkflowVersion do
   Computes a content hash for the given steps and connections.
   Used to detect changes between versions.
   """
-  def compute_source_hash(steps, connections) do
+  def compute_source_hash(steps, connections, groups \\ []) do
     content =
       %{
         steps: normalize_for_hash(steps),
-        connections: normalize_for_hash(connections)
+        connections: normalize_for_hash(connections),
+        groups: normalize_for_hash(groups)
       }
       |> Jason.encode!()
 
@@ -106,6 +110,9 @@ defmodule Imgd.Workflows.WorkflowVersion do
 
       %Connection{} = conn ->
         Map.take(conn, [:id, :source_step_id, :source_output, :target_step_id, :target_input])
+
+      %NodeGroup{} = group ->
+        Map.take(group, [:id, :name, :step_ids, :output_step_id, :collapsed])
 
       item when is_map(item) ->
         Map.drop(item, [:position, :__struct__, :__meta__])

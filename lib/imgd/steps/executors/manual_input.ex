@@ -10,6 +10,11 @@ defmodule Imgd.Steps.Executors.ManualInput do
   @config_schema %{
     "type" => "object",
     "properties" => %{
+      "input_schema" => %{
+        "type" => "object",
+        "title" => "Input Schema",
+        "description" => "JSON Schema describing expected input data"
+      },
       "trigger_data" => %{
         "type" => "string",
         "title" => "Trigger Data (JSON)",
@@ -24,5 +29,10 @@ defmodule Imgd.Steps.Executors.ManualInput do
   @impl true
   def execute(_config, input, _context) do
     {:ok, input}
+  end
+
+  @impl true
+  def effective_output_schema(config) do
+    Map.get(config, "input_schema") || @output_schema
   end
 end

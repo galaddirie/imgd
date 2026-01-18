@@ -35,8 +35,8 @@ defmodule Imgd.Collaboration.EditSession.IntegrationTest do
         },
         %{
           id: "output_step",
-          type_id: "data_output",
-          name: "Data Output",
+          type_id: "workflow_output",
+          name: "Workflow Output",
           position: %{x: 500, y: 100}
         }
       ],

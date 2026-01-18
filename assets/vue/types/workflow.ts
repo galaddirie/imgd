@@ -23,6 +23,7 @@ export interface WorkflowDraft {
   workflow_id: string;
   steps: Step[];
   connections: Connection[];
+  groups: NodeGroup[];
   triggers: Trigger[];
   settings: Record<string, unknown>;
 }
@@ -42,6 +43,15 @@ export interface Connection {
   source_output: string;
   target_step_id: string;
   target_input: string;
+}
+
+export interface NodeGroup {
+  id: string;
+  name: string;
+  step_ids: string[];
+  output_step_id: string;
+  position: { x?: number; y?: number; width?: number; height?: number };
+  collapsed: boolean;
 }
 
 export interface Trigger {
@@ -121,6 +131,15 @@ export interface StepNodeData {
 export interface EdgeData {
   animated?: boolean;
 }
+
+export interface GroupNodeData {
+  id: string;
+  name: string;
+  step_ids: string[];
+  collapsed: boolean;
+}
+
+export type WorkflowNodeData = StepNodeData | GroupNodeData;
 
 // =============================================================================
 // Execution Types

@@ -382,7 +382,11 @@ defmodule Imgd.Collaboration.EditSession.Server do
              :update_step_position,
              :update_step_metadata,
              :add_connection,
-             :remove_connection
+             :remove_connection,
+             :add_group,
+             :update_group,
+             :remove_group,
+             :set_group_membership
            ] ->
         {:ok, new_draft} = Operations.apply(draft, operation)
 
@@ -536,9 +540,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
       step.type_id == "webhook_trigger" &&
         normalize_path(Map.get(step.config, "path") || Map.get(step.config, :path) || step.id) ==
           path &&
-        normalize_method(
-          Map.get(step.config, "http_method") || Map.get(step.config, :http_method)
-        ) == method
+        method_matches?(
+          Map.get(step.config, "http_method") || Map.get(step.config, :http_method),
+          method
+        )
     end)
   end
 
@@ -549,7 +554,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
     normalized_method = normalize_method(method)
 
     if webhook_test.path == normalized_path &&
-         normalize_method(webhook_test.method) == normalized_method do
+         method_matches?(webhook_test.method, normalized_method) do
       {:ok, webhook_test}
     else
       :error
@@ -578,6 +583,13 @@ defmodule Imgd.Collaboration.EditSession.Server do
       "" -> "POST"
       trimmed -> String.upcase(trimmed)
     end
+  end
+
+  defp method_matches?(configured_method, incoming_method) do
+    normalized_config = normalize_method(configured_method)
+    normalized_incoming = normalize_method(incoming_method)
+
+    normalized_config == "ANY" or normalized_config == normalized_incoming
   end
 
   defp schedule_webhook_test_timer(state, webhook_test) do

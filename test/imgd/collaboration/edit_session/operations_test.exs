@@ -3,7 +3,7 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
 
   alias Imgd.Collaboration.EditSession.Operations
   alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.{Step, Connection}
+  alias Imgd.Workflows.Embeds.{Step, Connection, NodeGroup}
 
   describe "validate/2" do
     setup do
@@ -219,6 +219,69 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
       assert {:error, {:connection_not_found, "conn_999"}} = Operations.validate(draft, operation)
     end
 
+    test "validates add_group operation successfully", %{draft: draft} do
+      operation = %{
+        type: :add_group,
+        payload: %{
+          group: %{
+            id: "group_1",
+            name: "Group 1",
+            step_ids: ["step_1"],
+            position: %{x: 50, y: 50, width: 200, height: 120}
+          }
+        }
+      }
+
+      assert :ok = Operations.validate(draft, operation)
+    end
+
+    test "rejects add_group when steps are missing", %{draft: draft} do
+      operation = %{
+        type: :add_group,
+        payload: %{
+          group: %{
+            id: "group_1",
+            name: "Group 1",
+            step_ids: ["missing_step"],
+            position: %{x: 50, y: 50}
+          }
+        }
+      }
+
+      assert {:error, {:group_steps_not_found, ["missing_step"]}} =
+               Operations.validate(draft, operation)
+    end
+
+    test "validates set_group_membership operation", %{draft: draft} do
+      draft_with_group = %{
+        draft
+        | groups: [
+            %NodeGroup{
+              id: "group_1",
+              name: "Group 1",
+              step_ids: ["step_1"],
+              output_step_id: "step_1"
+            }
+          ]
+      }
+
+      operation = %{
+        type: :set_group_membership,
+        payload: %{group_id: "group_1", step_ids: ["step_2"]}
+      }
+
+      assert :ok = Operations.validate(draft_with_group, operation)
+    end
+
+    test "rejects set_group_membership for missing group", %{draft: draft} do
+      operation = %{
+        type: :set_group_membership,
+        payload: %{group_id: "missing_group", step_ids: ["step_1"]}
+      }
+
+      assert {:error, {:group_not_found, "missing_group"}} = Operations.validate(draft, operation)
+    end
+
     test "validates editor operations without draft validation", %{draft: draft} do
       # Editor operations don't need draft validation
       operations = [
@@ -406,6 +469,111 @@ defmodule Imgd.Collaboration.EditSession.OperationsTest do
 
       assert {:ok, new_draft} = Operations.apply(draft_with_conn, operation)
       assert new_draft.connections == []
+    end
+
+    test "applies add_group operation and updates step positions" do
+      draft = %WorkflowDraft{
+        workflow_id: Ecto.UUID.generate(),
+        steps: [
+          %Step{id: "step_1", type_id: "http_request", name: "HTTP Request"},
+          %Step{id: "step_2", type_id: "debug", name: "Debug Step"}
+        ],
+        connections: [],
+        groups: []
+      }
+
+      operation = %{
+        type: :add_group,
+        payload: %{
+          group: %{
+            id: "group_1",
+            name: "Group 1",
+            step_ids: ["step_1", "step_2"],
+            position: %{x: 100, y: 100, width: 300, height: 200}
+          },
+          step_positions: %{
+            "step_1" => %{x: 10, y: 20},
+            "step_2" => %{x: 40, y: 60}
+          }
+        }
+      }
+
+      assert {:ok, new_draft} = Operations.apply(draft, operation)
+      assert [%NodeGroup{} = group] = new_draft.groups
+      assert group.step_ids == ["step_1", "step_2"]
+      assert group.output_step_id in group.step_ids
+
+      step_1 = Enum.find(new_draft.steps, &(&1.id == "step_1"))
+      step_2 = Enum.find(new_draft.steps, &(&1.id == "step_2"))
+      assert step_1.position == %{x: 10, y: 20}
+      assert step_2.position == %{x: 40, y: 60}
+    end
+
+    test "applies set_group_membership operation" do
+      draft = %WorkflowDraft{
+        workflow_id: Ecto.UUID.generate(),
+        steps: [
+          %Step{id: "step_1", type_id: "http_request", name: "HTTP Request"},
+          %Step{id: "step_2", type_id: "debug", name: "Debug Step"}
+        ],
+        connections: [],
+        groups: [
+          %NodeGroup{
+            id: "group_1",
+            name: "Group 1",
+            step_ids: ["step_1"],
+            output_step_id: "step_1"
+          }
+        ]
+      }
+
+      operation = %{
+        type: :set_group_membership,
+        payload: %{
+          group_id: "group_1",
+          step_ids: ["step_2"],
+          step_positions: %{"step_2" => %{x: 24, y: 32}}
+        }
+      }
+
+      assert {:ok, new_draft} = Operations.apply(draft, operation)
+      group = Enum.find(new_draft.groups, &(&1.id == "group_1"))
+      assert Enum.sort(group.step_ids) == ["step_1", "step_2"]
+
+      step_2 = Enum.find(new_draft.steps, &(&1.id == "step_2"))
+      assert step_2.position == %{x: 24, y: 32}
+    end
+
+    test "applies remove_group operation and offsets step positions" do
+      draft = %WorkflowDraft{
+        workflow_id: Ecto.UUID.generate(),
+        steps: [
+          %Step{
+            id: "step_1",
+            type_id: "http_request",
+            name: "HTTP Request",
+            position: %{x: 10, y: 20}
+          }
+        ],
+        connections: [],
+        groups: [
+          %NodeGroup{
+            id: "group_1",
+            name: "Group 1",
+            step_ids: ["step_1"],
+            output_step_id: "step_1",
+            position: %{x: 100, y: 200}
+          }
+        ]
+      }
+
+      operation = %{type: :remove_group, payload: %{group_id: "group_1"}}
+
+      assert {:ok, new_draft} = Operations.apply(draft, operation)
+      assert new_draft.groups == []
+
+      step = Enum.find(new_draft.steps, &(&1.id == "step_1"))
+      assert step.position == %{x: 110, y: 220}
     end
   end
 

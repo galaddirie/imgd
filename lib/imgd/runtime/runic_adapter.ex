@@ -7,6 +7,8 @@ defmodule Imgd.Runtime.RunicAdapter do
   alias Runic.Component
   alias Runic.Workflow
   alias Runic.Workflow.FanOut
+  alias Imgd.Runtime.ExecutionContext
+  alias Imgd.Runtime.Hooks.Observability
   alias Imgd.Runtime.Steps.StepRunner
 
   @type source :: Imgd.Workflows.WorkflowDraft.t() | map()
@@ -23,12 +25,21 @@ defmodule Imgd.Runtime.RunicAdapter do
   @spec to_runic_workflow(source(), build_opts()) :: Workflow.t()
   def to_runic_workflow(source, opts \\ []) do
     step_outputs = Keyword.get(opts, :step_outputs, Keyword.get(opts, :pinned_outputs, %{}))
+    steps = source.steps || []
+    connections = source.connections || []
+    groups = Map.get(source, :groups) || []
 
-    graph = Imgd.Graph.from_workflow!(source.steps, source.connections, validate: false)
+    group_lookup = build_group_lookup(groups)
+    group_by_id = Map.new(groups, &{&1.id, &1})
+
+    {outer_steps, outer_connections} =
+      build_outer_graph(steps, connections, group_lookup, group_by_id)
+
+    graph = Imgd.Graph.from_workflow!(outer_steps, outer_connections, validate: false)
     upstream_lookup = build_upstream_lookup(graph)
 
     # Build step map for looking up step data by ID
-    step_map = Map.new(source.steps, &{&1.id, &1})
+    step_map = Map.new(outer_steps, &{&1.id, &1})
 
     step_opts = [
       execution_id: Keyword.get(opts, :execution_id),
@@ -39,16 +50,17 @@ defmodule Imgd.Runtime.RunicAdapter do
       upstream_lookup: upstream_lookup,
       trigger_data: Keyword.get(opts, :trigger_data, %{}),
       trigger_type: Keyword.get(opts, :trigger_type),
-      default_compute: Keyword.get(opts, :default_compute)
+      default_compute: Keyword.get(opts, :default_compute),
+      all_groups: groups
     ]
 
     wrk = Workflow.new(name: "execution_#{extract_source_id(source)}")
-    parent_lookup = build_parent_lookup(source.connections)
-    sorted_steps = topological_sort_steps(source.steps, source.connections)
+    parent_lookup = build_parent_lookup(outer_connections)
+    sorted_steps = topological_sort_steps(outer_steps, outer_connections)
 
     # Build splitter lookup to detect fan-out paths
     splitter_ids =
-      source.steps
+      outer_steps
       |> Enum.filter(&(&1.type_id == "splitter"))
       |> Enum.map(& &1.id)
       |> MapSet.new()
@@ -63,11 +75,16 @@ defmodule Imgd.Runtime.RunicAdapter do
 
     wrk =
       Enum.reduce(sorted_steps, wrk, fn step, acc ->
-        add_step_to_workflow(step, acc, parent_lookup, step_opts)
+        if step.type_id == "node_group" do
+          group = Map.fetch!(group_by_id, step.id)
+          add_group_to_workflow(group, steps, connections, acc, parent_lookup, step_opts)
+        else
+          add_step_to_workflow(step, acc, parent_lookup, step_opts)
+        end
       end)
 
     wrk
-    |> put_step_metadata(source.steps)
+    |> put_step_metadata(outer_steps, groups)
     |> track_all_fan_out_paths()
   end
 
@@ -92,6 +109,89 @@ defmodule Imgd.Runtime.RunicAdapter do
 
       _ ->
         StepRunner.create(step, opts)
+    end
+  end
+
+  # ===========================================================================
+  # Group Helpers
+  # ===========================================================================
+
+  defp build_group_lookup(groups) do
+    groups
+    |> Enum.flat_map(fn group -> Enum.map(group.step_ids || [], &{&1, group}) end)
+    |> Map.new()
+  end
+
+  defp build_outer_graph(steps, connections, group_lookup, group_by_id) do
+    ungrouped_steps = Enum.reject(steps, &Map.has_key?(group_lookup, &1.id))
+
+    group_steps =
+      group_by_id
+      |> Map.values()
+      |> Enum.map(&group_step_from_group/1)
+
+    outer_steps = ungrouped_steps ++ group_steps
+    outer_connections = build_outer_connections(connections, group_lookup)
+
+    {outer_steps, outer_connections}
+  end
+
+  defp group_step_from_group(group) do
+    %Imgd.Workflows.Embeds.Step{
+      id: group.id,
+      type_id: "node_group",
+      name: group.name || group.id,
+      config: %{},
+      position: Map.get(group, :position) || %{},
+      notes: nil
+    }
+  end
+
+  defp build_outer_connections(connections, group_lookup) do
+    connections
+    |> Enum.reduce([], fn conn, acc ->
+      source_id = connection_field(conn, :source_step_id)
+      target_id = connection_field(conn, :target_step_id)
+      source_group = Map.get(group_lookup, source_id)
+      target_group = Map.get(group_lookup, target_id)
+
+      cond do
+        source_group && target_group && source_group.id == target_group.id ->
+          acc
+
+        true ->
+          new_source = if source_group, do: source_group.id, else: source_id
+          new_target = if target_group, do: target_group.id, else: target_id
+
+          updated =
+            conn
+            |> update_connection(%{source_step_id: new_source, target_step_id: new_target})
+
+          [updated | acc]
+      end
+    end)
+    |> Enum.reverse()
+    |> Enum.uniq_by(&connection_identity/1)
+  end
+
+  defp connection_identity(conn) do
+    {
+      connection_field(conn, :source_step_id),
+      connection_field(conn, :target_step_id),
+      connection_field(conn, :source_output),
+      connection_field(conn, :target_input)
+    }
+  end
+
+  defp connection_field(conn, key) when is_map(conn) do
+    Map.get(conn, key) || Map.get(conn, Atom.to_string(key))
+  end
+
+  defp update_connection(conn, attrs) when is_map(conn) do
+    if Map.has_key?(conn, :__struct__) do
+      struct(conn, attrs)
+    else
+      Map.merge(conn, attrs)
     end
   end
 
@@ -211,6 +311,132 @@ defmodule Imgd.Runtime.RunicAdapter do
   # ===========================================================================
   # Private: Workflow Building
   # ===========================================================================
+
+  defp add_group_to_workflow(group, steps, connections, workflow, parent_lookup, step_opts) do
+    group_step_ids = MapSet.new(group.step_ids || [])
+
+    group_steps =
+      Enum.filter(steps, fn step ->
+        MapSet.member?(group_step_ids, step.id)
+      end)
+
+    group_connections =
+      Enum.filter(connections, fn conn ->
+        source_id = connection_field(conn, :source_step_id)
+        target_id = connection_field(conn, :target_step_id)
+
+        MapSet.member?(group_step_ids, source_id) and
+          MapSet.member?(group_step_ids, target_id)
+      end)
+
+    group_component =
+      build_group_component(group, group_steps, group_connections, step_opts)
+
+    group_parents = Map.get(parent_lookup, group.id, [])
+    connect_component(workflow, group_component, group_parents, step_opts)
+  end
+
+  defp build_group_component(group, group_steps, group_connections, step_opts) do
+    runic_step =
+      Runic.step(
+        fn input ->
+          execute_group(group, group_steps, group_connections, input, step_opts)
+        end,
+        name: group.id
+      )
+
+    unique_hash = :erlang.phash2({runic_step.hash, group.id}, 4_294_967_296)
+    %{runic_step | hash: unique_hash}
+  end
+
+  defp execute_group(group, group_steps, group_connections, input, parent_opts) do
+    outer_outputs = Process.get(:imgd_accumulated_outputs, %{})
+    outer_step_outputs = Process.get(:imgd_step_outputs, %{})
+    outer_step_skipped = Process.get(:imgd_step_skipped)
+    outer_fan_out_context = Process.get(:imgd_fan_out_context)
+
+    Process.put(:imgd_accumulated_outputs, %{})
+    Process.put(:imgd_step_outputs, %{})
+    Process.delete(:imgd_step_skipped)
+    Process.delete(:imgd_fan_out_context)
+
+    group_opts =
+      parent_opts
+      |> Keyword.put(:step_outputs, %{})
+      |> Keyword.put(:trigger_data, input)
+      |> Keyword.put(:current_group, group)
+
+    group_workflow =
+      build_group_workflow(group, group_steps, group_connections, group_opts)
+      |> Observability.attach_all_hooks(
+        execution_id: Keyword.get(parent_opts, :execution_id),
+        workflow_id: Keyword.get(parent_opts, :workflow_id),
+        skip_production_init: true
+      )
+
+    result_workflow = Workflow.react_until_satisfied(group_workflow, input)
+    output = extract_group_output(result_workflow, group.output_step_id)
+
+    updated_outputs = Map.put(outer_outputs, group.id, output)
+    Process.put(:imgd_accumulated_outputs, updated_outputs)
+    Process.put(:imgd_step_outputs, outer_step_outputs)
+
+    if is_nil(outer_step_skipped) do
+      Process.delete(:imgd_step_skipped)
+    else
+      Process.put(:imgd_step_skipped, outer_step_skipped)
+    end
+
+    if is_nil(outer_fan_out_context) do
+      Process.delete(:imgd_fan_out_context)
+    else
+      Process.put(:imgd_fan_out_context, outer_fan_out_context)
+    end
+
+    output
+  end
+
+  defp build_group_workflow(group, steps, connections, opts) do
+    graph = Imgd.Graph.from_workflow!(steps, connections, validate: false)
+    upstream_lookup = build_upstream_lookup(graph)
+    step_map = Map.new(steps, &{&1.id, &1})
+
+    step_opts =
+      opts
+      |> Keyword.put(:upstream_lookup, upstream_lookup)
+      |> Keyword.put(:all_groups, [])
+
+    wrk = Workflow.new(name: "group_#{group.id}")
+    parent_lookup = build_parent_lookup(connections)
+    sorted_steps = topological_sort_steps(steps, connections)
+
+    splitter_ids =
+      steps
+      |> Enum.filter(&(&1.type_id == "splitter"))
+      |> Enum.map(& &1.id)
+      |> MapSet.new()
+
+    fan_out_path_lookup = build_fan_out_path_lookup(graph, splitter_ids, step_map)
+
+    step_opts =
+      step_opts
+      |> Keyword.put(:splitter_ids, splitter_ids)
+      |> Keyword.put(:fan_out_path_lookup, fan_out_path_lookup)
+
+    wrk =
+      Enum.reduce(sorted_steps, wrk, fn step, acc ->
+        add_step_to_workflow(step, acc, parent_lookup, step_opts)
+      end)
+
+    wrk
+    |> put_step_metadata(steps)
+    |> track_all_fan_out_paths()
+  end
+
+  defp extract_group_output(workflow, output_step_id) do
+    ctx = ExecutionContext.from_runic_workflow(workflow)
+    ExecutionContext.get_output(ctx, output_step_id)
+  end
 
   defp add_step_to_workflow(step, workflow, parent_lookup, step_opts) do
     component_name = step.id
@@ -483,7 +709,9 @@ defmodule Imgd.Runtime.RunicAdapter do
     do_kahn_sort(new_rest, new_in_degrees, adjacency, [id | sorted])
   end
 
-  defp put_step_metadata(workflow, steps) when is_list(steps) do
+  defp put_step_metadata(workflow, steps, groups \\ [])
+
+  defp put_step_metadata(workflow, steps, groups) when is_list(steps) do
     step_metadata =
       Enum.reduce(steps, %{}, fn step, acc ->
         Map.put(acc, step.id, %{
@@ -493,10 +721,20 @@ defmodule Imgd.Runtime.RunicAdapter do
         })
       end)
 
+    step_metadata =
+      Enum.reduce(groups, step_metadata, fn group, acc ->
+        Map.put(acc, group.id, %{
+          type_id: "node_group",
+          step_id: group.id,
+          name: group.name || group.id,
+          skip_observability: true
+        })
+      end)
+
     Map.put(workflow, :__step_metadata__, step_metadata)
   end
 
-  defp put_step_metadata(workflow, _steps), do: workflow
+  defp put_step_metadata(workflow, _steps, _groups), do: workflow
 
   # ===========================================================================
   # Private: Component Creation

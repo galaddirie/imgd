@@ -153,7 +153,7 @@ defmodule Imgd.Workflows do
         where: w.status == :active,
         where:
           fragment(
-            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
+            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR s->'config'->>'http_method' = 'ANY' OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
             v.steps,
             ^path,
             ^method,
@@ -177,7 +177,7 @@ defmodule Imgd.Workflows do
         join: d in assoc(w, :draft),
         where:
           fragment(
-            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
+            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR s->'config'->>'http_method' = 'ANY' OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
             d.steps,
             ^path,
             ^method,
@@ -308,7 +308,7 @@ defmodule Imgd.Workflows do
 
         draft =
           workflow.draft ||
-            %WorkflowDraft{steps: [], connections: [], settings: %{}}
+            %WorkflowDraft{steps: [], connections: [], groups: [], settings: %{}}
 
         workflow_attrs = %{
           name: "Copy of #{workflow.name}",
@@ -324,6 +324,7 @@ defmodule Imgd.Workflows do
         draft_attrs = %{
           steps: Enum.map(draft.steps || [], &Map.from_struct/1),
           connections: Enum.map(draft.connections || [], &Map.from_struct/1),
+          groups: Enum.map(draft.groups || [], &Map.from_struct/1),
           settings: draft.settings || %{}
         }
 
@@ -360,6 +361,11 @@ defmodule Imgd.Workflows do
         # Get the current draft
         draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
 
+        case Imgd.Workflows.Validator.validate(draft) do
+          :ok -> :ok
+          {:error, errors} -> Repo.rollback({:invalid_workflow, errors})
+        end
+
         # Create new version from draft
         version_attrs =
           version_attrs
@@ -367,6 +373,7 @@ defmodule Imgd.Workflows do
           |> Map.put(:source_hash, compute_source_hash(draft))
           |> Map.put(:steps, Enum.map(draft.steps, &Map.from_struct/1))
           |> Map.put(:connections, Enum.map(draft.connections || [], &Map.from_struct/1))
+          |> Map.put(:groups, Enum.map(draft.groups || [], &Map.from_struct/1))
           |> Map.put(:published_by, scope.user.id)
 
         {:ok, version} =
@@ -686,6 +693,7 @@ defmodule Imgd.Workflows do
     data = %{
       steps: draft.steps,
       connections: draft.connections,
+      groups: draft.groups,
       settings: draft.settings
     }
 
@@ -700,7 +708,8 @@ defmodule Imgd.Workflows do
     %{
       draft
       | steps: draft.steps || [],
-        connections: draft.connections || []
+        connections: draft.connections || [],
+        groups: draft.groups || []
     }
   end
 end

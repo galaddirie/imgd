@@ -242,6 +242,7 @@ defmodule Imgd.Steps.Registry do
       Imgd.Steps.Executors.DataFilter,
       Imgd.Steps.Executors.DataTransform,
       Imgd.Steps.Executors.DataOutput,
+      Imgd.Steps.Executors.WorkflowOutput,
       Imgd.Steps.Executors.Condition,
       Imgd.Steps.Executors.Switch,
       Imgd.Steps.Executors.Format,

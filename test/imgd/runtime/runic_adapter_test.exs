@@ -3,7 +3,8 @@ defmodule Imgd.Runtime.RunicAdapterTest do
 
   alias Runic.Workflow
   alias Imgd.Runtime.RunicAdapter
-  alias Imgd.Workflows.Embeds.{Connection, Step}
+  alias Imgd.Runtime.Hooks.Observability
+  alias Imgd.Workflows.Embeds.{Connection, NodeGroup, Step}
 
   describe "to_runic_workflow/2" do
     test "respects dependency order even when steps are unordered" do
@@ -18,7 +19,10 @@ defmodule Imgd.Runtime.RunicAdapterTest do
         ]
       }
 
-      workflow = RunicAdapter.to_runic_workflow(source)
+      workflow =
+        source
+        |> RunicAdapter.to_runic_workflow()
+        |> Observability.attach_all_hooks(execution_id: "test_exec", workflow_id: "grouped_wf")
 
       result =
         workflow
@@ -149,6 +153,66 @@ defmodule Imgd.Runtime.RunicAdapterTest do
 
       assert [1, 2] in child_a_outputs
       assert [1, 2] in child_b_outputs
+    end
+
+    test "exposes group output as a composite step" do
+      source = %{
+        id: "grouped_wf",
+        steps: [
+          %Step{
+            id: "inner_math",
+            type_id: "math",
+            name: "Inner Math",
+            config: %{"operation" => "abs", "value" => -2}
+          },
+          %Step{
+            id: "inner_output",
+            type_id: "workflow_output",
+            name: "Group Output",
+            config: %{}
+          },
+          %Step{
+            id: "outer_math",
+            type_id: "math",
+            name: "Outer Math",
+            config: %{
+              "operation" => "add",
+              "value" => "{{ json }}",
+              "operand" => 3
+            }
+          }
+        ],
+        connections: [
+          %Connection{id: "c1", source_step_id: "inner_math", target_step_id: "inner_output"},
+          %Connection{id: "c2", source_step_id: "inner_output", target_step_id: "outer_math"}
+        ],
+        groups: [
+          %NodeGroup{
+            id: "group_1",
+            name: "Group 1",
+            step_ids: ["inner_math", "inner_output"],
+            output_step_id: "inner_output",
+            position: %{},
+            collapsed: false
+          }
+        ]
+      }
+
+      Process.put(:imgd_accumulated_outputs, %{})
+      Process.delete(:imgd_step_outputs)
+
+      workflow =
+        source
+        |> RunicAdapter.to_runic_workflow()
+        |> Observability.attach_all_hooks(execution_id: "test_exec", workflow_id: "grouped_wf")
+
+      result =
+        workflow
+        |> Workflow.react_until_satisfied(%{})
+        |> Workflow.raw_productions()
+
+      assert 5 in result
+      assert Process.get(:imgd_accumulated_outputs, %{})["group_1"] == 2
     end
   end
 

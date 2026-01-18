@@ -30,7 +30,9 @@ defmodule Imgd.Runtime.Steps.StepRunner do
           metadata: map(),
           step_outputs: map(),
           trigger_data: map(),
-          trigger_type: atom()
+          trigger_type: atom(),
+          current_group: map(),
+          all_groups: [map()]
         ]
 
   @doc """
@@ -186,7 +188,10 @@ defmodule Imgd.Runtime.Steps.StepRunner do
     dynamic_outputs = Process.get(:imgd_step_outputs, %{})
 
     # Merge: dynamic outputs take precedence (they're fresh), then pinned
-    step_outputs = Map.merge(pinned_outputs, dynamic_outputs)
+    step_outputs =
+      pinned_outputs
+      |> Map.merge(dynamic_outputs)
+      |> maybe_filter_group_outputs(opts)
 
     # Filter outputs to only include upstream steps
     upstream_ids = Map.get(Keyword.get(opts, :upstream_lookup, %{}), step.id, [])
@@ -205,6 +210,25 @@ defmodule Imgd.Runtime.Steps.StepRunner do
       trigger: Keyword.get(opts, :trigger_data, %{}),
       trigger_type: Keyword.get(opts, :trigger_type)
     )
+  end
+
+  defp maybe_filter_group_outputs(step_outputs, opts) do
+    case Keyword.get(opts, :current_group) do
+      nil ->
+        groups = Keyword.get(opts, :all_groups, [])
+
+        hidden_step_ids =
+          groups
+          |> Enum.flat_map(& &1.step_ids)
+          |> MapSet.new()
+
+        Map.reject(step_outputs, fn {step_id, _} ->
+          MapSet.member?(hidden_step_ids, step_id)
+        end)
+
+      _group ->
+        step_outputs
+    end
   end
 
   defp evaluate_config(config, ctx) when is_map(config) do

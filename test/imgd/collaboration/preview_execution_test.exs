@@ -38,8 +38,8 @@ defmodule Imgd.Collaboration.PreviewExecutionTest do
         },
         %{
           id: "output_step",
-          type_id: "data_output",
-          name: "Data Output",
+          type_id: "workflow_output",
+          name: "Workflow Output",
           position: %{x: 700, y: 100}
         }
       ],

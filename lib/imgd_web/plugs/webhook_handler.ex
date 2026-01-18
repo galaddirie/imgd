@@ -130,10 +130,10 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
         step.type_id == "webhook_trigger" &&
           normalize_path(Map.get(step.config, "path") || Map.get(step.config, :path) || step.id) ==
             normalized_path &&
-          normalize_method(
-            Map.get(step.config, "http_method") || Map.get(step.config, :http_method)
-          ) ==
+          method_matches?(
+            Map.get(step.config, "http_method") || Map.get(step.config, :http_method),
             normalized_method
+          )
       end)
 
     if step, do: step.config || %{}, else: %{}
@@ -271,6 +271,13 @@ defmodule ImgdWeb.Plugs.WebhookHandler do
       "" -> "POST"
       trimmed -> String.upcase(trimmed)
     end
+  end
+
+  defp method_matches?(configured_method, incoming_method) do
+    normalized_config = normalize_method(configured_method)
+    normalized_incoming = normalize_method(incoming_method)
+
+    normalized_config == "ANY" or normalized_config == normalized_incoming
   end
 
   defp handle_creation_error(conn, :access_denied) do

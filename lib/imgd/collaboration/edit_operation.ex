@@ -12,6 +12,10 @@ defmodule Imgd.Collaboration.EditOperation do
           | :update_step_metadata
           | :add_connection
           | :remove_connection
+          | :add_group
+          | :update_group
+          | :remove_group
+          | :set_group_membership
           | :pin_step_output
           | :unpin_step_output
           | :disable_step
@@ -30,7 +34,11 @@ defmodule Imgd.Collaboration.EditOperation do
         :update_step_position,
         :update_step_metadata,
         :add_connection,
-        :remove_connection
+        :remove_connection,
+        :add_group,
+        :update_group,
+        :remove_group,
+        :set_group_membership
       ]
 
     field :payload, :map

@@ -23,6 +23,7 @@ import StepConfigModal from './components/flow/StepConfigModal.vue';
 import EditorToolbar from './components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from './components/flow/ExecutionTracePanel.vue';
 import WorkflowStepNode from './components/flow/Node.vue';
+import GroupNode from './components/flow/GroupNode.vue';
 import CustomEdge from './components/flow/Edge.vue';
 import ContextMenu from './components/ui/ContextMenu.vue';
 import CollaborativeCursors from './components/flow/CollaborativeCursors.vue';
@@ -33,6 +34,7 @@ import { useWorkflowGraph } from './composables/useWorkflowGraph';
 import { useWorkflowNodes } from './composables/useWorkflowNodes';
 import {
   CURSOR_THROTTLE_MS,
+  DEFAULT_GROUP_DIMENSIONS,
   DEFAULT_NODE_DIMENSIONS,
   DEFAULT_VIEWPORT,
   DOUBLE_CLICK_DELAY_MS,
@@ -56,6 +58,8 @@ import {
   ClipboardDocumentIcon,
   ScissorsIcon,
   ArrowPathIcon,
+  RectangleGroupIcon,
+  FolderMinusIcon,
 } from '@heroicons/vue/24/outline';
 import type {
   Workflow,
@@ -63,6 +67,8 @@ import type {
   StepType,
   NodeLibraryItem,
   StepNodeData,
+  GroupNodeData,
+  WorkflowNodeData,
   EdgeData,
   Execution,
   StepExecution,
@@ -102,10 +108,47 @@ const props = withDefaults(defineProps<Props>(), {
 // =============================================================================
 
 const emit = defineEmits<{
-  (e: 'add_step', payload: { type_id: string; position: { x: number; y: number } }): void;
+  (
+    e: 'add_step',
+    payload: { type_id: string; position: { x: number; y: number }; group_id?: string | null }
+  ): void;
+  (
+    e: 'add_group',
+    payload: {
+      name?: string;
+      step_ids: string[];
+      position: { x: number; y: number; width: number; height: number };
+      step_positions?: Record<string, XYPosition>;
+    }
+  ): void;
+  (
+    e: 'update_group',
+    payload: {
+      group_id: string;
+      changes: {
+        name?: string;
+        position?: { x?: number; y?: number; width?: number; height?: number };
+        collapsed?: boolean;
+        output_step_id?: string;
+      };
+    }
+  ): void;
+  (e: 'remove_group', payload: { group_id: string }): void;
+  (
+    e: 'set_group_membership',
+    payload: {
+      group_id?: string | null;
+      step_ids: string[];
+      step_positions?: Record<string, XYPosition>;
+    }
+  ): void;
   (
     e: 'duplicate_steps',
-    payload: { step_ids: string[]; position_by_step_id: Record<string, XYPosition> }
+    payload: {
+      step_ids: string[];
+      position_by_step_id: Record<string, XYPosition>;
+      group_id_by_step_id?: Record<string, string>;
+    }
   ): void;
   (e: 'update_step', payload: { step_id: string; changes: Partial<Step> }): void;
   (e: 'remove_step', payload: { step_id: string }): void;
@@ -178,6 +221,7 @@ const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
 const isMounted = ref(false);
 const isSyncingDraft = ref(false);
 const pendingNodeRemovalIds = new Set<string>();
+const pendingGroupRemovalIds = new Set<string>();
 const pendingEdgeRemovalIds = new Set<string>();
 const isUpdatingSelection = ref(false);
 onMounted(() => {
@@ -222,15 +266,27 @@ const { stepNameById, upstreamStepIdsByStepId } = useWorkflowGraph(() => props.w
 
 const nodeTypes = {
   step: markRaw(WorkflowStepNode),
+  group: markRaw(GroupNode),
 };
 
 const edgeTypes = {
   custom: markRaw(CustomEdge as any),
 };
 
+const groupByStepId = computed(() => {
+  const map = new Map<string, string>();
+  for (const group of props.workflow.draft?.groups || []) {
+    for (const stepId of group.step_ids || []) {
+      map.set(stepId, group.id);
+    }
+  }
+  return map;
+});
+
 const clickTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const canvasRef = ref<HTMLElement | null>(null);
 const DUPLICATE_OFFSET: XYPosition = { x: 50, y: 50 };
+const GROUP_PADDING = 60;
 const clipboard = ref<{ stepIds: string[] } | null>(null);
 const clipboardPasteCount = ref(0);
 const pendingDuplicateSelection = ref<string[] | null>(null);
@@ -242,6 +298,14 @@ const emitInteraction = useThrottleFn(
   },
   CURSOR_THROTTLE_MS
 );
+
+const isGroupNode = (
+  node: GraphNode<WorkflowNodeData> | Node<WorkflowNodeData>
+): node is GraphNode<GroupNodeData> => node.type === 'group';
+
+const isStepNode = (
+  node: GraphNode<WorkflowNodeData> | Node<WorkflowNodeData>
+): node is GraphNode<StepNodeData> => node.type === 'step';
 
 const getFlowPositionFromEvent = (point: { clientX: number; clientY: number }) => {
   if (!canvasRef.value) return null;
@@ -264,11 +328,129 @@ const handlePaneMouseMove = (event: MouseEvent) => {
   }
 };
 
+const getAbsoluteNodePosition = (node: GraphNode<WorkflowNodeData>) => {
+  return node.computedPosition ?? node.position;
+};
+
+const findGroupAtPoint = (point: XYPosition) => {
+  const groupNodes = getNodes.value.filter(isGroupNode);
+  for (const node of [...groupNodes].reverse()) {
+    const { width, height } = node.dimensions;
+    const position = getAbsoluteNodePosition(node);
+    if (
+      width > 0 &&
+      height > 0 &&
+      point.x >= position.x &&
+      point.x <= position.x + width &&
+      point.y >= position.y &&
+      point.y <= position.y + height
+    ) {
+      return node;
+    }
+  }
+  return null;
+};
+
+const buildGroupBounds = (groupNodes: GraphNode<WorkflowNodeData>[]) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const node of groupNodes) {
+    if (!isStepNode(node)) continue;
+    const position = getAbsoluteNodePosition(node);
+    const width = node.dimensions.width || DEFAULT_NODE_DIMENSIONS.width;
+    const height = node.dimensions.height || DEFAULT_NODE_DIMENSIONS.height;
+
+    minX = Math.min(minX, position.x);
+    minY = Math.min(minY, position.y);
+    maxX = Math.max(maxX, position.x + width);
+    maxY = Math.max(maxY, position.y + height);
+  }
+
+  if (!isFinite(minX) || !isFinite(minY)) return null;
+
+  const paddedWidth = maxX - minX + GROUP_PADDING * 2;
+  const paddedHeight = maxY - minY + GROUP_PADDING * 2;
+
+  return {
+    x: minX - GROUP_PADDING,
+    y: minY - GROUP_PADDING,
+    width: Math.max(paddedWidth, DEFAULT_GROUP_DIMENSIONS.width),
+    height: Math.max(paddedHeight, DEFAULT_GROUP_DIMENSIONS.height),
+  };
+};
+
+const buildGroupName = () => {
+  const existingNames = new Set(
+    (props.workflow.draft?.groups || [])
+      .map(group => group.name)
+      .filter((name): name is string => !!name)
+  );
+
+  if (!existingNames.has('Group')) return 'Group';
+
+  let index = 2;
+  let candidate = `Group ${index}`;
+  while (existingNames.has(candidate)) {
+    index += 1;
+    candidate = `Group ${index}`;
+  }
+  return candidate;
+};
+
+const buildRelativePositions = (
+  nodes: GraphNode<WorkflowNodeData>[],
+  groupNode: GraphNode<GroupNodeData>
+) => {
+  const positions: Record<string, XYPosition> = {};
+  const groupPosition = getAbsoluteNodePosition(groupNode);
+
+  nodes.forEach(node => {
+    if (!isStepNode(node)) return;
+    const absolute = getAbsoluteNodePosition(node);
+    positions[node.id] = {
+      x: absolute.x - groupPosition.x,
+      y: absolute.y - groupPosition.y,
+    };
+  });
+
+  return positions;
+};
+
+const buildAbsolutePositions = (nodes: GraphNode<WorkflowNodeData>[]) => {
+  const positions: Record<string, XYPosition> = {};
+  nodes.forEach(node => {
+    if (!isStepNode(node)) return;
+    const absolute = getAbsoluteNodePosition(node);
+    positions[node.id] = { x: absolute.x, y: absolute.y };
+  });
+  return positions;
+};
+
+const emitGroupPositionUpdate = (groupNode: GraphNode<GroupNodeData>) => {
+  const width = groupNode.dimensions.width || DEFAULT_GROUP_DIMENSIONS.width;
+  const height = groupNode.dimensions.height || DEFAULT_GROUP_DIMENSIONS.height;
+
+  emit('update_group', {
+    group_id: groupNode.id,
+    changes: {
+      position: {
+        x: groupNode.position.x,
+        y: groupNode.position.y,
+        width,
+        height,
+      },
+    },
+  });
+};
+
 // Track transient node positions during drag
 const handleNodeDrag = (event: {
   event: MouseEvent | TouchEvent;
-  node: Node<StepNodeData>;
-  nodes: Node<StepNodeData>[];
+  node: Node<WorkflowNodeData>;
+  nodes: Node<WorkflowNodeData>[];
 }) => {
   // Get mouse position from drag event
   const mouseEvent = 'clientX' in event.event ? event.event : event.event.touches[0];
@@ -277,10 +459,12 @@ const handleNodeDrag = (event: {
 
   const dragging_steps: Record<string, XYPosition> = {};
   event.nodes.forEach(node => {
+    if (!isStepNode(node)) return;
     dragging_steps[node.id] = node.position;
   });
 
-  emitInteraction(flowPosition.x, flowPosition.y, dragging_steps);
+  const hasDraggingSteps = Object.keys(dragging_steps).length > 0;
+  emitInteraction(flowPosition.x, flowPosition.y, hasDraggingSteps ? dragging_steps : null);
 };
 
 onNodeDrag(handleNodeDrag);
@@ -290,8 +474,8 @@ onNodeDrag(handleNodeDrag);
 // =============================================================================
 
 // Track selection changes and emit to server
-const handleSelectionChange = ({ nodes }: { nodes: Node<StepNodeData>[] }) => {
-  const selectedIds = nodes.map(n => n.id);
+const handleSelectionChange = ({ nodes }: { nodes: Node<WorkflowNodeData>[] }) => {
+  const selectedIds = nodes.filter(isStepNode).map(n => n.id);
   // Update local store selection to match VueFlow's selection
   isUpdatingSelection.value = true;
   store.selectNode(selectedIds.length === 1 ? selectedIds[0] : null);
@@ -303,7 +487,7 @@ const handleSelectionChange = ({ nodes }: { nodes: Node<StepNodeData>[] }) => {
 watch(
   () => getSelectedNodes.value,
   newSelection => {
-    const selectedIds = newSelection.map(n => n.id);
+    const selectedIds = newSelection.filter(isStepNode).map(n => n.id);
     emit('selection_changed', { step_ids: selectedIds });
   },
   { deep: true }
@@ -339,12 +523,13 @@ const syncDraftState = async () => {
   setEdges(edges.value);
   await nextTick();
   pendingNodeRemovalIds.clear();
+  pendingGroupRemovalIds.clear();
   pendingEdgeRemovalIds.clear();
   isSyncingDraft.value = false;
 };
 
 watch(
-  () => [props.workflow.draft?.steps, props.workflow.draft?.connections],
+  () => [props.workflow.draft?.steps, props.workflow.draft?.connections, props.workflow.draft?.groups],
   () => {
     syncDraftState();
   },
@@ -358,7 +543,13 @@ onNodesChange(((changes: NodeChange[]) => {
 
   for (const change of changes) {
     if (change.type === 'remove') {
-      if (!pendingNodeRemovalIds.has(change.id)) {
+      const removedNode = getNodes.value.find(node => node.id === change.id);
+      if (removedNode && isGroupNode(removedNode)) {
+        if (!pendingGroupRemovalIds.has(change.id)) {
+          pendingGroupRemovalIds.add(change.id);
+          emit('remove_group', { group_id: change.id });
+        }
+      } else if (!pendingNodeRemovalIds.has(change.id)) {
         pendingNodeRemovalIds.add(change.id);
         emit('remove_step', { step_id: change.id });
       }
@@ -400,7 +591,9 @@ onEdgesChange(((changes: EdgeChange[]) => {
 
 const selectedNode = computed<Node<StepNodeData> | null>(() => {
   if (!store.selectedNodeId) return null;
-  return nodes.value.find(n => n.id === store.selectedNodeId) || null;
+  const node = nodes.value.find(n => n.id === store.selectedNodeId);
+  if (!node || node.type !== 'step') return null;
+  return node as Node<StepNodeData>;
 });
 
 const selectedStepType = computed<StepType | null>(() => {
@@ -427,18 +620,49 @@ const otherUserPresences = computed(() => {
   return props.presences.filter(p => p.user.id !== props.currentUserId);
 });
 
+const selectedStepNodes = computed(() => getSelectedNodes.value.filter(isStepNode));
+const selectedStepIds = computed(() => selectedStepNodes.value.map(node => node.id));
+const canGroupSelection = computed(() => selectedStepIds.value.length > 0);
+const canUngroupSelection = computed(() =>
+  selectedStepIds.value.some(stepId => groupByStepId.value.has(stepId))
+);
+
 const contextMenuItems = computed<MenuItem[]>(() => {
   const targetType = store.contextMenu.targetType;
   const targetNodeId = store.contextMenu.targetNodeId;
 
   if (targetType === 'node' && targetNodeId) {
     const node = nodes.value.find(n => n.id === targetNodeId);
+    if (node?.type === 'group') {
+      return [
+        { id: 'delete-group', label: 'Remove Group', icon: TrashIcon, danger: true },
+      ];
+    }
+
     const isDisabled = node?.data?.disabled;
     const isPinned = node?.data?.pinned;
+    const groupItems: MenuItem[] = [];
+    if (canGroupSelection.value) {
+      groupItems.push({
+        id: 'group-selection',
+        label: 'Group Selection',
+        icon: RectangleGroupIcon,
+        shortcut: '⌘G',
+      });
+    }
+    if (canUngroupSelection.value) {
+      groupItems.push({
+        id: 'ungroup-selection',
+        label: 'Remove from Group',
+        icon: FolderMinusIcon,
+      });
+    }
 
     return [
       { id: 'edit', label: 'Edit Step', icon: Cog6ToothIcon, shortcut: 'Enter' },
       { id: 'run-from', label: 'Run from Here', icon: PlayIcon },
+      ...(groupItems.length ? [{ id: 'divider-groups', label: '', divider: true }] : []),
+      ...groupItems,
       { id: 'divider-1', label: '', divider: true },
       { id: 'tidy-layout', label: tidyLabel.value, icon: ArrowPathIcon },
       { id: 'duplicate', label: 'Duplicate', icon: DocumentDuplicateIcon, shortcut: '⌘D' },
@@ -472,6 +696,47 @@ const contextMenuItems = computed<MenuItem[]>(() => {
   ];
 });
 
+const createGroupFromSelection = () => {
+  const selectedNodes = selectedStepNodes.value;
+  if (selectedNodes.length === 0) return;
+
+  const bounds = buildGroupBounds(selectedNodes);
+  if (!bounds) return;
+
+  const stepIds = selectedNodes.map(node => node.id);
+  const stepPositions: Record<string, XYPosition> = {};
+
+  selectedNodes.forEach(node => {
+    const absolute = getAbsoluteNodePosition(node);
+    stepPositions[node.id] = {
+      x: absolute.x - bounds.x,
+      y: absolute.y - bounds.y,
+    };
+  });
+
+  emit('add_group', {
+    name: buildGroupName(),
+    step_ids: stepIds,
+    position: bounds,
+    step_positions: stepPositions,
+  });
+};
+
+const ungroupSelectedSteps = () => {
+  const selectedNodes = selectedStepNodes.value;
+  if (selectedNodes.length === 0) return;
+
+  emit('set_group_membership', {
+    group_id: null,
+    step_ids: selectedNodes.map(node => node.id),
+    step_positions: buildAbsolutePositions(selectedNodes),
+  });
+};
+
+const removeGroup = (groupId: string) => {
+  emit('remove_group', { group_id: groupId });
+};
+
 // =============================================================================
 // Validation & Event Handlers (unchanged from original)
 // =============================================================================
@@ -501,6 +766,7 @@ type LayoutNode = {
   sourcePosition?: Position;
   dimensions?: { width: number; height: number };
   data?: StepNodeData;
+  parentNode?: string;
 };
 
 type LayoutBounds = { minX: number; minY: number; maxX: number; maxY: number };
@@ -593,11 +859,16 @@ const applyLayoutPositions = (layoutNodes: LayoutNode[]) => {
 };
 
 const handleLayout = () => {
-  const currentNodes = getNodes.value as unknown as LayoutNode[];
+  const currentNodes = getNodes.value.filter(isStepNode) as unknown as LayoutNode[];
   if (!currentNodes.length) return;
 
-  const selectedNodes = getSelectedNodes.value as unknown as LayoutNode[];
+  const selectedNodes = getSelectedNodes.value.filter(isStepNode) as unknown as LayoutNode[];
   const nodesToLayout = selectedNodes.length > 1 ? selectedNodes : currentNodes;
+  const parentGroupIds = new Set(nodesToLayout.map(node => node.parentNode || null));
+  if (parentGroupIds.size > 1) {
+    console.warn('Layout skipped: selection spans multiple groups.');
+    return;
+  }
   const nodeIds = new Set(nodesToLayout.map(node => node.id));
 
   const edgesToLayout = getEdges.value.filter(
@@ -624,9 +895,12 @@ const handleLayout = () => {
 // =============================================================================
 
 const resolveActiveNodeIds = (fallbackNodeId?: string | null) => {
-  const selectedIds = getSelectedNodes.value.map(node => node.id);
+  const selectedIds = getSelectedNodes.value.filter(isStepNode).map(node => node.id);
   if (selectedIds.length) return Array.from(new Set(selectedIds));
-  if (fallbackNodeId) return [fallbackNodeId];
+  if (fallbackNodeId) {
+    const fallbackNode = nodes.value.find(node => node.id === fallbackNodeId);
+    if (fallbackNode?.type === 'step') return [fallbackNodeId];
+  }
   if (store.selectedNodeId) return [store.selectedNodeId];
   return [];
 };
@@ -647,10 +921,26 @@ const buildPositionByStepId = (stepIds: string[], offset: XYPosition) => {
   return positions;
 };
 
+const buildGroupIdsByStepId = (stepIds: string[]) => {
+  const groupIds: Record<string, string> = {};
+  for (const stepId of stepIds) {
+    const groupId = groupByStepId.value.get(stepId);
+    if (groupId) {
+      groupIds[stepId] = groupId;
+    }
+  }
+  return groupIds;
+};
+
 const emitDuplicateSteps = (stepIds: string[], offset: XYPosition) => {
   if (!stepIds.length) return;
   const positionByStepId = buildPositionByStepId(stepIds, offset);
-  emit('duplicate_steps', { step_ids: stepIds, position_by_step_id: positionByStepId });
+  const groupIds = buildGroupIdsByStepId(stepIds);
+  emit('duplicate_steps', {
+    step_ids: stepIds,
+    position_by_step_id: positionByStepId,
+    group_id_by_step_id: Object.keys(groupIds).length ? groupIds : undefined,
+  });
 };
 
 const handleCopySteps = (stepIds: string[]) => {
@@ -742,10 +1032,24 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
     if (!stepIds.length) return;
     event.preventDefault();
     handleCutSteps(stepIds);
+    return;
+  }
+
+  if (key === 'g') {
+    if (event.shiftKey) {
+      if (!canUngroupSelection.value) return;
+      event.preventDefault();
+      ungroupSelectedSteps();
+      return;
+    }
+
+    if (!canGroupSelection.value) return;
+    event.preventDefault();
+    createGroupFromSelection();
   }
 };
 
-const handleNodeClick = (event: { node: Node<StepNodeData> }) => {
+const handleNodeClick = (event: { node: Node<WorkflowNodeData> }) => {
   const node = event.node;
 
   if (clickTimer.value) {
@@ -754,22 +1058,28 @@ const handleNodeClick = (event: { node: Node<StepNodeData> }) => {
   }
 
   clickTimer.value = setTimeout(() => {
-    store.selectNode(node.id);
+    if (node.type === 'step') {
+      store.selectNode(node.id);
+    } else {
+      store.selectNode(null);
+    }
     clickTimer.value = null;
   }, DOUBLE_CLICK_DELAY_MS);
 };
 
-const handleNodeDoubleClick = (event: { node: Node<StepNodeData> }) => {
+const handleNodeDoubleClick = (event: { node: Node<WorkflowNodeData> }) => {
   if (clickTimer.value) {
     clearTimeout(clickTimer.value);
     clickTimer.value = null;
   }
-  store.openConfigModal(event.node.id);
+  if (event.node.type === 'step') {
+    store.openConfigModal(event.node.id);
+  }
 };
 
-type SelectionContextMenuEvent = { event: MouseEvent; nodes: GraphNode<StepNodeData>[] };
+type SelectionContextMenuEvent = { event: MouseEvent; nodes: GraphNode<WorkflowNodeData>[] };
 
-const findNodeUnderCursor = (event: MouseEvent, nodes: GraphNode<StepNodeData>[]) => {
+const findNodeUnderCursor = (event: MouseEvent, nodes: GraphNode<WorkflowNodeData>[]) => {
   const flowElement = (vueFlowRef.value?.$el as HTMLElement | undefined) ?? canvasRef.value;
   if (!flowElement) return null;
   const { left, top } = flowElement.getBoundingClientRect();
@@ -820,6 +1130,15 @@ const handleContextMenuSelect = (itemId: string) => {
   const nodeId = store.contextMenu.targetNodeId;
 
   switch (itemId) {
+    case 'group-selection':
+      createGroupFromSelection();
+      break;
+    case 'ungroup-selection':
+      ungroupSelectedSteps();
+      break;
+    case 'delete-group':
+      if (nodeId) removeGroup(nodeId);
+      break;
     case 'edit':
       if (nodeId) store.openConfigModal(nodeId);
       break;
@@ -885,7 +1204,20 @@ const handleDrop = (event: DragEvent) => {
 
   const position = getFlowPositionFromEvent(event);
   if (position) {
-    emit('add_step', { type_id: typeId, position });
+    const targetGroup = findGroupAtPoint(position);
+    if (targetGroup) {
+      const groupPosition = getAbsoluteNodePosition(targetGroup);
+      emit('add_step', {
+        type_id: typeId,
+        position: {
+          x: position.x - groupPosition.x,
+          y: position.y - groupPosition.y,
+        },
+        group_id: targetGroup.id,
+      });
+    } else {
+      emit('add_step', { type_id: typeId, position });
+    }
   }
 };
 
@@ -939,15 +1271,84 @@ const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
   });
 };
 
-onNodeDragStop((event: { nodes: Node<StepNodeData>[] }) => {
+onNodeDragStop((event: { event: MouseEvent | TouchEvent; nodes: GraphNode<WorkflowNodeData>[] }) => {
   // Clear transient drag positions and emit final positions for persistence
   // We can just emit null for dragging_steps to clear it.
   // For now, we use 0,0 for the cursor as it will be updated by the next mousemove anyway.
   emitInteraction(0, 0, null);
 
-  for (const node of event.nodes) {
+  const draggedStepNodes = event.nodes.filter(isStepNode);
+  const draggedGroupNodes = event.nodes.filter(isGroupNode);
+
+  draggedGroupNodes.forEach(groupNode => {
+    emitGroupPositionUpdate(groupNode);
+  });
+
+  let handledStepIds = new Set<string>();
+  let targetGroupId: string | null = null;
+
+  if (draggedStepNodes.length > 0) {
+    const pointerEvent =
+      'clientX' in event.event
+        ? event.event
+        : event.event.changedTouches?.[0] ?? event.event.touches?.[0] ?? null;
+    const shiftKey = 'shiftKey' in event.event ? event.event.shiftKey : false;
+
+    if (shiftKey) {
+      const stepIds = draggedStepNodes.map(node => node.id);
+      const hasGroupedSteps = stepIds.some(stepId => groupByStepId.value.has(stepId));
+
+      if (hasGroupedSteps) {
+        emit('set_group_membership', {
+          group_id: null,
+          step_ids: stepIds,
+          step_positions: buildAbsolutePositions(draggedStepNodes),
+        });
+        handledStepIds = new Set(stepIds);
+      }
+    } else if (pointerEvent) {
+      const flowPosition = getFlowPositionFromEvent(pointerEvent);
+      const targetGroup = flowPosition ? findGroupAtPoint(flowPosition) : null;
+
+      if (targetGroup) {
+        targetGroupId = targetGroup.id;
+        const membershipChanged = draggedStepNodes.some(
+          node => groupByStepId.value.get(node.id) !== targetGroupId
+        );
+
+        if (membershipChanged) {
+          const stepIds = draggedStepNodes.map(node => node.id);
+          emit('set_group_membership', {
+            group_id: targetGroupId,
+            step_ids: stepIds,
+            step_positions: buildRelativePositions(draggedStepNodes, targetGroup),
+          });
+          handledStepIds = new Set(stepIds);
+        }
+      }
+    }
+  }
+
+  for (const node of draggedStepNodes) {
+    if (handledStepIds.has(node.id)) continue;
     emit('move_step', { step_id: node.id, position: node.position });
   }
+
+  const affectedGroupIds = new Set<string>();
+  draggedStepNodes.forEach(node => {
+    const groupId = groupByStepId.value.get(node.id);
+    if (groupId) affectedGroupIds.add(groupId);
+  });
+  if (targetGroupId) {
+    affectedGroupIds.add(targetGroupId);
+  }
+
+  affectedGroupIds.forEach(groupId => {
+    const groupNode = getNodes.value.find(node => node.id === groupId);
+    if (groupNode && isGroupNode(groupNode)) {
+      emitGroupPositionUpdate(groupNode);
+    }
+  });
 });
 
 const handleSaveConfig = (payload: {

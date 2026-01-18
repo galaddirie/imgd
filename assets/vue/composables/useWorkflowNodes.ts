@@ -2,6 +2,7 @@ import { computed } from 'vue';
 import type { Node, XYPosition } from '@vue-flow/core';
 
 import { generateColor } from '@/lib/color';
+import { DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
 import type {
   Workflow,
   StepType,
@@ -9,6 +10,8 @@ import type {
   EditorState,
   UserPresence,
   StepNodeData,
+  GroupNodeData,
+  WorkflowNodeData,
 } from '@/types/workflow';
 
 interface UseWorkflowNodesOptions {
@@ -108,8 +111,9 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     return positions;
   });
 
-  const nodes = computed<Node<StepNodeData>[]>(() => {
+  const nodes = computed<Node<WorkflowNodeData>[]>(() => {
     const steps = options.workflow().draft?.steps || [];
+    const groups = options.workflow().draft?.groups || [];
     const stepTypes = stepTypeById.value;
     const stepExecutions = stepExecutionByStepId.value;
     const itemStats = stepItemStatsByStepId.value;
@@ -118,7 +122,48 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const currentUserId = options.currentUserId();
     const onRunNode = options.onRunNode;
 
-    return steps.map(step => {
+    const groupByStepId = new Map<string, string>();
+    const groupNodes: Node<GroupNodeData>[] = groups.map(group => {
+      const position = group.position || {};
+      const width =
+        typeof position.width === 'number' && position.width > 0
+          ? position.width
+          : DEFAULT_GROUP_DIMENSIONS.width;
+      const height =
+        typeof position.height === 'number' && position.height > 0
+          ? position.height
+          : DEFAULT_GROUP_DIMENSIONS.height;
+
+      for (const stepId of group.step_ids || []) {
+        groupByStepId.set(stepId, group.id);
+      }
+
+      return {
+        id: group.id,
+        type: 'group',
+        position: {
+          x: typeof position.x === 'number' ? position.x : 0,
+          y: typeof position.y === 'number' ? position.y : 0,
+        },
+        data: {
+          id: group.id,
+          name: group.name || 'Group',
+          step_ids: group.step_ids || [],
+          collapsed: !!group.collapsed,
+        },
+        style: {
+          width: `${width}px`,
+          height: `${height}px`,
+        },
+        draggable: true,
+        selectable: true,
+        connectable: false,
+        deletable: false,
+        zIndex: 0,
+      } satisfies Node<GroupNodeData>;
+    });
+
+    const stepNodes = steps.map(step => {
       const stepType = stepTypes[step.type_id];
       const stepExecution = stepExecutions[step.id];
       const stepItemStats = itemStats[step.id];
@@ -126,6 +171,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       const isPinned = editorState?.pinned_outputs?.[step.id] !== undefined;
       const isDisabled = editorState?.disabled_steps?.includes(step.id);
       const lockedBy = editorState?.step_locks?.[step.id];
+      const parentGroupId = groupByStepId.get(step.id);
 
       const selectedBy = presences
         .filter(p => p.user.id !== currentUserId && p.selected_steps?.includes(step.id))
@@ -181,6 +227,9 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         id: step.id,
         type: 'step',
         position: transientPositions.value[step.id] || step.position,
+        parentNode: parentGroupId,
+        expandParent: parentGroupId ? true : undefined,
+        zIndex: parentGroupId ? 10 : 1,
         data: {
           id: step.id,
           type_id: step.type_id,
@@ -206,6 +255,8 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         } satisfies StepNodeData,
       };
     });
+
+    return groupNodes.concat(stepNodes);
   });
 
   return { nodes, transientPositions, stepExecutionsByStepId };

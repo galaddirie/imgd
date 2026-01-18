@@ -102,7 +102,14 @@ defmodule Imgd.Steps.Executors.Behaviour do
   """
   @callback default_config() :: map()
 
-  @optional_callbacks validate_config: 1, default_config: 0
+  @doc """
+  Returns the effective output schema for a step configuration.
+
+  This is used to refine output schemas based on user-provided configuration.
+  """
+  @callback effective_output_schema(config :: map()) :: map() | nil
+
+  @optional_callbacks validate_config: 1, default_config: 0, effective_output_schema: 1
 
   # ============================================================================
   # Helper Functions

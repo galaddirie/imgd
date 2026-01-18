@@ -3,6 +3,7 @@ export const DOUBLE_CLICK_DELAY_MS = 250;
 export const CURSOR_THROTTLE_MS = 50;
 
 export const DEFAULT_NODE_DIMENSIONS = { width: 150, height: 50 };
+export const DEFAULT_GROUP_DIMENSIONS = { width: 360, height: 240 };
 export const EDGE_LABEL_DIMENSIONS = { width: 40, height: 12 };
 export const EDGE_LABEL_PADDING = 6;
 export const EDGE_LABEL_POSITION = 0.6;

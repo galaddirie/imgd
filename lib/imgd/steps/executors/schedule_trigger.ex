@@ -27,6 +27,11 @@ defmodule Imgd.Steps.Executors.ScheduleTrigger do
         "title" => "Interval (seconds)",
         "minimum" => 60,
         "default" => 3600
+      },
+      "output_schema" => %{
+        "type" => "object",
+        "title" => "Output Schema",
+        "description" => "JSON Schema describing the trigger output"
       }
     }
   }
@@ -43,6 +48,11 @@ defmodule Imgd.Steps.Executors.ScheduleTrigger do
   @impl true
   def execute(_config, input, _context) do
     {:ok, input}
+  end
+
+  @impl true
+  def effective_output_schema(config) do
+    Map.get(config, "output_schema") || @output_schema
   end
 
   @impl true

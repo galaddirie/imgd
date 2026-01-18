@@ -38,9 +38,12 @@ defmodule Imgd.Runtime.Hooks.Observability do
   def attach_all_hooks(workflow, opts \\ []) do
     execution_id = Keyword.get(opts, :execution_id, "unknown")
     workflow_id = Keyword.get(opts, :workflow_id, "unknown")
+    skip_production_init? = Keyword.get(opts, :skip_production_init, false)
 
     # Initialize production counter for this execution
-    ProductionsCounter.init(execution_id)
+    if not skip_production_init? do
+      ProductionsCounter.init(execution_id)
+    end
 
     # Store context in workflow metadata for access in hooks
     workflow = put_hook_context(workflow, execution_id, workflow_id)
@@ -117,55 +120,59 @@ defmodule Imgd.Runtime.Hooks.Observability do
   end
 
   defp before_step_telemetry(step, workflow, fact, execution_id) do
-    step_name = get_step_name(step)
-    start_time = System.monotonic_time()
-    started_at = DateTime.utc_now()
-    step_type_id = get_step_type_id(step, workflow)
-    original_step_id = get_original_step_id(step, workflow)
-
-    # Use the fact's item context directly instead of global process state
-    # Each fact carries its own item_index and items_total from its originating FanOut
-    item_index = fact.item_index
-    items_total = fact.items_total
-
-    # Store the current fan-out context for the after_step_telemetry hook
-    if item_index do
-      Process.put(:imgd_fan_out_context, %{item_index: item_index, items_total: items_total})
-    else
-      Process.delete(:imgd_fan_out_context)
-    end
-
-    # Store start time and input for duration and complete payloads
-    workflow =
+    if skip_observability?(step, workflow) do
       workflow
-      |> put_step_start_time(step_name, start_time)
-      |> put_step_started_at(step_name, started_at)
-      |> put_step_input_data(step_name, fact.value)
-      |> put_step_semantic_type(step_name, classify_step_type(step))
+    else
+      step_name = get_step_name(step)
+      start_time = System.monotonic_time()
+      started_at = DateTime.utc_now()
+      step_type_id = get_step_type_id(step, workflow)
+      original_step_id = get_original_step_id(step, workflow)
 
-    # Buffer the "started" event instead of persisting immediately
-    push_step_event(%{
-      execution_id: execution_id,
-      step_id: original_step_id,
-      step_type_id: step_type_id || "unknown",
-      status: :running,
-      input_data: fact.value,
-      item_index: item_index,
-      items_total: items_total,
-      started_at: started_at
-    })
+      # Use the fact's item context directly instead of global process state
+      # Each fact carries its own item_index and items_total from its originating FanOut
+      item_index = fact.item_index
+      items_total = fact.items_total
 
-    state =
-      StepExecutionState.started(execution_id, original_step_id, fact.value,
-        step_type_id: step_type_id,
+      # Store the current fan-out context for the after_step_telemetry hook
+      if item_index do
+        Process.put(:imgd_fan_out_context, %{item_index: item_index, items_total: items_total})
+      else
+        Process.delete(:imgd_fan_out_context)
+      end
+
+      # Store start time and input for duration and complete payloads
+      workflow =
+        workflow
+        |> put_step_start_time(step_name, start_time)
+        |> put_step_started_at(step_name, started_at)
+        |> put_step_input_data(step_name, fact.value)
+        |> put_step_semantic_type(step_name, classify_step_type(step))
+
+      # Buffer the "started" event instead of persisting immediately
+      push_step_event(%{
+        execution_id: execution_id,
+        step_id: original_step_id,
+        step_type_id: step_type_id || "unknown",
+        status: :running,
+        input_data: fact.value,
         item_index: item_index,
         items_total: items_total,
         started_at: started_at
-      )
+      })
 
-    Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, state)
+      state =
+        StepExecutionState.started(execution_id, original_step_id, fact.value,
+          step_type_id: step_type_id,
+          item_index: item_index,
+          items_total: items_total,
+          started_at: started_at
+        )
 
-    workflow
+      Imgd.Executions.PubSub.broadcast_step(:step_started, execution_id, nil, state)
+
+      workflow
+    end
   end
 
   # ===========================================================================
@@ -178,91 +185,104 @@ defmodule Imgd.Runtime.Hooks.Observability do
   end
 
   defp after_step_telemetry(step, workflow, result_fact, execution_id) do
-    step_name = get_step_name(step)
-    step_type_id = get_step_type_id(step, workflow)
-    original_step_id = get_original_step_id(step, workflow)
+    if skip_observability?(step, workflow) do
+      skipped? = Process.get(:imgd_step_skipped, false)
+      Process.delete(:imgd_step_skipped)
 
-    # Calculate duration
-    start_time = get_step_start_time(workflow, step_name)
-    duration_us = if start_time, do: System.monotonic_time() - start_time, else: 0
-    duration_us = System.convert_time_unit(duration_us, :native, :microsecond)
-
-    # Check if step was skipped via process flag
-    skipped? = Process.get(:imgd_step_skipped, false)
-    Process.delete(:imgd_step_skipped)
-
-    # Get fan-out context if we're processing an item in a fan-out batch
-    fan_out_ctx = Process.get(:imgd_fan_out_context)
-    item_index = if fan_out_ctx, do: fan_out_ctx[:item_index], else: nil
-    items_total = if fan_out_ctx, do: fan_out_ctx[:items_total], else: nil
-
-    # Get the semantic step type for production counting
-    semantic_type = get_step_semantic_type(workflow, step_name)
-
-    # Record production and get count using ProductionsCounter
-    output_item_count =
-      if skipped? do
-        ProductionsCounter.record(execution_id, original_step_id, nil, step_type: semantic_type)
-      else
-        ProductionsCounter.record(execution_id, original_step_id, result_fact.value,
-          step_type: semantic_type
-        )
+      unless skipped? do
+        acc_outputs = Process.get(:imgd_accumulated_outputs, %{})
+        step_name = get_step_name(step)
+        Process.put(:imgd_accumulated_outputs, Map.put(acc_outputs, step_name, result_fact.value))
       end
 
-    input_data = get_step_input_data(workflow, step_name)
-    started_at = get_step_started_at(workflow, step_name)
+      workflow
+    else
+      step_name = get_step_name(step)
+      step_type_id = get_step_type_id(step, workflow)
+      original_step_id = get_original_step_id(step, workflow)
 
-    # Buffer the "completed" / "skipped" event
-    push_step_event(%{
-      execution_id: execution_id,
-      step_id: original_step_id,
-      step_type_id: step_type_id || "unknown",
-      status: if(skipped?, do: :skipped, else: :completed),
-      input_data: input_data,
-      output_data: result_fact.value,
-      output_item_count: output_item_count,
-      item_index: item_index,
-      items_total: items_total,
-      started_at: started_at,
-      completed_at: DateTime.utc_now()
-    })
+      # Calculate duration
+      start_time = get_step_start_time(workflow, step_name)
+      duration_us = if start_time, do: System.monotonic_time() - start_time, else: 0
+      duration_us = System.convert_time_unit(duration_us, :native, :microsecond)
 
-    unless skipped? do
-      acc_outputs = Process.get(:imgd_accumulated_outputs, %{})
-      Process.put(:imgd_accumulated_outputs, Map.put(acc_outputs, step_name, result_fact.value))
+      # Check if step was skipped via process flag
+      skipped? = Process.get(:imgd_step_skipped, false)
+      Process.delete(:imgd_step_skipped)
+
+      # Get fan-out context if we're processing an item in a fan-out batch
+      fan_out_ctx = Process.get(:imgd_fan_out_context)
+      item_index = if fan_out_ctx, do: fan_out_ctx[:item_index], else: nil
+      items_total = if fan_out_ctx, do: fan_out_ctx[:items_total], else: nil
+
+      # Get the semantic step type for production counting
+      semantic_type = get_step_semantic_type(workflow, step_name)
+
+      # Record production and get count using ProductionsCounter
+      output_item_count =
+        if skipped? do
+          ProductionsCounter.record(execution_id, original_step_id, nil, step_type: semantic_type)
+        else
+          ProductionsCounter.record(execution_id, original_step_id, result_fact.value,
+            step_type: semantic_type
+          )
+        end
+
+      input_data = get_step_input_data(workflow, step_name)
+      started_at = get_step_started_at(workflow, step_name)
+
+      # Buffer the "completed" / "skipped" event
+      push_step_event(%{
+        execution_id: execution_id,
+        step_id: original_step_id,
+        step_type_id: step_type_id || "unknown",
+        status: if(skipped?, do: :skipped, else: :completed),
+        input_data: input_data,
+        output_data: result_fact.value,
+        output_item_count: output_item_count,
+        item_index: item_index,
+        items_total: items_total,
+        started_at: started_at,
+        completed_at: DateTime.utc_now()
+      })
+
+      unless skipped? do
+        acc_outputs = Process.get(:imgd_accumulated_outputs, %{})
+        Process.put(:imgd_accumulated_outputs, Map.put(acc_outputs, step_name, result_fact.value))
+      end
+
+      state_opts = [
+        step_type_id: step_type_id,
+        duration_us: duration_us,
+        item_index: item_index,
+        items_total: items_total,
+        started_at: started_at,
+        completed_at: DateTime.utc_now(),
+        output_item_count: output_item_count
+      ]
+
+      state =
+        if skipped? do
+          StepExecutionState.skipped(execution_id, original_step_id, input_data, state_opts)
+        else
+          StepExecutionState.completed(
+            execution_id,
+            original_step_id,
+            input_data,
+            result_fact.value,
+            state_opts
+          )
+        end
+
+      Imgd.Executions.PubSub.broadcast_step(
+        if(skipped?, do: :step_skipped, else: :step_completed),
+        execution_id,
+        nil,
+        state
+      )
+
+      workflow
     end
-
-    state_opts = [
-      step_type_id: step_type_id,
-      duration_us: duration_us,
-      item_index: item_index,
-      items_total: items_total,
-      started_at: started_at,
-      completed_at: DateTime.utc_now(),
-      output_item_count: output_item_count
-    ]
-
-    state =
-      if skipped? do
-        StepExecutionState.skipped(execution_id, original_step_id, input_data, state_opts)
-      else
-        StepExecutionState.completed(
-          execution_id,
-          original_step_id,
-          input_data,
-          result_fact.value,
-          state_opts
-        )
-      end
-
-    Imgd.Executions.PubSub.broadcast_step(
-      if(skipped?, do: :step_skipped, else: :step_completed),
-      execution_id,
-      nil,
-      state
-    )
-
-    workflow
   end
 
   # ===========================================================================
@@ -304,6 +324,10 @@ defmodule Imgd.Runtime.Hooks.Observability do
     |> Map.get(:__changed__, %{})
     |> Map.get(:__step_metadata__, workflow |> Map.get(:__step_metadata__, %{}))
     |> Map.get(step_name, %{})
+  end
+
+  defp skip_observability?(step, workflow) do
+    get_step_metadata(step, workflow)[:skip_observability] == true
   end
 
   defp get_step_type_id(step, workflow) do

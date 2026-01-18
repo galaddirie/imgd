@@ -139,8 +139,16 @@ defmodule Imgd.Runtime.Triggers.Registry do
 
   @impl true
   def handle_call({:lookup_webhook, path, method}, _from, state) do
-    key = "#{String.upcase(method)}:#{path}"
-    {:reply, Map.fetch(state.webhook_routes, key), state}
+    method = String.upcase(method)
+    key = "#{method}:#{path}"
+
+    reply =
+      case Map.fetch(state.webhook_routes, key) do
+        {:ok, _} = ok -> ok
+        :error -> Map.fetch(state.webhook_routes, "ANY:#{path}")
+      end
+
+    {:reply, reply, state}
   end
 
   @impl true

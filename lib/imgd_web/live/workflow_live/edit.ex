@@ -157,6 +157,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:move_step={JS.push("move_step")}
           v-on:update_step={JS.push("update_step")}
           v-on:remove_step={JS.push("remove_step")}
+          v-on:add_group={JS.push("add_group")}
+          v-on:update_group={JS.push("update_group")}
+          v-on:remove_group={JS.push("remove_group")}
+          v-on:set_group_membership={JS.push("set_group_membership")}
           v-on:add_connection={JS.push("add_connection")}
           v-on:remove_connection={JS.push("remove_connection")}
           v-on:save_workflow={JS.push("save_workflow")}
@@ -183,7 +187,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # =============================================================================
 
   @impl true
-  def handle_event("add_step", %{"type_id" => type_id, "position" => pos}, socket) do
+  def handle_event("add_step", %{"type_id" => type_id, "position" => pos} = params, socket) do
     step_type_name =
       case StepRegistry.get(type_id) do
         {:ok, type} -> type.name
@@ -202,7 +206,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       notes: nil
     }
 
-    apply_operation(socket, :add_step, %{step: step})
+    payload =
+      case Map.get(params, "group_id") do
+        nil -> %{step: step}
+        group_id -> %{step: step, group_id: group_id}
+      end
+
+    apply_operation(socket, :add_step, payload)
   end
 
   @impl true
@@ -212,19 +222,36 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     draft = socket.assigns.workflow.draft
     steps = if(draft, do: draft.steps || [], else: [])
     connections = if(draft, do: draft.connections || [], else: [])
+    groups = if(draft, do: draft.groups || [], else: [])
 
     if step_ids == [] or steps == [] do
       {:noreply, socket}
     else
       position_by_step_id = Map.get(params, "position_by_step_id", %{})
 
-      {new_steps, id_map} =
-        build_duplicate_steps(steps, step_ids, position_by_step_id)
+      incoming_group_map =
+        case Map.get(params, "group_id_by_step_id") do
+          %{} = map -> map
+          _ -> %{}
+        end
+
+      group_lookup = build_group_lookup(groups)
+      group_id_by_step_id = Map.merge(group_lookup, incoming_group_map)
+
+      {new_steps, id_map, group_id_by_new_step_id} =
+        build_duplicate_steps(steps, step_ids, position_by_step_id, group_id_by_step_id)
 
       new_connections = build_duplicate_connections(connections, step_ids, id_map)
 
       operations =
-        Enum.map(new_steps, fn step -> {:add_step, %{step: step}} end) ++
+        Enum.map(new_steps, fn step ->
+          step_id = fetch_field(step, :id)
+
+          case Map.get(group_id_by_new_step_id, step_id) do
+            nil -> {:add_step, %{step: step}}
+            group_id -> {:add_step, %{step: step, group_id: group_id}}
+          end
+        end) ++
           Enum.map(new_connections, fn connection ->
             {:add_connection, %{connection: connection}}
           end)
@@ -256,6 +283,81 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_event("remove_step", %{"step_id" => step_id}, socket) do
     Logger.info("Received remove_step event for step: #{step_id}")
     apply_operation(socket, :remove_step, %{step_id: step_id})
+  end
+
+  @impl true
+  def handle_event("add_group", params, socket) do
+    step_ids =
+      params
+      |> Map.get("step_ids", [])
+      |> List.wrap()
+      |> Enum.uniq()
+
+    if step_ids == [] do
+      {:noreply, socket}
+    else
+      group = %{
+        id: UUID.generate(),
+        name: Map.get(params, "name", "Group"),
+        step_ids: step_ids,
+        position: normalize_group_position(Map.get(params, "position", %{})),
+        collapsed: Map.get(params, "collapsed", false)
+      }
+
+      step_positions =
+        case Map.get(params, "step_positions") do
+          %{} = positions -> positions
+          _ -> %{}
+        end
+
+      apply_operation(socket, :add_group, %{group: group, step_positions: step_positions})
+    end
+  end
+
+  @impl true
+  def handle_event("update_group", %{"group_id" => group_id} = params, socket) do
+    changes =
+      params
+      |> Map.get("changes", %{})
+      |> normalize_group_changes()
+
+    apply_operation(socket, :update_group, %{group_id: group_id, changes: changes})
+  end
+
+  @impl true
+  def handle_event("remove_group", %{"group_id" => group_id}, socket) do
+    apply_operation(socket, :remove_group, %{group_id: group_id})
+  end
+
+  @impl true
+  def handle_event("set_group_membership", params, socket) do
+    group_id =
+      case Map.get(params, "group_id") do
+        "" -> nil
+        group_id -> group_id
+      end
+
+    step_ids =
+      params
+      |> Map.get("step_ids", [])
+      |> List.wrap()
+      |> Enum.uniq()
+
+    step_positions =
+      case Map.get(params, "step_positions") do
+        %{} = positions -> positions
+        _ -> %{}
+      end
+
+    if step_ids == [] do
+      {:noreply, socket}
+    else
+      apply_operation(socket, :set_group_membership, %{
+        group_id: group_id,
+        step_ids: step_ids,
+        step_positions: step_positions
+      })
+    end
   end
 
   @impl true
@@ -731,20 +833,27 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     }
   end
 
-  defp build_duplicate_steps(steps, step_ids, position_by_step_id) do
+  defp build_duplicate_steps(steps, step_ids, position_by_step_id, group_id_by_step_id) do
     step_lookup = Map.new(steps, fn step -> {fetch_field(step, :id), step} end)
 
-    {new_steps, id_map, _existing_steps} =
-      Enum.reduce(step_ids, {[], %{}, steps}, fn step_id, {acc, id_map, existing_steps} ->
+    {new_steps, id_map, group_id_by_new_step_id, _existing_steps} =
+      Enum.reduce(step_ids, {[], %{}, %{}, steps}, fn step_id,
+                                                      {acc, id_map, group_map, existing_steps} ->
         case Map.get(step_lookup, step_id) do
           nil ->
-            {acc, id_map, existing_steps}
+            {acc, id_map, group_map, existing_steps}
 
           step ->
             base_name = fetch_field(step, :name) || "Step"
 
             {unique_name, new_step_id} =
               Workflows.generate_unique_step_identity(existing_steps, base_name)
+
+            group_map =
+              case Map.get(group_id_by_step_id, step_id) do
+                nil -> group_map
+                group_id -> Map.put(group_map, new_step_id, group_id)
+              end
 
             new_step = %{
               id: new_step_id,
@@ -760,11 +869,12 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               notes: fetch_field(step, :notes)
             }
 
-            {[new_step | acc], Map.put(id_map, step_id, new_step_id), [new_step | existing_steps]}
+            {[new_step | acc], Map.put(id_map, step_id, new_step_id), group_map,
+             [new_step | existing_steps]}
         end
       end)
 
-    {Enum.reverse(new_steps), id_map}
+    {Enum.reverse(new_steps), id_map, group_id_by_new_step_id}
   end
 
   defp build_duplicate_connections(connections, step_ids, id_map) do
@@ -800,6 +910,17 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     |> Enum.reverse()
   end
 
+  defp build_group_lookup(groups) do
+    groups
+    |> List.wrap()
+    |> Enum.flat_map(fn group ->
+      group_id = fetch_field(group, :id)
+      step_ids = fetch_field(group, :step_ids) || []
+      Enum.map(step_ids, &{&1, group_id})
+    end)
+    |> Map.new()
+  end
+
   defp resolve_duplicate_position(position_by_step_id, step_id, fallback_position) do
     case fetch_field(position_by_step_id, step_id) do
       %{} = position -> normalize_position(position)
@@ -813,6 +934,33 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       y: fetch_field(position, :y) || 0
     }
   end
+
+  defp normalize_group_position(position) when is_map(position) do
+    %{
+      x: fetch_field(position, :x) || 0,
+      y: fetch_field(position, :y) || 0,
+      width: fetch_field(position, :width),
+      height: fetch_field(position, :height)
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp normalize_group_position(_position), do: %{}
+
+  defp normalize_group_changes(changes) when is_map(changes) do
+    position =
+      Map.get(changes, :position) ||
+        Map.get(changes, "position")
+
+    if is_map(position) do
+      Map.put(changes, :position, normalize_group_position(position))
+    else
+      changes
+    end
+  end
+
+  defp normalize_group_changes(_changes), do: %{}
 
   defp offset_position(position) do
     normalized = normalize_position(position || %{})

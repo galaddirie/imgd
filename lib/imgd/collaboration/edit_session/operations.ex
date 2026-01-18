@@ -4,7 +4,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   """
 
   alias Imgd.Workflows.WorkflowDraft
-  alias Imgd.Workflows.Embeds.{Step, Connection}
+  alias Imgd.Workflows.Embeds.{Step, Connection, NodeGroup}
   alias Imgd.Graph
   require Logger
 
@@ -53,6 +53,18 @@ defmodule Imgd.Collaboration.EditSession.Operations do
       :remove_connection ->
         validate_remove_connection(draft, operation.payload)
 
+      :add_group ->
+        validate_add_group(draft, operation.payload)
+
+      :update_group ->
+        validate_update_group(draft, operation.payload)
+
+      :remove_group ->
+        validate_remove_group(draft, operation.payload)
+
+      :set_group_membership ->
+        validate_set_group_membership(draft, operation.payload)
+
       # Editor operations don't need draft validation
       type when type in [:pin_step_output, :unpin_step_output, :disable_step, :enable_step] ->
         :ok
@@ -91,6 +103,7 @@ defmodule Imgd.Collaboration.EditSession.Operations do
   defp validate_add_step(draft, payload) do
     step_data = field(payload, :step)
     step_id = field(step_data, :id)
+    group_id = field(payload, :group_id)
 
     cond do
       step_exists?(draft, step_id) ->
@@ -98,6 +111,9 @@ defmodule Imgd.Collaboration.EditSession.Operations do
 
       not valid_step_type?(step_data) ->
         {:error, :invalid_step_type}
+
+      not is_nil(group_id) and not group_exists?(draft, group_id) ->
+        {:error, {:group_not_found, group_id}}
 
       true ->
         :ok
@@ -161,6 +177,90 @@ defmodule Imgd.Collaboration.EditSession.Operations do
     end
   end
 
+  defp validate_add_group(draft, payload) do
+    group_data = field(payload, :group) || %{}
+    group_id = field(group_data, :id)
+    step_ids = List.wrap(field(group_data, :step_ids) || [])
+    missing_steps = Enum.reject(step_ids, &step_exists?(draft, &1))
+
+    cond do
+      is_nil(group_id) ->
+        {:error, :group_id_required}
+
+      group_exists?(draft, group_id) ->
+        {:error, {:group_already_exists, group_id}}
+
+      step_ids == [] ->
+        {:error, :group_requires_steps}
+
+      missing_steps != [] ->
+        {:error, {:group_steps_not_found, missing_steps}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_update_group(draft, payload) do
+    group_id = field(payload, :group_id)
+    changes = field(payload, :changes) || %{}
+
+    if group_exists?(draft, group_id) do
+      case Map.get(changes, "output_step_id") || Map.get(changes, :output_step_id) do
+        nil ->
+          :ok
+
+        output_step_id ->
+          case find_group(draft, group_id) do
+            nil ->
+              {:error, {:group_not_found, group_id}}
+
+            group ->
+              if output_step_id in (field(group, :step_ids) || []) do
+                :ok
+              else
+                {:error, {:invalid_group_output, output_step_id}}
+              end
+          end
+      end
+    else
+      {:error, {:group_not_found, group_id}}
+    end
+  end
+
+  defp validate_remove_group(draft, payload) do
+    group_id = field(payload, :group_id)
+
+    if group_exists?(draft, group_id) do
+      :ok
+    else
+      {:error, {:group_not_found, group_id}}
+    end
+  end
+
+  defp validate_set_group_membership(draft, payload) do
+    group_id = field(payload, :group_id)
+    step_ids = List.wrap(field(payload, :step_ids) || [])
+
+    cond do
+      step_ids == [] ->
+        {:error, :group_membership_missing_steps}
+
+      Enum.any?(step_ids, fn step_id -> not step_exists?(draft, step_id) end) ->
+        missing = Enum.reject(step_ids, &step_exists?(draft, &1))
+        {:error, {:group_steps_not_found, missing}}
+
+      is_nil(group_id) ->
+        :ok
+
+      group_exists?(draft, group_id) ->
+        :ok
+
+      true ->
+        {:error, {:group_not_found, group_id}}
+    end
+  end
+
   # ============================================================================
   # Apply Functions
   # ============================================================================
@@ -169,7 +269,20 @@ defmodule Imgd.Collaboration.EditSession.Operations do
     step_data = field(payload, :step)
     step = build_step(step_data)
     new_steps = (draft.steps || []) ++ [step]
-    {:ok, %{draft | steps: new_steps}}
+    group_id = field(payload, :group_id)
+
+    draft = %{draft | steps: new_steps}
+
+    draft =
+      if is_nil(group_id) do
+        draft
+      else
+        update_groups(draft, fn groups ->
+          add_steps_to_group(groups, group_id, [step.id])
+        end)
+      end
+
+    {:ok, draft}
   end
 
   defp do_apply(draft, :remove_step, payload) do
@@ -200,7 +313,12 @@ defmodule Imgd.Collaboration.EditSession.Operations do
         match
       end)
 
-    {:ok, %{draft | steps: new_steps, connections: new_connections}}
+    new_groups =
+      draft.groups
+      |> List.wrap()
+      |> remove_steps_from_groups([step_id])
+
+    {:ok, %{draft | steps: new_steps, connections: new_connections, groups: new_groups}}
   end
 
   defp do_apply(draft, :update_step_config, payload) do
@@ -259,6 +377,99 @@ defmodule Imgd.Collaboration.EditSession.Operations do
     {:ok, %{draft | connections: new_connections}}
   end
 
+  defp do_apply(draft, :add_group, payload) do
+    group_data = field(payload, :group) || %{}
+    step_positions = field(payload, :step_positions) || %{}
+    step_ids = List.wrap(field(group_data, :step_ids) || [])
+    group = build_group(group_data, draft)
+
+    groups =
+      draft.groups
+      |> List.wrap()
+      |> remove_steps_from_groups(step_ids)
+      |> Kernel.++([group])
+      |> normalize_groups()
+
+    draft = %{draft | groups: groups}
+    draft = update_step_positions(draft, step_positions)
+    {:ok, draft}
+  end
+
+  defp do_apply(draft, :update_group, payload) do
+    group_id = field(payload, :group_id)
+    changes = field(payload, :changes) || %{}
+
+    update_group(draft, group_id, fn group ->
+      group
+      |> maybe_update(:name, changes)
+      |> maybe_update(:position, changes)
+      |> maybe_update(:collapsed, changes)
+      |> maybe_update(:output_step_id, changes)
+    end)
+  end
+
+  defp do_apply(draft, :remove_group, payload) do
+    group_id = field(payload, :group_id)
+
+    case find_group(draft, group_id) do
+      nil ->
+        {:error, {:group_not_found, group_id}}
+
+      group ->
+        group_position = field(group, :position) || %{}
+        offset_x = field(group_position, :x) || 0
+        offset_y = field(group_position, :y) || 0
+
+        step_positions =
+          group
+          |> field(:step_ids)
+          |> List.wrap()
+          |> Enum.reduce(%{}, fn step_id, acc ->
+            case find_step(draft, step_id) do
+              nil ->
+                acc
+
+              step ->
+                position = field(step, :position) || %{}
+
+                new_position = %{
+                  x: (field(position, :x) || 0) + offset_x,
+                  y: (field(position, :y) || 0) + offset_y
+                }
+
+                Map.put(acc, step_id, new_position)
+            end
+          end)
+
+        groups =
+          draft.groups
+          |> List.wrap()
+          |> Enum.reject(fn group_item -> field(group_item, :id) == group_id end)
+          |> normalize_groups()
+
+        draft = %{draft | groups: groups}
+        draft = update_step_positions(draft, step_positions)
+        {:ok, draft}
+    end
+  end
+
+  defp do_apply(draft, :set_group_membership, payload) do
+    group_id = field(payload, :group_id)
+    step_ids = List.wrap(field(payload, :step_ids) || [])
+    step_positions = field(payload, :step_positions) || %{}
+
+    groups =
+      draft.groups
+      |> List.wrap()
+      |> remove_steps_from_groups(step_ids)
+      |> maybe_add_steps_to_group(group_id, step_ids)
+      |> normalize_groups()
+
+    draft = %{draft | groups: groups}
+    draft = update_step_positions(draft, step_positions)
+    {:ok, draft}
+  end
+
   defp do_apply(_draft, type, _payload) do
     {:error, {:unhandled_operation, type}}
   end
@@ -273,6 +484,205 @@ defmodule Imgd.Collaboration.EditSession.Operations do
 
   defp connection_exists?(draft, conn_id) do
     Enum.any?(draft.connections || [], fn conn -> field(conn, :id) == conn_id end)
+  end
+
+  defp group_exists?(draft, group_id) do
+    Enum.any?(draft.groups || [], fn group -> field(group, :id) == group_id end)
+  end
+
+  defp find_group(draft, group_id) do
+    Enum.find(draft.groups || [], fn group -> field(group, :id) == group_id end)
+  end
+
+  defp find_step(draft, step_id) do
+    Enum.find(draft.steps || [], fn step -> field(step, :id) == step_id end)
+  end
+
+  defp update_group(draft, group_id, update_fn) do
+    groups = draft.groups || []
+
+    {updated_groups, updated?} =
+      Enum.reduce(groups, {[], false}, fn group, {acc, updated?} ->
+        if field(group, :id) == group_id do
+          updated =
+            case update_fn.(group) do
+              {:ok, updated_group} -> updated_group
+              %NodeGroup{} = updated_group -> updated_group
+              updated_group when is_map(updated_group) -> updated_group
+            end
+
+          {[updated | acc], true}
+        else
+          {[group | acc], updated?}
+        end
+      end)
+
+    if updated? do
+      {:ok, %{draft | groups: Enum.reverse(updated_groups)}}
+    else
+      {:error, {:group_not_found, group_id}}
+    end
+  end
+
+  defp update_groups(draft, update_fn) do
+    groups = update_fn.(List.wrap(draft.groups))
+    %{draft | groups: normalize_groups(groups)}
+  end
+
+  defp remove_steps_from_groups(groups, step_ids) do
+    step_id_set = MapSet.new(step_ids)
+
+    groups
+    |> Enum.map(fn group ->
+      updated_step_ids =
+        group
+        |> field(:step_ids)
+        |> List.wrap()
+        |> Enum.reject(&MapSet.member?(step_id_set, &1))
+
+      update_group_fields(group, %{step_ids: updated_step_ids})
+    end)
+    |> normalize_groups()
+  end
+
+  defp add_steps_to_group(groups, group_id, step_ids) do
+    Enum.map(groups, fn group ->
+      if field(group, :id) == group_id do
+        updated_step_ids =
+          group
+          |> field(:step_ids)
+          |> List.wrap()
+          |> Kernel.++(step_ids)
+          |> Enum.uniq()
+
+        update_group_fields(group, %{step_ids: updated_step_ids})
+      else
+        group
+      end
+    end)
+  end
+
+  defp maybe_add_steps_to_group(groups, nil, _step_ids), do: groups
+
+  defp maybe_add_steps_to_group(groups, group_id, step_ids),
+    do: add_steps_to_group(groups, group_id, step_ids)
+
+  defp normalize_groups(groups) do
+    groups
+    |> Enum.reduce([], fn group, acc ->
+      step_ids = group |> field(:step_ids) |> List.wrap() |> Enum.uniq()
+
+      cond do
+        step_ids == [] ->
+          acc
+
+        field(group, :output_step_id) in step_ids ->
+          [update_group_fields(group, %{step_ids: step_ids}) | acc]
+
+        true ->
+          [update_group_fields(group, %{step_ids: step_ids, output_step_id: hd(step_ids)}) | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp update_step_positions(draft, step_positions) do
+    if step_positions == %{} do
+      draft
+    else
+      new_steps =
+        Enum.map(draft.steps || [], fn step ->
+          case field(step_positions, step.id) do
+            %{} = position ->
+              %{step | position: position}
+
+            _ ->
+              step
+          end
+        end)
+
+      %{draft | steps: new_steps}
+    end
+  end
+
+  defp build_group(data, draft) when is_map(data) do
+    step_ids =
+      data
+      |> field(:step_ids)
+      |> List.wrap()
+      |> Enum.uniq()
+
+    output_step_id = resolve_group_output_step_id(data, step_ids, draft.connections || [])
+
+    %NodeGroup{
+      id: field(data, :id),
+      name: field(data, :name) || "Group",
+      step_ids: step_ids,
+      output_step_id: output_step_id,
+      position: field(data, :position) || %{},
+      collapsed: field(data, :collapsed) || false
+    }
+  end
+
+  defp resolve_group_output_step_id(data, step_ids, connections) do
+    output_step_id = field(data, :output_step_id)
+
+    cond do
+      output_step_id in step_ids ->
+        output_step_id
+
+      step_ids == [] ->
+        output_step_id
+
+      true ->
+        infer_group_output_step_id(step_ids, connections)
+    end
+  end
+
+  defp infer_group_output_step_id(step_ids, connections) do
+    step_set = MapSet.new(step_ids)
+
+    outgoing_to_outside =
+      connections
+      |> Enum.filter(fn conn ->
+        source_id = field(conn, :source_step_id)
+        target_id = field(conn, :target_step_id)
+        MapSet.member?(step_set, source_id) and not MapSet.member?(step_set, target_id)
+      end)
+      |> Enum.map(&field(&1, :source_step_id))
+      |> Enum.uniq()
+
+    cond do
+      length(outgoing_to_outside) == 1 ->
+        hd(outgoing_to_outside)
+
+      true ->
+        internal_sources =
+          connections
+          |> Enum.filter(fn conn ->
+            source_id = field(conn, :source_step_id)
+            target_id = field(conn, :target_step_id)
+            MapSet.member?(step_set, source_id) and MapSet.member?(step_set, target_id)
+          end)
+          |> Enum.map(&field(&1, :source_step_id))
+          |> MapSet.new()
+
+        leaf_ids = Enum.reject(step_ids, &MapSet.member?(internal_sources, &1))
+
+        if length(leaf_ids) == 1 do
+          hd(leaf_ids)
+        else
+          hd(step_ids)
+        end
+    end
+  end
+
+  defp update_group_fields(group, attrs) when is_map(group) do
+    if Map.has_key?(group, :__struct__) do
+      struct(group, attrs)
+    else
+      Map.merge(group, attrs)
+    end
   end
 
   defp valid_step_type?(step_data) do

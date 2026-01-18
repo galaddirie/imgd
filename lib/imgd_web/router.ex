@@ -27,6 +27,7 @@ defmodule ImgdWeb.Router do
   scope "/api", ImgdWeb do
     pipe_through :api
 
+    get "/workflows/:id/contract", WorkflowContractController, :show
     match :*, "/hooks/*path", Plugs.WebhookHandler, :handle
     match :*, "/hook-test/*path", Plugs.WebhookHandler, :handle
   end
