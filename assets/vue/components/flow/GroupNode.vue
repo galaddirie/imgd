@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { useVueFlow } from '@vue-flow/core';
 import type { NodeProps } from '@vue-flow/core';
 import type { GroupNodeData } from '@/types/workflow';
-import { DEFAULT_GROUP_COLOR } from '@/constants/layout';
+import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
+import { useThemeStore } from '@/stores/theme';
 import { PencilIcon, Squares2X2Icon } from '@heroicons/vue/24/outline';
 
 // Simple debounce utility
@@ -18,8 +20,12 @@ function debounce<T extends (...args: any[]) => any>(
 }
 
 const props = defineProps<NodeProps<GroupNodeData>>();
+const { getNodes, updateNode } = useVueFlow();
+const themeStore = useThemeStore();
 
 const DEFAULT_NAME = 'Group';
+const MIN_GROUP_WIDTH = 240;
+const MIN_GROUP_HEIGHT = 180;
 
 const stepCount = computed(() => props.data.step_ids?.length ?? 0);
 const isEditing = ref(false);
@@ -51,13 +57,20 @@ const hexToRgba = (hex: string, alpha: number) => {
 };
 
 const accentColor = computed(() => normalizeHexColor(props.data.color));
+const isGroupingTarget = computed(() => !!props.data.isGroupingTarget);
 const nodeStyle = computed(() => {
   const accent = accentColor.value;
-  const ring = props.selected ? `, 0 0 0 2px ${hexToRgba(accent, 0.25)}` : '';
+  const selectionRing = props.selected ? `, 0 0 0 2px ${hexToRgba(accent, 0.25)}` : '';
+  const groupRing = isGroupingTarget.value
+    ? `, 0 0 0 3px ${groupingRingColor.value}, 0 0 0 6px ${groupingHaloColor.value}`
+    : '';
   return {
-    borderColor: hexToRgba(accent, props.selected ? 0.55 : 0.35),
-    backgroundColor: hexToRgba(accent, 0.12),
-    boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.08)${ring}`,
+    borderColor: hexToRgba(
+      accent,
+      isGroupingTarget.value ? 0.65 : props.selected ? 0.55 : 0.35
+    ),
+    backgroundColor: hexToRgba(accent, isGroupingTarget.value ? 0.16 : 0.12),
+    boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.08)${selectionRing}${groupRing}`,
   };
 });
 
@@ -65,14 +78,217 @@ const outlineStyle = computed(() => ({
   borderColor: hexToRgba(accentColor.value, 0.2),
 }));
 
+const groupingRingColor = computed(() =>
+  themeStore.theme === 'dark' ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.65)'
+);
+const groupingHaloColor = computed(() =>
+  themeStore.theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)'
+);
+const groupingOutlineStyle = computed(() => ({
+  borderColor: groupingRingColor.value,
+  boxShadow: `0 0 0 10px ${groupingHaloColor.value}`,
+}));
+
 const countDotStyle = computed(() => ({
   backgroundColor: accentColor.value,
 }));
 
+const handleStyle = computed(() => ({
+  backgroundColor: accentColor.value,
+  borderColor: hexToRgba(accentColor.value, 0.7),
+}));
+
 const nodeClasses = computed(() => [
-  'relative h-full w-full rounded-3xl border bg-base-200/30 p-4 transition-shadow',
+  'group relative h-full w-full rounded-3xl border bg-base-200/30 p-4 transition-all duration-200 ease-out',
   props.dragging ? 'cursor-grabbing shadow-lg' : 'cursor-grab',
 ]);
+
+type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+type ResizeState = {
+  handle: ResizeHandle;
+  startPointer: { x: number; y: number };
+  startPosition: { x: number; y: number };
+  startSize: { width: number; height: number };
+  startRight: number;
+  startBottom: number;
+  stepPositions: Record<string, { x: number; y: number }>;
+  lastBounds?: { x: number; y: number; width: number; height: number };
+};
+
+const resizeState = ref<ResizeState | null>(null);
+const isResizing = ref(false);
+
+const resizeHandles: Array<{ id: ResizeHandle; className: string }> = [
+  { id: 'nw', className: 'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize' },
+  { id: 'n', className: 'left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize' },
+  { id: 'ne', className: 'right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize' },
+  { id: 'e', className: 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
+  { id: 'se', className: 'right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize' },
+  { id: 's', className: 'left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-ns-resize' },
+  { id: 'sw', className: 'left-0 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize' },
+  { id: 'w', className: 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
+];
+
+const resizeHandleVisibility = computed(() =>
+  isResizing.value || props.selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+);
+
+const getStepPositions = () => {
+  const positions: Record<string, { x: number; y: number }> = {};
+  const stepIds = new Set(props.data.step_ids || []);
+  if (stepIds.size === 0) return positions;
+
+  getNodes.value.forEach(node => {
+    if (node.type !== 'step') return;
+    if (!stepIds.has(node.id)) return;
+    positions[node.id] = { x: node.position.x, y: node.position.y };
+  });
+
+  return positions;
+};
+
+const updateGroupBounds = (bounds: { x: number; y: number; width: number; height: number }) => {
+  updateNode(props.id, {
+    position: { x: bounds.x, y: bounds.y },
+    style: { width: `${bounds.width}px`, height: `${bounds.height}px` },
+  });
+};
+
+const updateChildPositions = (delta: { x: number; y: number }, stepPositions: ResizeState['stepPositions']) => {
+  if (delta.x === 0 && delta.y === 0) return;
+  Object.entries(stepPositions).forEach(([stepId, position]) => {
+    updateNode(stepId, {
+      position: {
+        x: position.x - delta.x,
+        y: position.y - delta.y,
+      },
+    });
+  });
+};
+
+const handleResizeMove = (event: PointerEvent) => {
+  const state = resizeState.value;
+  if (!state) return;
+
+  const dx = event.clientX - state.startPointer.x;
+  const dy = event.clientY - state.startPointer.y;
+
+  let nextWidth = state.startSize.width;
+  let nextHeight = state.startSize.height;
+  let nextX = state.startPosition.x;
+  let nextY = state.startPosition.y;
+
+  const hasWest = state.handle.includes('w');
+  const hasEast = state.handle.includes('e');
+  const hasNorth = state.handle.includes('n');
+  const hasSouth = state.handle.includes('s');
+
+  if (hasEast) {
+    nextWidth = state.startSize.width + dx;
+  } else if (hasWest) {
+    nextWidth = state.startSize.width - dx;
+  }
+
+  if (hasSouth) {
+    nextHeight = state.startSize.height + dy;
+  } else if (hasNorth) {
+    nextHeight = state.startSize.height - dy;
+  }
+
+  nextWidth = Math.max(nextWidth, MIN_GROUP_WIDTH);
+  nextHeight = Math.max(nextHeight, MIN_GROUP_HEIGHT);
+
+  if (hasWest) {
+    nextX = state.startRight - nextWidth;
+  }
+
+  if (hasNorth) {
+    nextY = state.startBottom - nextHeight;
+  }
+
+  const delta = {
+    x: nextX - state.startPosition.x,
+    y: nextY - state.startPosition.y,
+  };
+
+  const bounds = { x: nextX, y: nextY, width: nextWidth, height: nextHeight };
+  updateGroupBounds(bounds);
+  updateChildPositions(delta, state.stepPositions);
+
+  resizeState.value = { ...state, lastBounds: bounds };
+};
+
+const stopResize = () => {
+  const state = resizeState.value;
+  if (!state) return;
+
+  window.removeEventListener('pointermove', handleResizeMove);
+  window.removeEventListener('pointerup', stopResize);
+  window.removeEventListener('pointercancel', stopResize);
+
+  const bounds = state.lastBounds;
+  if (bounds) {
+    props.data.onUpdate?.(props.id, {
+      position: {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+      },
+    });
+
+    const delta = {
+      x: bounds.x - state.startPosition.x,
+      y: bounds.y - state.startPosition.y,
+    };
+
+    if (delta.x !== 0 || delta.y !== 0) {
+      const stepPositions: Record<string, { x: number; y: number }> = {};
+      Object.entries(state.stepPositions).forEach(([stepId, position]) => {
+        stepPositions[stepId] = {
+          x: position.x - delta.x,
+          y: position.y - delta.y,
+        };
+      });
+      props.data.onMoveSteps?.(stepPositions);
+    }
+  }
+
+  resizeState.value = null;
+  isResizing.value = false;
+};
+
+const startResize = (handle: ResizeHandle, event: PointerEvent) => {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const width = props.dimensions.width || DEFAULT_GROUP_DIMENSIONS.width;
+  const height = props.dimensions.height || DEFAULT_GROUP_DIMENSIONS.height;
+  const startPosition = { x: props.position.x, y: props.position.y };
+
+  resizeState.value = {
+    handle,
+    startPointer: { x: event.clientX, y: event.clientY },
+    startPosition,
+    startSize: { width, height },
+    startRight: startPosition.x + width,
+    startBottom: startPosition.y + height,
+    stepPositions: getStepPositions(),
+    lastBounds: { x: startPosition.x, y: startPosition.y, width, height },
+  };
+
+  isResizing.value = true;
+  window.addEventListener('pointermove', handleResizeMove);
+  window.addEventListener('pointerup', stopResize);
+  window.addEventListener('pointercancel', stopResize);
+};
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', handleResizeMove);
+  window.removeEventListener('pointerup', stopResize);
+  window.removeEventListener('pointercancel', stopResize);
+});
 
 const startEditing = () => {
   isEditing.value = true;
@@ -121,6 +337,12 @@ const handleColorInput = (event: Event) => {
 
 <template>
   <div :class="nodeClasses" :style="nodeStyle">
+    <div
+      class="pointer-events-none absolute -inset-1 z-10 rounded-[28px] border-2 opacity-0 transition-opacity duration-150"
+      :class="isGroupingTarget ? 'opacity-100' : 'opacity-0'"
+      :style="groupingOutlineStyle"
+    ></div>
+
     <div
       class="pointer-events-none absolute inset-0 rounded-3xl border border-dashed"
       :style="outlineStyle"
@@ -193,8 +415,23 @@ const handleColorInput = (event: Event) => {
       </div>
     </div>
 
-    <div class="absolute bottom-3 right-3 text-base-content/40 text-sm font-medium">
-      Drag nodes here to add them
+    <div
+      class="absolute bottom-3 right-3 text-sm font-medium transition-colors"
+      :class="isGroupingTarget ? 'text-base-content/70' : 'text-base-content/40'"
+    >
+      {{ isGroupingTarget ? 'Release to add to group' : 'Drag nodes here to add them' }}
     </div>
+
+    <button
+      v-for="handle in resizeHandles"
+      :key="handle.id"
+      class="nodrag absolute z-20 size-3.5 rounded-full border shadow-sm transition hover:scale-110"
+      :class="[handle.className, resizeHandleVisibility]"
+      type="button"
+      :aria-label="`Resize group ${handle.id}`"
+      :style="handleStyle"
+      @pointerdown="startResize(handle.id, $event)"
+      @mousedown.stop
+    ></button>
   </div>
 </template>

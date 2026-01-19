@@ -203,6 +203,7 @@ const {
   onConnect,
   onNodesChange,
   onEdgesChange,
+  onNodeDragStart,
   onNodeDragStop,
   onNodeDrag,
   project,
@@ -210,6 +211,7 @@ const {
   getEdges,
   getSelectedNodes,
   updateNode,
+  updateNodeData,
   updateEdge,
   applyNodeChanges,
   applyEdgeChanges,
@@ -249,6 +251,11 @@ onBeforeUnmount(() => {
 const { layout, previousDirection } = useLayout();
 
 const handleRunNode = (stepId: string) => emit('run_node', { step_id: stepId });
+const handleMoveSteps = (stepPositions: Record<string, XYPosition>) => {
+  Object.entries(stepPositions).forEach(([stepId, position]) => {
+    emit('move_step', { step_id: stepId, position });
+  });
+};
 
 const { nodes } = useWorkflowNodes({
   workflow: () => props.workflow,
@@ -259,6 +266,8 @@ const { nodes } = useWorkflowNodes({
   currentUserId: () => props.currentUserId,
   onRunNode: stepId => handleRunNode(stepId),
   onUpdateGroup: (groupId, changes) => emit('update_group', { group_id: groupId, changes }),
+  onMoveSteps: handleMoveSteps,
+  groupingPreview: () => groupingPreview.value,
 });
 
 const { edges } = useWorkflowEdges({
@@ -294,6 +303,11 @@ const GROUP_PADDING = 60;
 const clipboard = ref<{ stepIds: string[] } | null>(null);
 const clipboardPasteCount = ref(0);
 const pendingDuplicateSelection = ref<string[] | null>(null);
+type GroupingPreview = { groupId: string | null; stepIds: string[]; color: string | null };
+
+const groupingPreview = ref<GroupingPreview>({ groupId: null, stepIds: [], color: null });
+const lastGroupingPreview = ref<GroupingPreview>({ groupId: null, stepIds: [], color: null });
+const ungroupDragStepIds = ref<string[] | null>(null);
 
 // Consolidated interaction tracking (mouse + transient dragging)
 const emitInteraction = useThrottleFn(
@@ -329,6 +343,9 @@ const handlePaneMouseMove = (event: MouseEvent) => {
   // Otherwise, we emit just the cursor position
   if (!getSelectedNodes.value.some(n => n.dragging)) {
     emitInteraction(flowPosition.x, flowPosition.y);
+  } else {
+    const draggingStepNodes = getNodes.value.filter(node => node.dragging).filter(isStepNode);
+    updateGroupingPreview(draggingStepNodes, flowPosition, event.shiftKey);
   }
 };
 
@@ -336,10 +353,70 @@ const getAbsoluteNodePosition = (node: GraphNode<WorkflowNodeData>) => {
   return node.computedPosition ?? node.position;
 };
 
+const hexToRgba = (hex: string, alpha: number) => {
+  const normalized = hex.replace('#', '');
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const miniMapNodeColor = (node: GraphNode<WorkflowNodeData>) => {
+  if (node.type === 'group') {
+    const color = (node.data as GroupNodeData | undefined)?.color || DEFAULT_GROUP_COLOR;
+    return hexToRgba(color, 0.45);
+  }
+  return 'color-mix(in oklch, var(--color-base-100) 72%, var(--color-base-content) 28%)';
+};
+
+type NodeRect = { x: number; y: number; width: number; height: number };
+
+const parseNodeSize = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const getNodeSize = (node: GraphNode<WorkflowNodeData>) => {
+  if (node.dimensions.width > 0 && node.dimensions.height > 0) {
+    return { width: node.dimensions.width, height: node.dimensions.height };
+  }
+
+  const style = typeof node.style === 'function' ? node.style(node) : node.style;
+  const styleWidth = parseNodeSize(style?.width);
+  const styleHeight = parseNodeSize(style?.height);
+  if (styleWidth && styleHeight) {
+    return { width: styleWidth, height: styleHeight };
+  }
+
+  return node.type === 'group' ? DEFAULT_GROUP_DIMENSIONS : DEFAULT_NODE_DIMENSIONS;
+};
+
+const getNodeRect = (node: GraphNode<WorkflowNodeData>): NodeRect => {
+  const position = getAbsoluteNodePosition(node);
+  const { width, height } = getNodeSize(node);
+  return { x: position.x, y: position.y, width, height };
+};
+
+const getOverlapArea = (rectA: NodeRect, rectB: NodeRect) => {
+  const xOverlap = Math.max(
+    0,
+    Math.min(rectA.x + rectA.width, rectB.x + rectB.width) - Math.max(rectA.x, rectB.x)
+  );
+  const yOverlap = Math.max(
+    0,
+    Math.min(rectA.y + rectA.height, rectB.y + rectB.height) - Math.max(rectA.y, rectB.y)
+  );
+  return xOverlap * yOverlap;
+};
+
 const findGroupAtPoint = (point: XYPosition) => {
   const groupNodes = getNodes.value.filter(isGroupNode);
   for (const node of [...groupNodes].reverse()) {
-    const { width, height } = node.dimensions;
+    const { width, height } = getNodeSize(node);
     const position = getAbsoluteNodePosition(node);
     if (
       width > 0 &&
@@ -355,7 +432,110 @@ const findGroupAtPoint = (point: XYPosition) => {
   return null;
 };
 
-const buildGroupBounds = (groupNodes: GraphNode<WorkflowNodeData>[]) => {
+const findGroupByIntersection = (draggedStepNodes: GraphNode<WorkflowNodeData>[]) => {
+  if (draggedStepNodes.length === 0) return null;
+
+  const groupNodes = getNodes.value.filter(isGroupNode);
+  let bestGroup: GraphNode<GroupNodeData> | null = null;
+  let bestOverlap = 0;
+
+  groupNodes.forEach(groupNode => {
+    const groupRect = getNodeRect(groupNode);
+    draggedStepNodes.forEach(stepNode => {
+      if (!isStepNode(stepNode)) return;
+      const stepRect = getNodeRect(stepNode);
+      const overlap = getOverlapArea(stepRect, groupRect);
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestGroup = groupNode as GraphNode<GroupNodeData>;
+      }
+    });
+  });
+
+  return bestOverlap > 0 ? bestGroup : null;
+};
+
+const applyGroupingPreview = (nextPreview: GroupingPreview) => {
+  const prevPreview = lastGroupingPreview.value;
+  const prevStepIds = new Set(prevPreview.stepIds);
+  const nextStepIds = new Set(nextPreview.stepIds);
+
+  if (prevPreview.groupId && prevPreview.groupId !== nextPreview.groupId) {
+    updateNodeData(prevPreview.groupId, { isGroupingTarget: false, groupingColor: undefined });
+  }
+  if (nextPreview.groupId) {
+    updateNodeData(nextPreview.groupId, {
+      isGroupingTarget: true,
+      groupingColor: nextPreview.color ?? undefined,
+    });
+  }
+
+  prevStepIds.forEach(stepId => {
+    if (!nextStepIds.has(stepId)) {
+      updateNodeData(stepId, { isGroupingCandidate: false, groupingColor: undefined });
+    }
+  });
+  nextStepIds.forEach(stepId => {
+    if (!prevStepIds.has(stepId) || prevPreview.color !== nextPreview.color) {
+      updateNodeData(stepId, {
+        isGroupingCandidate: true,
+        groupingColor: nextPreview.color ?? undefined,
+      });
+    }
+  });
+
+  lastGroupingPreview.value = {
+    groupId: nextPreview.groupId,
+    stepIds: Array.from(nextStepIds),
+    color: nextPreview.color,
+  };
+};
+
+const clearGroupingPreview = () => {
+  const nextPreview: GroupingPreview = { groupId: null, stepIds: [], color: null };
+  groupingPreview.value = nextPreview;
+  applyGroupingPreview(nextPreview);
+};
+
+const updateGroupingPreview = (
+  draggedStepNodes: GraphNode<WorkflowNodeData>[],
+  flowPosition: XYPosition | null,
+  shiftKey: boolean
+) => {
+  if (shiftKey || draggedStepNodes.length === 0) {
+    clearGroupingPreview();
+    return;
+  }
+
+  const targetGroup =
+    (flowPosition ? findGroupAtPoint(flowPosition) : null) ??
+    findGroupByIntersection(draggedStepNodes);
+  if (!targetGroup) {
+    clearGroupingPreview();
+    return;
+  }
+
+  const targetGroupId = targetGroup.id;
+  const stepIdsToGroup = draggedStepNodes
+    .filter(node => groupByStepId.value.get(node.id) !== targetGroupId)
+    .map(node => node.id);
+
+  if (stepIdsToGroup.length === 0) {
+    clearGroupingPreview();
+    return;
+  }
+
+  const groupColor = targetGroup.data?.color || DEFAULT_GROUP_COLOR;
+  const nextPreview: GroupingPreview = {
+    groupId: targetGroupId,
+    stepIds: stepIdsToGroup,
+    color: groupColor,
+  };
+  groupingPreview.value = nextPreview;
+  applyGroupingPreview(nextPreview);
+};
+
+const buildGroupBounds = (groupNodes: GraphNode<WorkflowNodeData>[], padding = GROUP_PADDING) => {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -375,12 +555,47 @@ const buildGroupBounds = (groupNodes: GraphNode<WorkflowNodeData>[]) => {
 
   if (!isFinite(minX) || !isFinite(minY)) return null;
 
-  const paddedWidth = maxX - minX + GROUP_PADDING * 2;
-  const paddedHeight = maxY - minY + GROUP_PADDING * 2;
+  const paddedWidth = maxX - minX + padding * 2;
+  const paddedHeight = maxY - minY + padding * 2;
 
   return {
-    x: minX - GROUP_PADDING,
-    y: minY - GROUP_PADDING,
+    x: minX - padding,
+    y: minY - padding,
+    width: Math.max(paddedWidth, DEFAULT_GROUP_DIMENSIONS.width),
+    height: Math.max(paddedHeight, DEFAULT_GROUP_DIMENSIONS.height),
+  };
+};
+
+const buildGroupBoundsFromPositions = (
+  groupNodes: GraphNode<WorkflowNodeData>[],
+  positions: Map<string, XYPosition>,
+  padding = GROUP_PADDING
+) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const node of groupNodes) {
+    if (!isStepNode(node)) continue;
+    const position = positions.get(node.id) ?? getAbsoluteNodePosition(node);
+    const width = node.dimensions.width || DEFAULT_NODE_DIMENSIONS.width;
+    const height = node.dimensions.height || DEFAULT_NODE_DIMENSIONS.height;
+
+    minX = Math.min(minX, position.x);
+    minY = Math.min(minY, position.y);
+    maxX = Math.max(maxX, position.x + width);
+    maxY = Math.max(maxY, position.y + height);
+  }
+
+  if (!isFinite(minX) || !isFinite(minY)) return null;
+
+  const paddedWidth = maxX - minX + padding * 2;
+  const paddedHeight = maxY - minY + padding * 2;
+
+  return {
+    x: minX - padding,
+    y: minY - padding,
     width: Math.max(paddedWidth, DEFAULT_GROUP_DIMENSIONS.width),
     height: Math.max(paddedHeight, DEFAULT_GROUP_DIMENSIONS.height),
   };
@@ -453,13 +668,16 @@ const emitGroupPositionUpdate = (groupNode: GraphNode<GroupNodeData>) => {
 // Track transient node positions during drag
 const handleNodeDrag = (event: {
   event: MouseEvent | TouchEvent;
-  node: Node<WorkflowNodeData>;
-  nodes: Node<WorkflowNodeData>[];
+  node: GraphNode<WorkflowNodeData>;
+  nodes: GraphNode<WorkflowNodeData>[];
 }) => {
   // Get mouse position from drag event
   const mouseEvent = 'clientX' in event.event ? event.event : event.event.touches[0];
   const flowPosition = getFlowPositionFromEvent(mouseEvent);
   if (!flowPosition) return;
+
+  const shiftKey = 'shiftKey' in event.event ? event.event.shiftKey : false;
+  const draggedStepNodes = event.nodes.filter(isStepNode);
 
   const dragging_steps: Record<string, XYPosition> = {};
   event.nodes.forEach(node => {
@@ -469,9 +687,27 @@ const handleNodeDrag = (event: {
 
   const hasDraggingSteps = Object.keys(dragging_steps).length > 0;
   emitInteraction(flowPosition.x, flowPosition.y, hasDraggingSteps ? dragging_steps : null);
+  updateGroupingPreview(draggedStepNodes, flowPosition, shiftKey);
 };
 
 onNodeDrag(handleNodeDrag);
+onNodeDragStart((event: {
+  event: MouseEvent | TouchEvent;
+  nodes: GraphNode<WorkflowNodeData>[];
+}) => {
+  const shiftKey = 'shiftKey' in event.event ? event.event.shiftKey : false;
+  const draggedStepNodes = event.nodes.filter(isStepNode);
+  const hasGroupedSteps = draggedStepNodes.some(node => groupByStepId.value.has(node.id));
+
+  if (shiftKey && hasGroupedSteps) {
+    ungroupDragStepIds.value = draggedStepNodes.map(node => node.id);
+    draggedStepNodes.forEach(node => {
+      updateNode(node.id, { expandParent: false });
+    });
+  } else {
+    ungroupDragStepIds.value = null;
+  }
+});
 
 // =============================================================================
 // Collaboration: Selection Tracking
@@ -639,6 +875,8 @@ const contextMenuItems = computed<MenuItem[]>(() => {
     const node = nodes.value.find(n => n.id === targetNodeId);
     if (node?.type === 'group') {
       return [
+        { id: 'tidy-group', label: 'Tidy up node group', icon: ArrowPathIcon },
+        { id: 'divider-group', label: '', divider: true },
         { id: 'delete-group', label: 'Remove Group', icon: TrashIcon, danger: true },
       ];
     }
@@ -851,48 +1089,158 @@ const alignLayoutPositions = (
   }));
 };
 
-const applyLayoutPositions = (layoutNodes: LayoutNode[]) => {
-  if (!layoutNodes.length) return;
-  layoutNodes.forEach(node => {
-    updateNode(node.id, {
-      position: node.position,
-      targetPosition: node.targetPosition,
-      sourcePosition: node.sourcePosition,
-    });
-    emit('move_step', { step_id: node.id, position: node.position });
-  });
-};
+type LayoutOptions = { groupId?: string };
 
-const handleLayout = () => {
-  const currentNodes = getNodes.value.filter(isStepNode) as unknown as LayoutNode[];
-  if (!currentNodes.length) return;
+const handleLayout = (options: LayoutOptions = {}) => {
+  const stepNodes = getNodes.value.filter(isStepNode) as unknown as GraphNode<StepNodeData>[];
+  if (!stepNodes.length) return;
 
-  const selectedNodes = getSelectedNodes.value.filter(isStepNode) as unknown as LayoutNode[];
-  const nodesToLayout = selectedNodes.length > 1 ? selectedNodes : currentNodes;
-  const parentGroupIds = new Set(nodesToLayout.map(node => node.parentNode || null));
-  if (parentGroupIds.size > 1) {
-    console.warn('Layout skipped: selection spans multiple groups.');
-    return;
+  const groupNodes = getNodes.value.filter(isGroupNode) as unknown as GraphNode<GroupNodeData>[];
+  const groupNodeById = new Map(groupNodes.map(node => [node.id, node]));
+
+  let nodesToLayout: LayoutNode[] = [];
+  const groupsToResize = new Set<string>();
+
+  if (options.groupId) {
+    nodesToLayout = stepNodes
+      .filter(node => node.parentNode === options.groupId)
+      .map(node => ({
+        ...node,
+        position: getAbsoluteNodePosition(node),
+      }));
+    groupsToResize.add(options.groupId);
+  } else {
+    const selection = getSelectedNodes.value;
+    const selectedSteps = selection.filter(isStepNode) as unknown as GraphNode<StepNodeData>[];
+    const selectedGroups = selection.filter(isGroupNode) as unknown as GraphNode<GroupNodeData>[];
+
+    if (selection.length > 1) {
+      const stepsFromGroups = selectedGroups.flatMap(group =>
+        stepNodes.filter(node => node.parentNode === group.id)
+      );
+      const combined = [...selectedSteps, ...stepsFromGroups];
+      const unique = new Map(combined.map(node => [node.id, node]));
+      nodesToLayout = Array.from(unique.values()).map(node => ({
+        ...node,
+        position: getAbsoluteNodePosition(node),
+      }));
+
+      nodesToLayout.forEach(node => {
+        if (node.parentNode) groupsToResize.add(node.parentNode);
+      });
+      selectedGroups.forEach(group => groupsToResize.add(group.id));
+    } else {
+      nodesToLayout = stepNodes.map(node => ({
+        ...node,
+        position: getAbsoluteNodePosition(node),
+      }));
+      groupNodes.forEach(group => groupsToResize.add(group.id));
+    }
   }
-  const nodeIds = new Set(nodesToLayout.map(node => node.id));
 
+  if (!nodesToLayout.length) return;
+
+  const nodeIds = new Set(nodesToLayout.map(node => node.id));
   const edgesToLayout = getEdges.value.filter(
     edge => nodeIds.has(edge.source) && nodeIds.has(edge.target)
   );
 
   const layoutDirection = (previousDirection.value === 'RL' ? 'RL' : 'LR') as LayoutDirection;
-  const nodeLookup = new Map(nodesToLayout.map(node => [node.id, node]));
-  const hasEdgeLabels = edgesToLayout.some(edge => hasEdgeLabel(nodeLookup.get(edge.source)));
-  const layoutNodes = layout(nodesToLayout, edgesToLayout, layoutDirection, {
-    ranksep: hasEdgeLabels ? EDGE_LABEL_GAP : undefined,
-  }) as LayoutNode[];
-  const normalizedLayout = alignLayoutPositions(
-    nodesToLayout,
-    layoutNodes,
-    edgesToLayout,
-    layoutDirection
-  );
-  applyLayoutPositions(normalizedLayout);
+  let normalizedLayout = nodesToLayout;
+
+  if (nodesToLayout.length > 1) {
+    const nodeLookup = new Map(nodesToLayout.map(node => [node.id, node]));
+    const hasEdgeLabels = edgesToLayout.some(edge => hasEdgeLabel(nodeLookup.get(edge.source)));
+    const layoutNodes = layout(nodesToLayout, edgesToLayout, layoutDirection, {
+      ranksep: hasEdgeLabels ? EDGE_LABEL_GAP : undefined,
+    }) as LayoutNode[];
+    normalizedLayout = alignLayoutPositions(
+      nodesToLayout,
+      layoutNodes,
+      edgesToLayout,
+      layoutDirection
+    );
+  }
+
+  const layoutById = new Map(normalizedLayout.map(node => [node.id, node]));
+  const desiredAbsolutePositions = new Map<string, XYPosition>();
+  stepNodes.forEach(node => {
+    desiredAbsolutePositions.set(node.id, getAbsoluteNodePosition(node));
+  });
+  normalizedLayout.forEach(node => {
+    desiredAbsolutePositions.set(node.id, node.position);
+  });
+
+  const groupBoundsById = new Map<string, { x: number; y: number; width: number; height: number }>();
+  groupsToResize.forEach(groupId => {
+    const groupNode = groupNodeById.get(groupId);
+    if (!groupNode) return;
+    const groupSteps = stepNodes.filter(node => node.parentNode === groupId);
+    const bounds = buildGroupBoundsFromPositions(groupSteps, desiredAbsolutePositions);
+    if (!bounds) return;
+    groupBoundsById.set(groupId, bounds);
+
+    updateNode(groupId, {
+      position: { x: bounds.x, y: bounds.y },
+      style: { width: `${bounds.width}px`, height: `${bounds.height}px` },
+    });
+    emit('update_group', { group_id: groupId, changes: { position: bounds } });
+  });
+
+  const currentGroupPositions = new Map<string, XYPosition>();
+  groupNodes.forEach(group => {
+    currentGroupPositions.set(group.id, getAbsoluteNodePosition(group));
+  });
+
+  stepNodes.forEach(node => {
+    const shouldUpdate = layoutById.has(node.id) || (node.parentNode && groupBoundsById.has(node.parentNode));
+    if (!shouldUpdate) return;
+
+    const desiredAbsolute = desiredAbsolutePositions.get(node.id);
+    if (!desiredAbsolute) return;
+
+    if (node.parentNode) {
+      const groupId = node.parentNode;
+      const groupBounds = groupBoundsById.get(groupId);
+      const groupPosition = groupBounds
+        ? { x: groupBounds.x, y: groupBounds.y }
+        : currentGroupPositions.get(groupId);
+      if (!groupPosition) return;
+
+      const relativePosition = {
+        x: desiredAbsolute.x - groupPosition.x,
+        y: desiredAbsolute.y - groupPosition.y,
+      };
+      const layoutNode = layoutById.get(node.id);
+      const positionChanged =
+        relativePosition.x !== node.position.x || relativePosition.y !== node.position.y;
+
+      if (positionChanged || layoutNode) {
+        updateNode(node.id, {
+          position: relativePosition,
+          targetPosition: layoutNode?.targetPosition,
+          sourcePosition: layoutNode?.sourcePosition,
+        });
+      }
+      if (positionChanged) {
+        emit('move_step', { step_id: node.id, position: relativePosition });
+      }
+    } else {
+      const layoutNode = layoutById.get(node.id);
+      const positionChanged =
+        desiredAbsolute.x !== node.position.x || desiredAbsolute.y !== node.position.y;
+      if (positionChanged || layoutNode) {
+        updateNode(node.id, {
+          position: desiredAbsolute,
+          targetPosition: layoutNode?.targetPosition,
+          sourcePosition: layoutNode?.sourcePosition,
+        });
+      }
+      if (positionChanged) {
+        emit('move_step', { step_id: node.id, position: desiredAbsolute });
+      }
+    }
+  });
 };
 
 // =============================================================================
@@ -1144,6 +1492,9 @@ const handleContextMenuSelect = (itemId: string) => {
     case 'delete-group':
       if (nodeId) removeGroup(nodeId);
       break;
+    case 'tidy-group':
+      if (nodeId) handleLayout({ groupId: nodeId });
+      break;
     case 'edit':
       if (nodeId) store.openConfigModal(nodeId);
       break;
@@ -1276,11 +1627,24 @@ const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
   });
 };
 
+const restoreExpandParent = () => {
+  if (!ungroupDragStepIds.value) return;
+  const stepIds = ungroupDragStepIds.value;
+  ungroupDragStepIds.value = null;
+
+  stepIds.forEach(stepId => {
+    const node = getNodes.value.find(item => item.id === stepId);
+    updateNode(stepId, { expandParent: node?.parentNode ? true : undefined });
+  });
+};
+
 onNodeDragStop((event: { event: MouseEvent | TouchEvent; nodes: GraphNode<WorkflowNodeData>[] }) => {
   // Clear transient drag positions and emit final positions for persistence
   // We can just emit null for dragging_steps to clear it.
   // For now, we use 0,0 for the cursor as it will be updated by the next mousemove anyway.
   emitInteraction(0, 0, null);
+  clearGroupingPreview();
+  restoreExpandParent();
 
   const draggedStepNodes = event.nodes.filter(isStepNode);
   const draggedGroupNodes = event.nodes.filter(isGroupNode);
@@ -1494,7 +1858,7 @@ const requestNodeRemoval = (nodeId: string) => {
           >
             <Background :pattern-color="oklchToHex('oklch(50% 0.05 260)')" :gap="24" />
             <Controls position="bottom-right" />
-            <MiniMap position="bottom-left" />
+            <MiniMap position="bottom-left" :node-color="miniMapNodeColor" />
           </VueFlow>
 
           <!-- Execution Failure Overlay -->

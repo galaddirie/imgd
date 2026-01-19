@@ -126,6 +126,8 @@ export interface StepNodeData {
     name: string;
     color: string;
   }>;
+  isGroupingCandidate?: boolean;
+  groupingColor?: string;
   onRunNode?: (stepId: string) => void;
 }
 
@@ -139,7 +141,17 @@ export interface GroupNodeData {
   step_ids: string[];
   collapsed: boolean;
   color?: string;
-  onUpdate?: (groupId: string, changes: { name?: string; color?: string }) => void;
+  isGroupingTarget?: boolean;
+  groupingColor?: string;
+  onUpdate?: (
+    groupId: string,
+    changes: {
+      name?: string;
+      color?: string;
+      position?: { x?: number; y?: number; width?: number; height?: number };
+    }
+  ) => void;
+  onMoveSteps?: (stepPositions: Record<string, { x: number; y: number }>) => void;
 }
 
 export type WorkflowNodeData = StepNodeData | GroupNodeData;

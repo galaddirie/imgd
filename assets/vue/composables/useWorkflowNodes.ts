@@ -22,7 +22,16 @@ interface UseWorkflowNodesOptions {
   presences: () => UserPresence[];
   currentUserId: () => string | undefined;
   onRunNode?: (stepId: string) => void;
-  onUpdateGroup?: (groupId: string, changes: { name?: string; color?: string }) => void;
+  onUpdateGroup?: (
+    groupId: string,
+    changes: {
+      name?: string;
+      color?: string;
+      position?: { x?: number; y?: number; width?: number; height?: number };
+    }
+  ) => void;
+  onMoveSteps?: (stepPositions: Record<string, XYPosition>) => void;
+  groupingPreview?: () => { groupId?: string | null; stepIds?: string[]; color?: string | null };
 }
 
 export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
@@ -122,6 +131,10 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const presences = options.presences();
     const currentUserId = options.currentUserId();
     const onRunNode = options.onRunNode;
+    const groupingPreview = options.groupingPreview?.() ?? {};
+    const groupingStepIds = new Set(groupingPreview.stepIds || []);
+    const groupingTargetId = groupingPreview.groupId ?? null;
+    const groupingColor = groupingPreview.color ?? undefined;
 
     const groupByStepId = new Map<string, string>();
     const groupNodes: Node<GroupNodeData>[] = groups.map(group => {
@@ -153,7 +166,10 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           step_ids: group.step_ids || [],
           collapsed: !!group.collapsed,
           color,
+          isGroupingTarget: groupingTargetId === group.id,
+          groupingColor,
           onUpdate: options.onUpdateGroup,
+          onMoveSteps: options.onMoveSteps,
         },
         style: {
           width: `${width}px`,
@@ -176,6 +192,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       const isDisabled = editorState?.disabled_steps?.includes(step.id);
       const lockedBy = editorState?.step_locks?.[step.id];
       const parentGroupId = groupByStepId.get(step.id);
+      const isGroupingCandidate = groupingStepIds.has(step.id);
 
       const selectedBy = presences
         .filter(p => p.user.id !== currentUserId && p.selected_steps?.includes(step.id))
@@ -255,6 +272,8 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           pinned: isPinned,
           locked_by: lockedBy,
           selected_by: selectedBy,
+          isGroupingCandidate,
+          groupingColor: isGroupingCandidate ? groupingColor : undefined,
           onRunNode,
         } satisfies StepNodeData,
       };

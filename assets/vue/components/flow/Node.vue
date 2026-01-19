@@ -167,6 +167,14 @@ const statusConfig = computed(() => {
 
 const currentStatusStyle = computed(() => statusConfig.value[effectiveStatus.value]);
 
+const hexToRgba = (hex: string, alpha: number) => {
+  const normalized = hex.replace('#', '');
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 // Node classes
 const nodeClasses = computed(() => [
   'group relative flex items-start gap-3 rounded-2xl border border-base-300/50 bg-base-100 p-4 shadow-md transition-shadow',
@@ -188,6 +196,12 @@ const nodeStyle = computed(() => {
   if (props.selected) {
     const ringColor = isDark ? 'rgba(255, 255, 255, 0.55)' : 'rgba(0, 0, 0, 0.95)';
     shadow += `, 0 0 0 2px ${ringColor}`;
+  }
+
+  if (props.data.isGroupingCandidate) {
+    const ringColor = isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)';
+    const haloColor = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)';
+    shadow += `, 0 0 0 3px ${ringColor}, 0 0 0 9px ${haloColor}`;
   }
 
   const style: Record<string, string> = {
