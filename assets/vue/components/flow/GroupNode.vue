@@ -5,6 +5,18 @@ import type { GroupNodeData } from '@/types/workflow';
 import { DEFAULT_GROUP_COLOR } from '@/constants/layout';
 import { PencilIcon, Squares2X2Icon } from '@heroicons/vue/24/outline';
 
+// Simple debounce utility
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  delay: number
+): (...args: Parameters<T>) => void {
+  let timeoutId: number;
+  return (...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func.apply(null, args), delay);
+  };
+}
+
 const props = defineProps<NodeProps<GroupNodeData>>();
 
 const DEFAULT_NAME = 'Group';
@@ -96,10 +108,14 @@ const openColorPicker = () => {
   colorInputRef.value?.click();
 };
 
+const debouncedUpdateColor = debounce((color: string) => {
+  props.data.onUpdate?.(props.id, { color });
+}, 300);
+
 const handleColorInput = (event: Event) => {
   const target = event.target as HTMLInputElement | null;
   if (!target?.value) return;
-  props.data.onUpdate?.(props.id, { color: target.value });
+  debouncedUpdateColor(target.value);
 };
 </script>
 
@@ -118,9 +134,7 @@ const handleColorInput = (event: Event) => {
           <Squares2X2Icon class="h-4.5 w-4.5" />
         </div>
         <div class="min-w-0">
-          <p class="text-base-content/50 text-[10px] font-semibold tracking-[0.2em] uppercase">
-            Group
-          </p>
+
           <div class="flex items-center gap-2">
             <input
               v-if="isEditing"
@@ -179,7 +193,7 @@ const handleColorInput = (event: Event) => {
       </div>
     </div>
 
-    <div class="text-base-content/40 mt-4 text-xs font-medium">
+    <div class="absolute bottom-3 right-3 text-base-content/40 text-sm font-medium">
       Drag nodes here to add them
     </div>
   </div>
