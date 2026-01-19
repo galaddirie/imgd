@@ -10,7 +10,6 @@ defmodule Imgd.Runtime.Execution.Server do
   alias Imgd.Runtime.RunicAdapter
   alias Imgd.Runtime.Events
   alias Imgd.Runtime.Hooks.Observability
-  alias Imgd.Runtime.ProductionsCounter
   alias Imgd.Executions
   alias Imgd.Executions.Execution
   import Ecto.Query, warn: false
@@ -144,19 +143,12 @@ defmodule Imgd.Runtime.Execution.Server do
     # Always flush buffered step events before dying
     flush_step_executions(execution_id)
 
-    # Clean up production counter if execution_id exists
-    case execution_id do
-      nil -> :ok
-      id -> ProductionsCounter.clear(id)
-    end
 
     :ok
   end
 
   @impl true
   def handle_info(:run, state) do
-    # Initialize production counter for this execution
-    ProductionsCounter.init(state.execution_id)
 
     # Transition to running in DB if pending
     if state.status == :pending do
@@ -184,16 +176,13 @@ defmodule Imgd.Runtime.Execution.Server do
         new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
         finalize_execution(new_state)
 
-        # Finalize production counting (clears state)
-        production_counts = ProductionsCounter.finalize(state.execution_id)
 
         # Flush step events to DB
         flush_step_executions(state.execution_id)
 
         # Emit completion event
         Events.emit(:execution_completed, new_state.execution_id, %{
-          status: :completed,
-          production_counts: production_counts
+          status: :completed
         })
 
         {:stop, :normal, new_state}
@@ -337,8 +326,6 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp handle_failure(state, step_id, reason) do
-    # Finalize production counting even on failure
-    production_counts = ProductionsCounter.finalize(state.execution_id)
 
     error_map = Execution.format_error({:step_failed, step_id, reason})
     completed_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
@@ -393,8 +380,7 @@ defmodule Imgd.Runtime.Execution.Server do
     # Emit execution failed event
     Events.emit(:execution_failed, state.execution_id, %{
       status: :failed,
-      error: error_map,
-      production_counts: production_counts
+      error: error_map
     })
 
     # Flush step events to DB

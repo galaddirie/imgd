@@ -265,7 +265,6 @@ export interface EditorState {
   workflow_id: string;
   pinned_outputs?: Record<string, unknown>;
   disabled_steps?: string[];
-  disabled_mode?: Record<string, 'skip' | 'exclude'>;
   step_locks?: Record<string, string>;
   webhook_test?: WebhookTestState | null;
 }

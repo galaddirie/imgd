@@ -308,17 +308,19 @@ defmodule Imgd.Collaboration.EditSession.Server do
   end
 
   defp replay_operations(draft, editor_state, ops, initial_seq) do
-    Enum.reduce(ops, {draft, editor_state, initial_seq}, fn op, {d, state, seq} ->
-      {new_draft, new_editor_state, _editor_state_changed} = apply_to_state(d, state, op)
-      {new_draft, new_editor_state, max(seq, op.seq)}
+    try do
+      Enum.reduce(ops, {draft, editor_state, initial_seq}, fn op, {d, state, seq} ->
+        {new_draft, new_editor_state, _editor_state_changed} = apply_to_state(d, state, op)
+        {new_draft, new_editor_state, max(seq, op.seq)}
+      end)
     rescue
       error ->
         Logger.error(
-          "Failed to replay operation #{op.operation_id} (type: #{op.type}) during recovery: #{inspect(error)}"
+          "Failed to replay operations during recovery: #{inspect(error)}"
         )
 
-        {d, state, seq}
-    end)
+        {draft, editor_state, initial_seq}
+    end
   end
 
   defp process_operation(state, operation) do

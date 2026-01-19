@@ -27,7 +27,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
   require Logger
   alias Runic.Workflow
   alias Imgd.Runtime.StepExecutionState
-  alias Imgd.Runtime.ProductionsCounter
 
   @type hook_opts :: [execution_id: String.t(), workflow_id: String.t()]
 
@@ -38,12 +37,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
   def attach_all_hooks(workflow, opts \\ []) do
     execution_id = Keyword.get(opts, :execution_id, "unknown")
     workflow_id = Keyword.get(opts, :workflow_id, "unknown")
-    skip_production_init? = Keyword.get(opts, :skip_production_init, false)
+    _skip_production_init? = Keyword.get(opts, :skip_production_init, false)
 
-    # Initialize production counter for this execution
-    if not skip_production_init? do
-      ProductionsCounter.init(execution_id)
-    end
 
     # Store context in workflow metadata for access in hooks
     workflow = put_hook_context(workflow, execution_id, workflow_id)
@@ -218,15 +213,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
       # Get the semantic step type for production counting
       semantic_type = get_step_semantic_type(workflow, step_name)
 
-      # Record production and get count using ProductionsCounter
-      output_item_count =
-        if skipped? do
-          ProductionsCounter.record(execution_id, original_step_id, nil, step_type: semantic_type)
-        else
-          ProductionsCounter.record(execution_id, original_step_id, result_fact.value,
-            step_type: semantic_type
-          )
-        end
+      # Calculate output item count directly from fact data
+      output_item_count = calculate_output_item_count(result_fact, semantic_type, skipped?)
 
       input_data = get_step_input_data(workflow, step_name)
       started_at = get_step_started_at(workflow, step_name)
@@ -298,13 +286,55 @@ defmodule Imgd.Runtime.Hooks.Observability do
   - :reduce - Consumes N items, produces 1 (aggregator via Reduce)
   - :regular - 1:1 input to output
   """
-  @spec classify_step_type(term()) :: ProductionsCounter.step_type()
-  def classify_step_type(step) do
-    case step do
-      %Runic.Workflow.FanOut{} -> :fan_out
-      %Runic.Workflow.FanIn{} -> :fan_in
-      %Runic.Workflow.Reduce{} -> :reduce
-      _ -> :regular
+  @spec classify_step_type(term()) :: :regular | :fan_out | :fan_in | :reduce
+  def classify_step_type(%Runic.Workflow.FanOut{}), do: :fan_out
+  def classify_step_type(%Runic.Workflow.FanIn{}), do: :fan_in
+  def classify_step_type(%Runic.Workflow.Reduce{}), do: :reduce
+  def classify_step_type(_), do: :regular
+
+  @doc """
+  Calculate the output item count for a step based on its result fact and type.
+
+  This replaces the ProductionsCounter logic with direct calculation from Runic fact data.
+  """
+  @spec calculate_output_item_count(Runic.Workflow.Fact.t(), :regular | :fan_out | :fan_in | :reduce, boolean()) :: non_neg_integer()
+  def calculate_output_item_count(_fact, _step_type, true = _skipped), do: 0
+
+  def calculate_output_item_count(fact, step_type, false = _skipped) do
+    case {fact.value, step_type} do
+      # FanOut: count the items produced (length of output list)
+      {list, :fan_out} when is_list(list) ->
+        length(list)
+
+      # FanIn/Reduce: always produces single aggregated result
+      {_, :fan_in} ->
+        1
+
+      {_, :reduce} ->
+        1
+
+      # Regular step: if output is a list, count as 1 (the list itself)
+      # unless we can detect it's actually a fan-out based on fact metadata
+      {list, :regular} when is_list(list) ->
+        # Check if this fact has fan-out metadata indicating it's actually part of a fan-out
+        if fact.item_index do
+          # This is a fan-out item, so it produces 1 item
+          1
+        else
+          # This is a regular step that outputs a list, count as 1
+          1
+        end
+
+      # Nil or empty output
+      {nil, _} ->
+        0
+
+      {[], _} ->
+        0
+
+      # Any other value = 1 production
+      {_value, _} ->
+        1
     end
   end
 

@@ -1734,7 +1734,6 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       workflow_id: workflow_id,
       pinned_outputs: state[:pinned_outputs] || state["pinned_outputs"] || %{},
       disabled_steps: MapSet.new(state[:disabled_steps] || state["disabled_steps"] || []),
-      disabled_mode: state[:disabled_mode] || state["disabled_mode"] || %{},
       step_locks: state[:step_locks] || state["step_locks"] || %{},
       webhook_test: state[:webhook_test] || state["webhook_test"]
     }
