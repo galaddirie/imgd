@@ -27,7 +27,6 @@ const DEFAULT_NAME = 'Group';
 const MIN_GROUP_WIDTH = 240;
 const MIN_GROUP_HEIGHT = 180;
 
-const stepCount = computed(() => props.data.step_ids?.length ?? 0);
 const isEditing = ref(false);
 const nameDraft = ref(props.data.name || DEFAULT_NAME);
 const nameInputRef = ref<HTMLInputElement | null>(null);
@@ -89,9 +88,6 @@ const groupingOutlineStyle = computed(() => ({
   boxShadow: `0 0 0 10px ${groupingHaloColor.value}`,
 }));
 
-const countDotStyle = computed(() => ({
-  backgroundColor: accentColor.value,
-}));
 
 const handleStyle = computed(() => ({
   backgroundColor: accentColor.value,
@@ -406,12 +402,6 @@ const handleColorInput = (event: Event) => {
           @input="handleColorInput"
           @mousedown.stop
         />
-        <div
-          class="bg-base-100/80 border-base-200 text-base-content/60 flex items-center gap-2 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide"
-        >
-          <span class="h-1.5 w-1.5 rounded-full" :style="countDotStyle"></span>
-          {{ stepCount }} nodes
-        </div>
       </div>
     </div>
 

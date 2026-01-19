@@ -30,6 +30,7 @@ interface UseWorkflowNodesOptions {
       position?: { x?: number; y?: number; width?: number; height?: number };
     }
   ) => void;
+  onUpdateStep?: (stepId: string, changes: { name?: string }) => void;
   onMoveSteps?: (stepPositions: Record<string, XYPosition>) => void;
   groupingPreview?: () => { groupId?: string | null; stepIds?: string[]; color?: string | null };
 }
@@ -275,6 +276,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           isGroupingCandidate,
           groupingColor: isGroupingCandidate ? groupingColor : undefined,
           onRunNode,
+          onUpdate: options.onUpdateStep,
         } satisfies StepNodeData,
       };
     });

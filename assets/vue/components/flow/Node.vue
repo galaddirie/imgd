@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { Position } from '@vue-flow/core';
 import type { NodeProps } from '@vue-flow/core';
 import Handle from './Handle.vue';
@@ -14,7 +14,6 @@ import {
   EnvelopeIcon,
   ArrowPathIcon,
   CodeBracketSquareIcon,
-  EllipsisVerticalIcon,
   BugAntIcon,
   CalculatorIcon,
   FunnelIcon,
@@ -29,7 +28,7 @@ import {
   CheckIcon,
   ExclamationCircleIcon,
   ClockIcon,
-  PlayIcon,
+  PlayIcon as PlayOutlineIcon,
   ForwardIcon,
   PauseIcon,
   BookmarkIcon,
@@ -41,10 +40,15 @@ import {
   PencilIcon,
   XCircleIcon,
 } from '@heroicons/vue/24/outline';
+import { PlayIcon, PowerIcon, BookmarkIcon as BookmarkSolidIcon } from '@heroicons/vue/24/solid';
 
 const props = defineProps<NodeProps<StepNodeData>>();
 const themeStore = useThemeStore();
 const clientStore = useClientStore();
+
+const isEditing = ref(false);
+const nameDraft = ref(props.data.name || 'Untitled Step');
+const nameInputRef = ref<HTMLInputElement | null>(null);
 
 // Compute effective status (pinned takes precedence for display)
 const effectiveStatus = computed<NodeStatus>(() => {
@@ -249,20 +253,68 @@ const showInputHandle = computed(
   () => props.data.hasInput !== false && props.data.step_kind !== 'trigger'
 );
 const showOutputHandle = computed(() => props.data.hasOutput !== false);
+
+// Inline editing functions
+const startEditing = () => {
+  isEditing.value = true;
+  nameDraft.value = props.data.name || 'Untitled Step';
+  nextTick(() => nameInputRef.value?.focus());
+};
+
+const commitName = () => {
+  const nextName = nameDraft.value.trim() || 'Untitled Step';
+  isEditing.value = false;
+
+  if (nextName !== (props.data.name || 'Untitled Step')) {
+    props.data.onUpdate?.(props.id, { name: nextName });
+  }
+};
+
+const cancelName = () => {
+  isEditing.value = false;
+  nameDraft.value = props.data.name || 'Untitled Step';
+};
+
+const handleNameKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    commitName();
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    cancelName();
+  }
+};
 </script>
 
 <template>
-  <div class="relative inline-flex">
-    <!-- Run Node Button -->
-    <button
-      class="absolute -top-3 left-1/2 z-20 flex size-6 -translate-x-1/2 items-center justify-center rounded-full border border-base-300 bg-base-100 shadow-sm transition hover:-translate-y-0.5 hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50"
-      :disabled="data.disabled"
+  <div class="relative inline-flex group">
+    <!-- Run Node Icon -->
+    <PlayIcon
+      class="absolute -top-7 left-3 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-50 group-hover:opacity-70"
+      :class="{
+        'pointer-events-none opacity-50': data.disabled,
+        'opacity-70': props.selected
+      }"
       aria-label="Run node"
       title="Run node"
       @click.stop="data.onRunNode?.(props.id)"
-    >
-      <PlayIcon class="text-base-content/70 size-3.5" />
-    </button>
+    />
+
+    <!-- Power Icon -->
+    <PowerIcon
+      class="absolute -top-7 left-12 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
+      :class="{ 'opacity-70': props.selected }"
+      aria-label="Power"
+      title="Power"
+    />
+
+    <!-- Bookmark Icon -->
+    <BookmarkSolidIcon
+      class="absolute -top-7 left-21 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
+      :class="{ 'opacity-70': props.selected }"
+      aria-label="Bookmark"
+      title="Bookmark"
+    />
 
     <!-- Input Handle -->
     <div
@@ -285,9 +337,26 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false);
       <div class="min-w-0 flex-1">
         <!-- Title Row -->
         <div class="mb-1 flex items-start justify-between gap-2">
-          <h3 class="text-base-content truncate text-sm leading-tight font-semibold">
-            {{ data.name || 'Untitled Step' }}
-          </h3>
+          <div class="min-w-0 w-36">
+            <input
+              v-if="isEditing"
+              ref="nameInputRef"
+              v-model="nameDraft"
+              class="input input-xs nodrag bg-base-100/90 text-base-content/80 h-6 w-full rounded-lg text-xs font-semibold"
+              type="text"
+              @keydown="handleNameKeydown"
+              @blur="commitName"
+              @mousedown.stop
+            />
+            <h3
+              v-else
+              class="text-base-content truncate text-sm leading-tight font-semibold h-6 flex items-center"
+              title="Double click to rename"
+              @dblclick.stop="startEditing"
+            >
+              {{ data.name || 'Untitled Step' }}
+            </h3>
+          </div>
 
           <div class="flex items-center gap-1">
             <!-- Lock indicator -->
@@ -307,19 +376,12 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false);
             <!-- Edit button -->
             <button
               class="btn btn-ghost btn-xs opacity-0 transition-opacity group-hover:opacity-100"
-              aria-label="Edit step"
-              @click.stop="clientStore.openConfigModal(props.id)"
+              aria-label="Edit step name"
+              @click.stop="startEditing"
             >
               <PencilIcon class="text-base-content/60 size-4" />
             </button>
 
-            <!-- Actions menu -->
-            <button
-              class="btn btn-ghost btn-xs opacity-0 transition-opacity group-hover:opacity-100"
-              aria-label="Step actions"
-            >
-              <EllipsisVerticalIcon class="text-base-content/60 size-5" />
-            </button>
           </div>
         </div>
 

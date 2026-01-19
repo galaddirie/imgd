@@ -129,6 +129,7 @@ export interface StepNodeData {
   isGroupingCandidate?: boolean;
   groupingColor?: string;
   onRunNode?: (stepId: string) => void;
+  onUpdate?: (stepId: string, changes: { name?: string }) => void;
 }
 
 export interface EdgeData {

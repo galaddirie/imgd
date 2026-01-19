@@ -266,6 +266,7 @@ const { nodes } = useWorkflowNodes({
   currentUserId: () => props.currentUserId,
   onRunNode: stepId => handleRunNode(stepId),
   onUpdateGroup: (groupId, changes) => emit('update_group', { group_id: groupId, changes }),
+  onUpdateStep: (stepId, changes) => emit('update_step', { step_id: stepId, changes }),
   onMoveSteps: handleMoveSteps,
   groupingPreview: () => groupingPreview.value,
 });
