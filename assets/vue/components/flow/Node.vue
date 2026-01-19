@@ -275,6 +275,10 @@ const cancelName = () => {
   nameDraft.value = props.data.name || 'Untitled Step';
 };
 
+const handleTogglePin = () => {
+  props.data.onTogglePin?.(props.id, !!props.data.pinned);
+};
+
 const handleNameKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -308,12 +312,15 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       title="Power"
     />
 
-    <!-- Bookmark Icon -->
-    <BookmarkSolidIcon
+    <!-- Pin Output Icon -->
+    <component
+      :is="data.pinned ? BookmarkSolidIcon : BookmarkIcon"
       class="absolute -top-7 left-21 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
-      :class="{ 'opacity-70': props.selected }"
-      aria-label="Bookmark"
-      title="Bookmark"
+      :class="{ 'opacity-70': props.selected || data.pinned }"
+      :style="data.pinned ? { color: oklchToHex(colorMap.pinned) } : undefined"
+      :aria-label="data.pinned ? 'Unpin output' : 'Pin output'"
+      :title="data.pinned ? 'Unpin output' : 'Pin output'"
+      @click.stop="handleTogglePin"
     />
 
     <!-- Input Handle -->

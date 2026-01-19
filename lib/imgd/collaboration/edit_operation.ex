@@ -38,7 +38,11 @@ defmodule Imgd.Collaboration.EditOperation do
         :add_group,
         :update_group,
         :remove_group,
-        :set_group_membership
+        :set_group_membership,
+        :pin_step_output,
+        :unpin_step_output,
+        :disable_step,
+        :enable_step
       ]
 
     field :payload, :map

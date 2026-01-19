@@ -290,12 +290,13 @@ defmodule Imgd.Collaboration.EditSession.Server do
   defp load_initial_state(workflow_id) do
     with {:ok, draft} <- Workflows.get_draft(workflow_id),
          {:ok, last_seq, ops} <- Persistence.load_pending_ops(workflow_id) do
-      {draft, seq} = replay_operations(draft, ops, last_seq)
+      editor_state = EditorState.from_settings(workflow_id, draft.settings || %{})
+      {draft, editor_state, seq} = replay_operations(draft, editor_state, ops, last_seq)
 
       state = %State{
         workflow_id: workflow_id,
         draft: draft,
-        editor_state: %EditorState{workflow_id: workflow_id},
+        editor_state: editor_state,
         seq: seq,
         op_buffer: ops,
         applied_ops: MapSet.new(Enum.map(ops, & &1.operation_id)),
@@ -306,19 +307,17 @@ defmodule Imgd.Collaboration.EditSession.Server do
     end
   end
 
-  defp replay_operations(draft, ops, initial_seq) do
-    Enum.reduce(ops, {draft, initial_seq}, fn op, {d, seq} ->
-      case Operations.apply(d, op) do
-        {:ok, new_draft} ->
-          {new_draft, max(seq, op.seq)}
+  defp replay_operations(draft, editor_state, ops, initial_seq) do
+    Enum.reduce(ops, {draft, editor_state, initial_seq}, fn op, {d, state, seq} ->
+      {new_draft, new_editor_state, _editor_state_changed} = apply_to_state(d, state, op)
+      {new_draft, new_editor_state, max(seq, op.seq)}
+    rescue
+      error ->
+        Logger.error(
+          "Failed to replay operation #{op.operation_id} (type: #{op.type}) during recovery: #{inspect(error)}"
+        )
 
-        {:error, reason} ->
-          Logger.error(
-            "Failed to replay operation #{op.operation_id} (type: #{op.type}) during recovery: #{inspect(reason)}"
-          )
-
-          {d, seq}
-      end
+        {d, state, seq}
     end)
   end
 
@@ -388,39 +387,60 @@ defmodule Imgd.Collaboration.EditSession.Server do
              :remove_group,
              :set_group_membership
            ] ->
-        {:ok, new_draft} = Operations.apply(draft, operation)
+        case Operations.apply(draft, operation) do
+          {:ok, new_draft} ->
+            # Clean up editor state if step was removed
+            new_editor_state =
+              if type == :remove_step do
+                step_id =
+                  Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
 
-        # Clean up editor state if step was removed
-        new_editor_state =
-          if type == :remove_step do
-            step_id =
-              Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
+                editor_state
+                |> EditorState.unpin_output(step_id)
+                |> EditorState.enable_step(step_id)
+              else
+                editor_state
+              end
 
-            editor_state
-            |> EditorState.unpin_output(step_id)
-            |> EditorState.enable_step(step_id)
-          else
-            editor_state
-          end
+            {new_draft, new_editor_state, type == :remove_step}
 
-        {new_draft, new_editor_state, type == :remove_step}
+          {:error, reason} ->
+            Logger.error("Failed to apply operation #{inspect(operation.type)}: #{inspect(reason)}")
+            {draft, editor_state, false}
+        end
 
       # Editor-only operations - modify editor state only
       :pin_step_output ->
+        step_id = Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
+
+        output_data =
+          cond do
+            Map.has_key?(operation.payload, :output_data) ->
+              Map.get(operation.payload, :output_data)
+
+            Map.has_key?(operation.payload, "output_data") ->
+              Map.get(operation.payload, "output_data")
+
+            true ->
+              %{}
+          end
+
         new_editor_state =
           EditorState.pin_output(
             editor_state,
-            operation.payload.step_id,
-            operation.payload[:output_data] || %{}
+            step_id,
+            output_data
           )
 
         {draft, new_editor_state, true}
 
       :unpin_step_output ->
+        step_id = Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
+
         new_editor_state =
           EditorState.unpin_output(
             editor_state,
-            operation.payload.step_id
+            step_id
           )
 
         {draft, new_editor_state, true}
@@ -429,8 +449,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
         new_editor_state =
           EditorState.disable_step(
             editor_state,
-            Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id"),
-            Map.get(operation.payload, :mode) || Map.get(operation.payload, "mode") || :skip
+            Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
           )
 
         {draft, new_editor_state, true}
@@ -439,7 +458,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
         new_editor_state =
           EditorState.enable_step(
             editor_state,
-            operation.payload.step_id
+            Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
           )
 
         {draft, new_editor_state, true}
@@ -706,7 +725,6 @@ defmodule Imgd.Collaboration.EditSession.Server do
     %{
       pinned_outputs: editor_state.pinned_outputs,
       disabled_steps: MapSet.to_list(editor_state.disabled_steps),
-      disabled_mode: editor_state.disabled_mode,
       step_locks: editor_state.step_locks,
       webhook_test: editor_state.webhook_test
     }

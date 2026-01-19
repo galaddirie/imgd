@@ -385,8 +385,28 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # =============================================================================
 
   @impl true
-  def handle_event("pin_output", %{"step_id" => step_id}, socket) do
-    apply_operation(socket, :pin_step_output, %{step_id: step_id, output_data: %{}})
+  def handle_event("pin_output", params, socket) do
+    step_id = fetch_payload_value(params, :step_id)
+
+    if is_nil(step_id) do
+      {:noreply, socket}
+    else
+      output_data_present? = payload_has_key?(params, :output_data)
+      item_index = parse_item_index(params)
+
+      output_data =
+        if output_data_present? do
+          fetch_payload_value(params, :output_data)
+        else
+          resolve_pin_output(socket.assigns.step_executions, step_id, item_index)
+        end
+
+      if !output_data_present? and is_nil(output_data) do
+        {:noreply, put_flash(socket, :error, "No output data available to pin yet")}
+      else
+        apply_operation(socket, :pin_step_output, %{step_id: step_id, output_data: output_data})
+      end
+    end
   end
 
   @impl true
@@ -1422,6 +1442,111 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   defp fetch_payload_value(_payload, _key), do: nil
+
+  defp payload_has_key?(payload, key) when is_map(payload) do
+    Map.has_key?(payload, key) || Map.has_key?(payload, Atom.to_string(key))
+  end
+
+  defp payload_has_key?(_payload, _key), do: false
+
+  defp parse_item_index(payload) do
+    case fetch_payload_value(payload, :item_index) do
+      nil ->
+        nil
+
+      index when is_integer(index) ->
+        index
+
+      index when is_binary(index) ->
+        case Integer.parse(index) do
+          {parsed, _} -> parsed
+          :error -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp resolve_pin_output(step_executions, step_id, item_index) do
+    candidates =
+      step_executions
+      |> Enum.filter(&step_execution_matches?(&1, step_id, item_index))
+      |> then(fn matches ->
+        if matches == [] and not is_nil(item_index) do
+          Enum.filter(step_executions, &step_execution_matches?(&1, step_id, nil))
+        else
+          matches
+        end
+      end)
+
+    case pick_latest_execution(candidates) do
+      nil -> nil
+      execution -> Map.get(execution, :output_data)
+    end
+  end
+
+  defp step_execution_matches?(execution, step_id, nil) do
+    Map.get(execution, :step_id) == step_id
+  end
+
+  defp step_execution_matches?(execution, step_id, item_index) do
+    Map.get(execution, :step_id) == step_id and Map.get(execution, :item_index) == item_index
+  end
+
+  defp pick_latest_execution([]), do: nil
+
+  defp pick_latest_execution(executions) do
+    completed =
+      Enum.filter(executions, fn execution ->
+        status = Map.get(execution, :status)
+        status in [:completed, "completed"]
+      end)
+
+    candidates = if completed == [], do: executions, else: completed
+
+    Enum.max_by(candidates, &execution_timestamp/1, fn -> nil end)
+  end
+
+  defp execution_timestamp(execution) do
+    completed_at = Map.get(execution, :completed_at)
+    started_at = Map.get(execution, :started_at)
+    inserted_at = Map.get(execution, :inserted_at)
+
+    timestamp_from(completed_at) || timestamp_from(started_at) || timestamp_from(inserted_at) || 0
+  end
+
+  defp timestamp_from(nil), do: nil
+
+  defp timestamp_from(%DateTime{} = datetime) do
+    DateTime.to_unix(datetime, :millisecond)
+  end
+
+  defp timestamp_from(%NaiveDateTime{} = datetime) do
+    datetime
+    |> DateTime.from_naive!("Etc/UTC")
+    |> DateTime.to_unix(:millisecond)
+  end
+
+  defp timestamp_from(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} ->
+        DateTime.to_unix(datetime, :millisecond)
+
+      _ ->
+        case NaiveDateTime.from_iso8601(value) do
+          {:ok, datetime} ->
+            datetime
+            |> DateTime.from_naive!("Etc/UTC")
+            |> DateTime.to_unix(:millisecond)
+
+          _ ->
+            nil
+        end
+    end
+  end
+
+  defp timestamp_from(_value), do: nil
 
   defp default_step_status(:step_started), do: :running
   defp default_step_status(:step_failed), do: :failed

@@ -130,6 +130,7 @@ export interface StepNodeData {
   groupingColor?: string;
   onRunNode?: (stepId: string) => void;
   onUpdate?: (stepId: string, changes: { name?: string }) => void;
+  onTogglePin?: (stepId: string, isPinned: boolean) => void;
 }
 
 export interface EdgeData {

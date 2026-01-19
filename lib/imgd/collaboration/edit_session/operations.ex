@@ -84,7 +84,8 @@ defmodule Imgd.Collaboration.EditSession.Operations do
 
     case do_apply(draft, type, payload) do
       {:ok, updated_draft} = result ->
-        if draft == updated_draft do
+        if draft == updated_draft and
+             type not in [:pin_step_output, :unpin_step_output, :disable_step, :enable_step] do
           Logger.warning("Operations.apply: No changes made to draft for type=#{inspect(type)}")
         end
 
@@ -468,6 +469,11 @@ defmodule Imgd.Collaboration.EditSession.Operations do
 
     draft = %{draft | groups: groups}
     draft = update_step_positions(draft, step_positions)
+    {:ok, draft}
+  end
+
+  defp do_apply(draft, type, _payload)
+       when type in [:pin_step_output, :unpin_step_output, :disable_step, :enable_step] do
     {:ok, draft}
   end
 

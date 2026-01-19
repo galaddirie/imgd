@@ -166,7 +166,10 @@ const emit = defineEmits<{
     }
   ): void;
   (e: 'remove_connection', payload: { connection_id: string }): void;
-  (e: 'pin_output', payload: { step_id: string }): void;
+  (
+    e: 'pin_output',
+    payload: { step_id: string; output_data?: unknown; item_index?: number | null }
+  ): void;
   (e: 'unpin_output', payload: { step_id: string }): void;
   (e: 'disable_step', payload: { step_id: string; mode: 'skip' | 'exclude' }): void;
   (e: 'enable_step', payload: { step_id: string }): void;
@@ -268,6 +271,7 @@ const { nodes } = useWorkflowNodes({
   onUpdateGroup: (groupId, changes) => emit('update_group', { group_id: groupId, changes }),
   onUpdateStep: (stepId, changes) => emit('update_step', { step_id: stepId, changes }),
   onMoveSteps: handleMoveSteps,
+  onTogglePin: handleTogglePin,
   groupingPreview: () => groupingPreview.value,
 });
 
@@ -855,6 +859,83 @@ const isExecutionRunning = computed(() => {
   const status = props.execution?.status;
   return status === 'running' || status === 'pending';
 });
+
+type PinPayload = { step_id: string; output_data?: unknown; item_index?: number | null };
+
+const toTimestamp = (value: unknown) => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+const resolvePinExecution = (stepId: string, itemIndex?: number | null) => {
+  const executions = props.stepExecutions.filter(se => se.step_id === stepId);
+  if (!executions.length) return null;
+
+  const filtered =
+    itemIndex === null || itemIndex === undefined
+      ? executions
+      : executions.filter(se => se.item_index === itemIndex);
+  const candidates = filtered.length ? filtered : executions;
+  const completed = candidates.filter(se => se.status === 'completed');
+  const pool = completed.length ? completed : candidates;
+
+  return pool.reduce<StepExecution | null>((best, current) => {
+    if (!best) return current;
+    const bestTime = toTimestamp(best.completed_at ?? best.started_at ?? best.inserted_at);
+    const currentTime = toTimestamp(current.completed_at ?? current.started_at ?? current.inserted_at);
+    return currentTime >= bestTime ? current : best;
+  }, null);
+};
+
+const buildPinPayload = (stepId: string, itemIndex?: number | null) => {
+  const execution = resolvePinExecution(stepId, itemIndex);
+  if (!execution) return { step_id: stepId };
+
+  return {
+    step_id: stepId,
+    output_data: execution.output_data ?? null,
+    item_index: execution.item_index ?? null,
+  };
+};
+
+const emitPinOutput = (stepId: string, itemIndex?: number | null) => {
+  emit('pin_output', buildPinPayload(stepId, itemIndex));
+};
+
+const handlePinOutput = (payload: PinPayload) => {
+  if (!payload || !payload.step_id) return;
+  const hasOutputData = Object.prototype.hasOwnProperty.call(payload, 'output_data');
+
+  if (hasOutputData) {
+    emit('pin_output', {
+      step_id: payload.step_id,
+      output_data: payload.output_data ?? null,
+      item_index: payload.item_index ?? null,
+    });
+    return;
+  }
+
+  emitPinOutput(payload.step_id, payload.item_index);
+};
+
+const handleUnpinOutput = (payload: { step_id: string }) => {
+  if (!payload?.step_id) return;
+  emit('unpin_output', { step_id: payload.step_id });
+};
+
+function handleTogglePin(stepId: string, isPinned: boolean) {
+  if (isPinned) {
+    emit('unpin_output', { step_id: stepId });
+    return;
+  }
+
+  emitPinOutput(stepId);
+}
 
 // Filter out current user from presences for cursor display
 const otherUserPresences = computed(() => {
@@ -1527,11 +1608,7 @@ const handleContextMenuSelect = (itemId: string) => {
     case 'toggle-pin':
       if (nodeId) {
         const node = nodes.value.find(n => n.id === nodeId);
-        if (node?.data?.pinned) {
-          emit('unpin_output', { step_id: nodeId });
-        } else {
-          emit('pin_output', { step_id: nodeId });
-        }
+        handleTogglePin(nodeId, !!node?.data?.pinned);
       }
       break;
     case 'add-step':
@@ -1943,6 +2020,8 @@ const requestNodeRemoval = (nodeId: string) => {
         @save="handleSaveConfig"
         @delete="handleDeleteStep"
         @preview_expression="handlePreviewExpression"
+        @pin_output="handlePinOutput"
+        @unpin_output="handleUnpinOutput"
         @toggle_webhook_test="handleToggleWebhookTest"
       />
 

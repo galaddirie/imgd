@@ -5,13 +5,13 @@ defmodule Imgd.Collaboration.EditorState do
   Not persisted - reconstructed when session starts.
   """
 
+  alias Imgd.Runtime.Serializer
+
   defstruct [
     :workflow_id,
     # %{step_id => output_data}
     pinned_outputs: %{},
     disabled_steps: MapSet.new(),
-    # %{step_id => :skip | :exclude}
-    disabled_mode: %{},
     # step_id for partial execution
     execution_start: nil,
     # %{step_id => user_id} - soft locks
@@ -33,19 +33,17 @@ defmodule Imgd.Collaboration.EditorState do
     %{state | pinned_outputs: Map.delete(state.pinned_outputs, step_id)}
   end
 
-  def disable_step(state, step_id, mode \\ :skip) do
+  def disable_step(state, step_id) do
     %{
       state
-      | disabled_steps: MapSet.put(state.disabled_steps, step_id),
-        disabled_mode: Map.put(state.disabled_mode, step_id, mode)
+      | disabled_steps: MapSet.put(state.disabled_steps, step_id)
     }
   end
 
   def enable_step(state, step_id) do
     %{
       state
-      | disabled_steps: MapSet.delete(state.disabled_steps, step_id),
-        disabled_mode: Map.delete(state.disabled_mode, step_id)
+      | disabled_steps: MapSet.delete(state.disabled_steps, step_id)
     }
   end
 
@@ -56,6 +54,44 @@ defmodule Imgd.Collaboration.EditorState do
   def disable_webhook_test(state) do
     %{state | webhook_test: nil}
   end
+
+  def to_settings(%__MODULE__{} = state) do
+    %{
+      "pinned_outputs" => normalize_pinned_outputs(state.pinned_outputs),
+      "disabled_steps" => MapSet.to_list(state.disabled_steps)
+    }
+  end
+
+  def from_settings(workflow_id, settings) when is_map(settings) do
+    editor_state =
+      Map.get(settings, "editor_state") || Map.get(settings, :editor_state) || %{}
+
+    pinned_outputs =
+      Map.get(editor_state, "pinned_outputs") || Map.get(editor_state, :pinned_outputs) || %{}
+
+    disabled_steps =
+      editor_state
+      |> Map.get("disabled_steps") || Map.get(editor_state, :disabled_steps) || []
+      |> List.wrap()
+
+    %__MODULE__{
+      workflow_id: workflow_id,
+      pinned_outputs: pinned_outputs,
+      disabled_steps: MapSet.new(disabled_steps)
+    }
+  end
+
+  def from_settings(workflow_id, _settings) do
+    %__MODULE__{workflow_id: workflow_id}
+  end
+
+  defp normalize_pinned_outputs(outputs) when is_map(outputs) do
+    Map.new(outputs, fn {step_id, output} ->
+      {to_string(step_id), Serializer.wrap_for_db(output)}
+    end)
+  end
+
+  defp normalize_pinned_outputs(_outputs), do: %{}
 
   def acquire_lock(state, step_id, user_id) do
     now = DateTime.utc_now()

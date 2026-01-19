@@ -26,6 +26,7 @@ import {
   VariableIcon,
   GlobeAltIcon,
   PencilIcon,
+  BookmarkIcon,
 } from '@heroicons/vue/24/outline';
 import { unwrapData, formatDataForDisplay } from '@/lib/dataUtils';
 
@@ -53,7 +54,14 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-const emit = defineEmits(['close', 'save', 'preview_expression', 'toggle_webhook_test']);
+const emit = defineEmits([
+  'close',
+  'save',
+  'preview_expression',
+  'toggle_webhook_test',
+  'pin_output',
+  'unpin_output',
+]);
 
 const activeTab = ref<'config' | 'output' | 'pinned'>('config');
 const fieldModes = ref<Record<string, 'literal' | 'expression'>>({});
@@ -221,6 +229,36 @@ const activeStepExecution = computed(() => {
   // Otherwise return the first (or only) execution
   return executions[0];
 });
+
+const pinnedOutputs = computed(() => props.editorState?.pinned_outputs ?? {});
+const hasPinnedOutput = computed(() => {
+  const stepId = props.node?.id;
+  if (!stepId) return false;
+  return Object.prototype.hasOwnProperty.call(pinnedOutputs.value, stepId);
+});
+const pinnedOutput = computed(() => {
+  if (!props.node?.id || !hasPinnedOutput.value) return null;
+  return pinnedOutputs.value[props.node.id];
+});
+const canPinOutput = computed(() => {
+  const execution = activeStepExecution.value;
+  return !!execution && execution.status === 'completed';
+});
+const pinButtonLabel = computed(() => (hasPinnedOutput.value ? 'Update Pin' : 'Pin Output'));
+
+const pinOutput = () => {
+  if (!props.node || !activeStepExecution.value || !canPinOutput.value) return;
+  emit('pin_output', {
+    step_id: props.node.id,
+    output_data: activeStepExecution.value.output_data ?? null,
+    item_index: activeStepExecution.value.item_index ?? null,
+  });
+};
+
+const unpinOutput = () => {
+  if (!props.node) return;
+  emit('unpin_output', { step_id: props.node.id });
+};
 
 const toRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -1107,6 +1145,19 @@ const toggleWebhookListening = () => {
                   </h4>
                   <div class="flex items-center gap-2">
                     <button
+                      @click.stop="pinOutput"
+                      class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
+                      :disabled="!canPinOutput"
+                      :title="
+                        canPinOutput
+                          ? pinButtonLabel
+                          : 'Run the workflow to capture output before pinning'
+                      "
+                    >
+                      <BookmarkIcon class="h-3 w-3" />
+                      {{ pinButtonLabel }}
+                    </button>
+                    <button
                       @click.stop="copyExpression('steps', node?.id)"
                       class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
                     >
@@ -1126,6 +1177,9 @@ const toggleWebhookListening = () => {
                       </svg>
                       Copy Expression
                     </button>
+                    <span v-if="hasPinnedOutput" class="badge badge-secondary badge-sm"
+                      >Pinned</span
+                    >
                     <span
                       v-if="activeStepExecution.status === 'completed'"
                       class="badge badge-success badge-sm"
@@ -1172,22 +1226,78 @@ const toggleWebhookListening = () => {
             </div>
           </div>
 
-          <div v-else class="flex h-full flex-col items-center justify-center opacity-40">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="mb-4 h-16 w-16"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+          <div v-else class="custom-scrollbar mx-auto h-full max-w-4xl space-y-8 p-4">
+            <div v-if="hasPinnedOutput" class="space-y-6 pb-20">
+              <section class="space-y-3">
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <h4 class="text-base-content/40 text-xs font-bold tracking-widest uppercase">
+                      Pinned Output
+                    </h4>
+                    <p class="text-base-content/50 mt-1 text-xs font-medium">
+                      Pinned outputs are reused when running previews.
+                    </p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button
+                      @click.stop="pinOutput"
+                      class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
+                      :disabled="!canPinOutput"
+                      :title="
+                        canPinOutput
+                          ? pinButtonLabel
+                          : 'Run the workflow to capture output before pinning'
+                      "
+                    >
+                      <BookmarkIcon class="h-3 w-3" />
+                      {{ pinButtonLabel }}
+                    </button>
+                    <button
+                      class="btn btn-xs btn-ghost text-error/80 hover:text-error"
+                      @click.stop="unpinOutput"
+                    >
+                      Unpin
+                    </button>
+                  </div>
+                </div>
+                <div
+                  class="bg-base-300/30 overflow-x-auto rounded-2xl p-4 font-mono text-xs whitespace-pre"
+                >
+                  {{ formatDataForDisplay(pinnedOutput) }}
+                </div>
+              </section>
+            </div>
+
+            <div
+              v-else
+              class="flex h-full flex-col items-center justify-center gap-3 text-center opacity-40"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-              />
-            </svg>
-            <p class="text-sm font-bold">No pinned snapshots</p>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-16 w-16"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+                />
+              </svg>
+              <div>
+                <p class="text-sm font-bold">No pinned output</p>
+                <p class="text-xs">Pin an output to reuse it during previews.</p>
+              </div>
+              <button
+                v-if="canPinOutput"
+                class="btn btn-xs btn-primary"
+                @click.stop="pinOutput"
+              >
+                Pin latest output
+              </button>
+            </div>
           </div>
         </div>
       </div>
