@@ -304,7 +304,7 @@ const groupByStepId = computed(() => {
 const clickTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const canvasRef = ref<HTMLElement | null>(null);
 const DUPLICATE_OFFSET: XYPosition = { x: 50, y: 50 };
-const GROUP_PADDING = 60;
+const GROUP_PADDING = 25;
 const clipboard = ref<{ stepIds: string[] } | null>(null);
 const clipboardPasteCount = ref(0);
 const pendingDuplicateSelection = ref<string[] | null>(null);
