@@ -241,6 +241,19 @@ export interface TraceEntry {
   error?: string;
   item_index?: number | null;
   items_total?: number | null;
+  isMultiItem?: boolean;
+  iterations?: Array<{
+    id: string;
+    status: StepExecutionStatus;
+    duration_us?: number;
+    timestamp?: string;
+    input_data?: unknown;
+    output_data?: unknown;
+    error?: string;
+    item_index?: number | null;
+  }>;
+  input_data?: unknown;
+  output_data?: unknown;
 }
 
 // =============================================================================
