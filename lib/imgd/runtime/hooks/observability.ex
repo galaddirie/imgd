@@ -39,7 +39,6 @@ defmodule Imgd.Runtime.Hooks.Observability do
     workflow_id = Keyword.get(opts, :workflow_id, "unknown")
     _skip_production_init? = Keyword.get(opts, :skip_production_init, false)
 
-
     # Store context in workflow metadata for access in hooks
     workflow = put_hook_context(workflow, execution_id, workflow_id)
 
@@ -297,7 +296,11 @@ defmodule Imgd.Runtime.Hooks.Observability do
 
   This replaces the ProductionsCounter logic with direct calculation from Runic fact data.
   """
-  @spec calculate_output_item_count(Runic.Workflow.Fact.t(), :regular | :fan_out | :fan_in | :reduce, boolean()) :: non_neg_integer()
+  @spec calculate_output_item_count(
+          Runic.Workflow.Fact.t(),
+          :regular | :fan_out | :fan_in | :reduce,
+          boolean()
+        ) :: non_neg_integer()
   def calculate_output_item_count(_fact, _step_type, true = _skipped), do: 0
 
   def calculate_output_item_count(fact, step_type, false = _skipped) do

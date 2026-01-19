@@ -143,13 +143,11 @@ defmodule Imgd.Runtime.Execution.Server do
     # Always flush buffered step events before dying
     flush_step_executions(execution_id)
 
-
     :ok
   end
 
   @impl true
   def handle_info(:run, state) do
-
     # Transition to running in DB if pending
     if state.status == :pending do
       update_status(state.execution_id, :running)
@@ -175,7 +173,6 @@ defmodule Imgd.Runtime.Execution.Server do
         # Sync the Runic graph results back to the Imgd context
         new_state = %{state | runic_workflow: new_runic_wrk, status: :completed}
         finalize_execution(new_state)
-
 
         # Flush step events to DB
         flush_step_executions(state.execution_id)
@@ -326,7 +323,6 @@ defmodule Imgd.Runtime.Execution.Server do
   end
 
   defp handle_failure(state, step_id, reason) do
-
     error_map = Execution.format_error({:step_failed, step_id, reason})
     completed_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 

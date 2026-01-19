@@ -115,6 +115,7 @@ const traces = computed<TraceEntry[]>(() => {
         id: se.id,
         step_id: se.step_id,
         step_name: stepName,
+        step_type_id: se.step_type_id,
         status: se.status,
         duration_us: se.duration_us,
         timestamp: formatTraceTimestamp(se),
@@ -282,6 +283,9 @@ const selectStep = (stepId: string) => {
                 {{ trace.timestamp }}
                 <span v-if="trace.step_id === trace.step_name" class="opacity-60"
                   >• {{ trace.step_id }}</span
+                >
+                <span v-if="trace.step_type_id" class="opacity-60"
+                  >• {{ trace.step_type_id }}</span
                 >
               </div>
             </div>

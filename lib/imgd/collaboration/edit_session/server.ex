@@ -315,9 +315,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
       end)
     rescue
       error ->
-        Logger.error(
-          "Failed to replay operations during recovery: #{inspect(error)}"
-        )
+        Logger.error("Failed to replay operations during recovery: #{inspect(error)}")
 
         {draft, editor_state, initial_seq}
     end
@@ -407,7 +405,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
             {new_draft, new_editor_state, type == :remove_step}
 
           {:error, reason} ->
-            Logger.error("Failed to apply operation #{inspect(operation.type)}: #{inspect(reason)}")
+            Logger.error(
+              "Failed to apply operation #{inspect(operation.type)}: #{inspect(reason)}"
+            )
+
             {draft, editor_state, false}
         end
 

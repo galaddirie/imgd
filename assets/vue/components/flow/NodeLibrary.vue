@@ -182,7 +182,7 @@ const getIcon = (iconName: string) => iconMap[iconName] || CodeBracketIcon;
         </button>
 
         <!-- Category Items -->
-        <div v-show="expandedCategories.has(category)" class="mt-1 space-y-1">
+        <div v-show="expandedCategories.has(category) || searchQuery.length > 0" class="mt-1 space-y-1">
           <div
             v-for="item in items"
             :key="item.type_id"

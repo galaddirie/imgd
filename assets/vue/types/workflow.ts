@@ -234,6 +234,7 @@ export interface TraceEntry {
   id: string;
   step_id: string;
   step_name: string;
+  step_type_id?: string;
   status: StepExecutionStatus;
   duration_us?: number;
   timestamp?: string;

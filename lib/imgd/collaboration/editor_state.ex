@@ -71,8 +71,9 @@ defmodule Imgd.Collaboration.EditorState do
 
     disabled_steps =
       editor_state
-      |> Map.get("disabled_steps") || Map.get(editor_state, :disabled_steps) || []
-      |> List.wrap()
+      |> Map.get("disabled_steps") || Map.get(editor_state, :disabled_steps) ||
+        []
+        |> List.wrap()
 
     %__MODULE__{
       workflow_id: workflow_id,
