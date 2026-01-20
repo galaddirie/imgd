@@ -5,7 +5,7 @@ import type { NodeProps } from '@vue-flow/core';
 import Handle from './Handle.vue';
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '@/lib/color';
 import { useThemeStore } from '@/stores/theme';
-import { useClientStore } from '@/store/clientStore';
+import { useClientStore } from '@/stores/clientStore';
 import type { StepNodeData } from '@/types/workflow';
 import {
   GlobeAltIcon,

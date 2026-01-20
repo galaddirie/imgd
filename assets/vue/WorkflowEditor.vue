@@ -18,20 +18,20 @@ import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
 import { useThrottleFn } from '@vueuse/core';
 
-import NodeLibrary from './components/flow/NodeLibrary.vue';
-import StepConfigModal from './components/flow/StepConfigModal.vue';
-import EditorToolbar from './components/flow/EditorToolbar.vue';
-import ExecutionTracePanel from './components/flow/ExecutionTracePanel.vue';
-import WorkflowStepNode from './components/flow/Node.vue';
-import GroupNode from './components/flow/GroupNode.vue';
-import CustomEdge from './components/flow/Edge.vue';
-import ContextMenu from './components/ui/ContextMenu.vue';
-import CollaborativeCursors from './components/flow/CollaborativeCursors.vue';
-import type { MenuItem } from './components/ui/ContextMenu.vue';
+import NodeLibrary from '@/components/flow/NodeLibrary.vue';
+import StepConfigModal from '@/components/flow/StepConfigModal.vue';
+import EditorToolbar from '@/components/flow/EditorToolbar.vue';
+import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
+import WorkflowStepNode from '@/components/flow/Node.vue';
+import GroupNode from '@/components/flow/GroupNode.vue';
+import CustomEdge from '@/components/flow/Edge.vue';
+import ContextMenu from '@/components/ui/ContextMenu.vue';
+import CollaborativeCursors from '@/components/flow/CollaborativeCursors.vue';
+import type { MenuItem } from '@/components/ui/ContextMenu.vue';
 
-import { useWorkflowEdges } from './composables/useWorkflowEdges';
-import { useWorkflowGraph } from './composables/useWorkflowGraph';
-import { useWorkflowNodes } from './composables/useWorkflowNodes';
+import { useWorkflowEdges } from '@/composables/useWorkflowEdges';
+import { useWorkflowGraph } from '@/composables/useWorkflowGraph';
+import { useWorkflowNodes } from '@/composables/useWorkflowNodes';
 import {
   CURSOR_THROTTLE_MS,
   DEFAULT_GROUP_COLOR,
@@ -43,11 +43,11 @@ import {
   EDGE_LABEL_HALF_HEIGHT,
   EDGE_LABEL_HALF_WIDTH,
   EDGE_LABEL_POSITION,
-} from './constants/layout';
-import { useClientStore } from './store/clientStore';
-import { useUndoStore } from './store/undoStore';
-import { oklchToHex } from './lib/color';
-import { useLayout } from './lib/useLayout';
+} from '@/constants/layout';
+import { useClientStore } from '@/stores/clientStore';
+import { useUndoStore } from '@/stores/undoStore';
+import { oklchToHex } from '@/lib/color';
+import { useLayout } from '@/lib/useLayout';
 
 import {
   TrashIcon,
@@ -76,7 +76,7 @@ import type {
   StepExecution,
   EditorState,
   UserPresence,
-} from './types/workflow';
+} from '@/types/workflow';
 
 // =============================================================================
 // Props - Data from LiveView via LiveVue
