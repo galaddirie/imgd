@@ -21,6 +21,7 @@ interface UseWorkflowNodesOptions {
   editorState: () => EditorState | undefined;
   presences: () => UserPresence[];
   currentUserId: () => string | undefined;
+  canEdit?: () => boolean;
   onRunNode?: (stepId: string) => void;
   onUpdateGroup?: (
     groupId: string,
@@ -132,6 +133,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const editorState = options.editorState();
     const presences = options.presences();
     const currentUserId = options.currentUserId();
+    const canEdit = options.canEdit?.() ?? true;
     const onRunNode = options.onRunNode;
     const groupingPreview = options.groupingPreview?.() ?? {};
     const groupingStepIds = new Set(groupingPreview.stepIds || []);
@@ -170,14 +172,15 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           color,
           isGroupingTarget: groupingTargetId === group.id,
           groupingColor,
-          onUpdate: options.onUpdateGroup,
-          onMoveSteps: options.onMoveSteps,
+          onUpdate: canEdit ? options.onUpdateGroup : undefined,
+          onMoveSteps: canEdit ? options.onMoveSteps : undefined,
+          canEdit,
         },
         style: {
           width: `${width}px`,
           height: `${height}px`,
         },
-        draggable: true,
+        draggable: canEdit,
         selectable: true,
         connectable: false,
         deletable: false,
@@ -278,9 +281,10 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           selected_by: selectedBy,
           isGroupingCandidate,
           groupingColor: isGroupingCandidate ? groupingColor : undefined,
-          onRunNode,
-          onUpdate: options.onUpdateStep,
-          onTogglePin: options.onTogglePin,
+          onRunNode: canEdit ? onRunNode : undefined,
+          onUpdate: canEdit ? options.onUpdateStep : undefined,
+          onTogglePin: canEdit ? options.onTogglePin : undefined,
+          canEdit,
         } satisfies StepNodeData,
       };
 

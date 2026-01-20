@@ -45,6 +45,7 @@ import { PlayIcon, PowerIcon, BookmarkIcon as BookmarkSolidIcon } from '@heroico
 const props = defineProps<NodeProps<StepNodeData>>();
 const themeStore = useThemeStore();
 const clientStore = useClientStore();
+const canEdit = computed(() => props.data.canEdit ?? true);
 
 const isEditing = ref(false);
 const nameDraft = ref(props.data.name || 'Untitled Step');
@@ -184,7 +185,11 @@ const nodeClasses = computed(() => [
   'group relative flex items-start gap-3 rounded-2xl border border-base-300/50 bg-base-100 p-4 shadow-md transition-shadow',
   // Different styling for trigger nodes
   props.data.step_kind === 'trigger' ? 'rounded-[50px_0.5rem_0.5rem_10px]' : '',
-  props.dragging ? 'cursor-grabbing shadow-xl' : 'cursor-grab hover:shadow-lg',
+  props.dragging
+    ? 'cursor-grabbing shadow-xl'
+    : canEdit.value
+      ? 'cursor-grab hover:shadow-lg'
+      : 'cursor-default',
   props.data.disabled ? 'opacity-60' : '',
   props.data.locked_by ? 'ring-2 ring-warning/50' : '',
   props.data.selected_by?.length ? 'ring-2 ring-offset-2' : '',
@@ -256,12 +261,14 @@ const showOutputHandle = computed(() => props.data.hasOutput !== false);
 
 // Inline editing functions
 const startEditing = () => {
+  if (!canEdit.value) return;
   isEditing.value = true;
   nameDraft.value = props.data.name || 'Untitled Step';
   nextTick(() => nameInputRef.value?.focus());
 };
 
 const commitName = () => {
+  if (!canEdit.value) return;
   const nextName = nameDraft.value.trim() || 'Untitled Step';
   isEditing.value = false;
 
@@ -276,6 +283,7 @@ const cancelName = () => {
 };
 
 const handleTogglePin = () => {
+  if (!canEdit.value) return;
   props.data.onTogglePin?.(props.id, !!props.data.pinned);
 };
 
@@ -294,6 +302,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
   <div class="relative inline-flex group">
     <!-- Run Node Icon -->
     <PlayIcon
+      v-if="canEdit"
       class="absolute -top-7 left-3 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-50 group-hover:opacity-70"
       :class="{
         'pointer-events-none opacity-50': data.disabled,
@@ -306,6 +315,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 
     <!-- Power Icon -->
     <PowerIcon
+      v-if="canEdit"
       class="absolute -top-7 left-12 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
       :class="{ 'opacity-70': props.selected }"
       aria-label="Power"
@@ -314,6 +324,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 
     <!-- Pin Output Icon -->
     <component
+      v-if="canEdit"
       :is="BookmarkSolidIcon"
       class="absolute -top-7 left-21 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
       :class="{ 'opacity-70': props.selected }"
@@ -346,7 +357,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
         <div class="mb-1 flex items-start justify-between gap-2">
           <div class="min-w-0 w-36">
             <input
-              v-if="isEditing"
+              v-if="isEditing && canEdit"
               ref="nameInputRef"
               v-model="nameDraft"
               class="input input-xs nodrag bg-base-100/90 text-base-content/80 h-6 w-full rounded-lg text-xs font-semibold"
@@ -358,8 +369,8 @@ const handleNameKeydown = (event: KeyboardEvent) => {
             <h3
               v-else
               class="text-base-content truncate text-sm leading-tight font-semibold h-6 flex items-center"
-              title="Double click to rename"
-              @dblclick.stop="startEditing"
+              :title="canEdit ? 'Double click to rename' : ''"
+              @dblclick.stop="canEdit && startEditing()"
             >
               {{ data.name || 'Untitled Step' }}
             </h3>
@@ -382,6 +393,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 
             <!-- Edit button -->
             <button
+              v-if="canEdit"
               class="btn btn-ghost btn-xs opacity-0 transition-opacity group-hover:opacity-100"
               aria-label="Edit step name"
               @click.stop="startEditing"

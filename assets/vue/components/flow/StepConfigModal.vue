@@ -44,6 +44,7 @@ type ConfigSchema = {
 interface Props {
   node: Node<StepNodeData> | null;
   isOpen: boolean;
+  canEdit?: boolean;
   stepType?: StepType | null;
   execution?: Execution | null;
   stepExecutions?: StepExecution[];
@@ -69,6 +70,7 @@ const fieldValues = ref<Record<string, unknown>>({});
 const searchQuery = ref('');
 const isEditingName = ref(false);
 const editName = ref('');
+const canEdit = computed(() => props.canEdit ?? true);
 
 // Initialize field state when node changes
 watch(
@@ -98,6 +100,7 @@ watch(
 watchDebounced(
   fieldValues,
   newValues => {
+    if (!canEdit.value) return;
     if (!props.isOpen || !props.node) return;
 
     Object.entries(newValues).forEach(([key, value]) => {
@@ -116,6 +119,10 @@ watchDebounced(
 const closeModal = () => emit('close');
 
 const saveConfig = () => {
+  if (!canEdit.value) {
+    closeModal();
+    return;
+  }
   emit('save', {
     id: props.node?.id,
     name: editName.value,
@@ -125,6 +132,7 @@ const saveConfig = () => {
 };
 
 const toggleMode = (field: string) => {
+  if (!canEdit.value) return;
   fieldModes.value[field] = fieldModes.value[field] === 'literal' ? 'expression' : 'literal';
 };
 
@@ -247,6 +255,7 @@ const canPinOutput = computed(() => {
 const pinButtonLabel = computed(() => (hasPinnedOutput.value ? 'Update Pin' : 'Pin Output'));
 
 const pinOutput = () => {
+  if (!canEdit.value) return;
   if (!props.node || !activeStepExecution.value || !canPinOutput.value) return;
   emit('pin_output', {
     step_id: props.node.id,
@@ -256,6 +265,7 @@ const pinOutput = () => {
 };
 
 const unpinOutput = () => {
+  if (!canEdit.value) return;
   if (!props.node) return;
   emit('unpin_output', { step_id: props.node.id });
 };
@@ -453,6 +463,7 @@ const copyExpression = (sectionId: string, key?: string) => {
 };
 
 const toggleWebhookListening = () => {
+  if (!canEdit.value) return;
   if (!props.node || isWebhookListeningElsewhere.value) return;
   emit('toggle_webhook_test', {
     action: isWebhookListening.value ? 'stop' : 'start',
@@ -498,7 +509,7 @@ const toggleWebhookListening = () => {
           </div>
           <div>
             <div class="flex items-center gap-2">
-              <div v-if="isEditingName" class="flex items-center gap-2">
+              <div v-if="isEditingName && canEdit" class="flex items-center gap-2">
                 <input
                   v-model="editName"
                   type="text"
@@ -514,6 +525,7 @@ const toggleWebhookListening = () => {
               >
                 {{ editName }}
                 <button
+                  v-if="canEdit"
                   class="btn btn-ghost btn-xs btn-circle opacity-0 transition-opacity group-hover/name:opacity-100"
                   @click="isEditingName = true"
                 >
@@ -720,10 +732,14 @@ const toggleWebhookListening = () => {
           <div v-if="activeTab === 'config'" class="mx-auto max-w-3xl space-y-10 pb-20">
             <div class="space-y-1">
               <h3 class="text-base-content text-lg font-semibold tracking-tight">
-                Step Configuration
+                {{ canEdit ? 'Step Configuration' : 'Step Inspector' }}
               </h3>
               <p class="text-base-content/50 text-xs font-medium">
-                Configure the parameters for this operation.
+                {{
+                  canEdit
+                    ? 'Configure the parameters for this operation.'
+                    : 'Review configuration and runtime details for this step.'
+                }}
               </p>
             </div>
 
@@ -803,7 +819,7 @@ const toggleWebhookListening = () => {
                 </div>
               </div>
 
-              <div v-if="webhookMode === 'test'" class="space-y-3 pt-2">
+              <div v-if="canEdit && webhookMode === 'test'" class="space-y-3 pt-2">
                 <div class="flex items-center gap-4">
                   <button
                     class="btn btn-sm w-full gap-2 shadow-lg"
@@ -873,7 +889,7 @@ const toggleWebhookListening = () => {
                       field.label
                     }}</label>
 
-                    <div class="join">
+                    <div v-if="canEdit" class="join">
                       <button
                         class="join-item btn btn-xs capitalize"
                         :class="fieldModes[field.key] === 'literal' ? 'btn-primary' : 'btn-ghost'"
@@ -891,6 +907,12 @@ const toggleWebhookListening = () => {
                         Expression
                       </button>
                     </div>
+                    <div
+                      v-else
+                      class="text-base-content/50 rounded-full border border-base-200 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                    >
+                      {{ fieldModes[field.key] === 'expression' ? 'Expression' : 'Fixed' }}
+                    </div>
                   </div>
 
                   <div class="p-5">
@@ -905,6 +927,7 @@ const toggleWebhookListening = () => {
                             | null
                             | undefined
                         "
+                        :readonly="!canEdit"
                         class="textarea textarea-bordered bg-base-200/10 border-base-300 focus:border-primary min-h-[100px] w-full rounded-xl font-mono text-xs"
                         :placeholder="
                           field.type === 'json'
@@ -923,6 +946,7 @@ const toggleWebhookListening = () => {
                             | undefined
                         "
                         :type="field.type === 'number' ? 'number' : 'text'"
+                        :readonly="!canEdit"
                         class="input input-md bg-base-200/20 border-base-300 focus:border-primary w-full rounded-xl text-sm font-medium"
                       />
                     </template>
@@ -937,6 +961,7 @@ const toggleWebhookListening = () => {
                               | null
                               | undefined
                           "
+                          :readonly="!canEdit"
                           class="textarea bg-base-100 border-secondary/10 focus:border-secondary/40 focus:ring-secondary/5 min-h-[80px] w-full rounded-xl border-2 font-mono text-[13px] focus:ring-4"
                           placeholder="{{ steps.PreviousStep.json.field }}"
                         ></textarea>
@@ -1145,6 +1170,7 @@ const toggleWebhookListening = () => {
                   </h4>
                   <div class="flex items-center gap-2">
                     <button
+                      v-if="canEdit"
                       @click.stop="pinOutput"
                       class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
                       :disabled="!canPinOutput"
@@ -1240,6 +1266,7 @@ const toggleWebhookListening = () => {
                   </div>
                   <div class="flex items-center gap-2">
                     <button
+                      v-if="canEdit"
                       @click.stop="pinOutput"
                       class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
                       :disabled="!canPinOutput"
@@ -1253,6 +1280,7 @@ const toggleWebhookListening = () => {
                       {{ pinButtonLabel }}
                     </button>
                     <button
+                      v-if="canEdit"
                       class="btn btn-xs btn-ghost text-error/80 hover:text-error"
                       @click.stop="unpinOutput"
                     >
@@ -1291,7 +1319,7 @@ const toggleWebhookListening = () => {
                 <p class="text-xs">Pin an output to reuse it during previews.</p>
               </div>
               <button
-                v-if="canPinOutput"
+                v-if="canEdit && canPinOutput"
                 class="btn btn-xs btn-primary"
                 @click.stop="pinOutput"
               >
@@ -1305,15 +1333,22 @@ const toggleWebhookListening = () => {
       <!-- Footer -->
       <div class="border-base-200 bg-base-100 flex items-center justify-end border-t px-8 py-5">
         <div class="flex items-center gap-4">
-          <button class="btn btn-ghost btn-sm text-base-content/60 font-bold" @click="closeModal">
-            Discard Changes
-          </button>
-          <button
-            class="btn btn-primary shadow-primary/20 rounded-xl px-8 font-bold shadow-lg"
-            @click="saveConfig"
-          >
-            Save Configuration
-          </button>
+          <template v-if="canEdit">
+            <button class="btn btn-ghost btn-sm text-base-content/60 font-bold" @click="closeModal">
+              Discard Changes
+            </button>
+            <button
+              class="btn btn-primary shadow-primary/20 rounded-xl px-8 font-bold shadow-lg"
+              @click="saveConfig"
+            >
+              Save Configuration
+            </button>
+          </template>
+          <template v-else>
+            <button class="btn btn-ghost btn-sm text-base-content/60 font-bold" @click="closeModal">
+              Close
+            </button>
+          </template>
         </div>
       </div>
     </div>

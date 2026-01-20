@@ -23,7 +23,6 @@ import { useLayoutEngine } from '@/composables/workflow/useLayoutEngine';
 import { useMiniMapNodeColor } from '@/composables/workflow/useMiniMapNodeColor';
 import { useNodeDrag } from '@/composables/workflow/useNodeDrag';
 import { useNodeInteraction } from '@/composables/workflow/useNodeInteraction';
-import { useRevisionHistory } from '@/composables/workflow/useRevisionHistory';
 import { useWorkflowActions } from '@/composables/workflow/useWorkflowActions';
 import { useWorkflowExecutionState } from '@/composables/workflow/useWorkflowExecutionState';
 import { useWorkflowNodeActions } from '@/composables/workflow/useWorkflowNodeActions';
@@ -63,17 +62,9 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   } = useVueFlow();
   const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
   const syncResetRef = ref<() => void>(() => {});
-  const revision = useRevisionHistory({
-    workflow: () => props.workflow,
-    workflowVersions: () => props.workflowVersions ?? [],
-    emit,
-    store,
-    undoStore,
-    live,
-  });
-  const canEdit = computed(() => revision.canEdit.value);
-  const activeWorkflow = computed<Workflow>(() => revision.previewDraft.value ? { ...props.workflow, draft: revision.previewDraft.value } : props.workflow);
-  const activeDraft = computed<WorkflowDraft | undefined>(() => activeWorkflow.value.draft);
+  const canEdit = computed(() => true);
+  const activeWorkflow = computed<Workflow>(() => props.workflow);
+  const activeDraft = computed<WorkflowDraft | undefined>(() => props.workflow.draft);
   const nodeActions = useWorkflowNodeActions({ canEdit: () => canEdit.value, emit });
   const pins = useWorkflowPins({ stepExecutions: () => props.stepExecutions ?? [], emit });
   const grouping = useGrouping({
@@ -91,6 +82,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     editorState: () => props.editorState,
     presences: () => props.presences ?? [],
     currentUserId: () => props.currentUserId,
+    canEdit: () => canEdit.value,
     onRunNode: nodeActions.handleRunNode,
     onUpdateGroup: nodeActions.handleUpdateGroup,
     onUpdateStep: nodeActions.handleUpdateStep,
@@ -253,7 +245,6 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   return {
     store,
     undoStore,
-    revision,
     nodes,
     edges,
     nodeTypes,
@@ -306,6 +297,5 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     presences: props.presences ?? [],
     currentUserId: props.currentUserId,
     workflow: props.workflow,
-    workflowVersions: props.workflowVersions ?? [],
   };
 }

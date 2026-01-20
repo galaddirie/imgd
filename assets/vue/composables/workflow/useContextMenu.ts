@@ -18,6 +18,7 @@ import {
   ArrowPathIcon,
   RectangleGroupIcon,
   FolderMinusIcon,
+  MagnifyingGlassIcon,
 } from '@heroicons/vue/24/outline';
 
 interface UseContextMenuOptions {
@@ -47,6 +48,21 @@ export function useContextMenu(options: UseContextMenuOptions) {
   const contextMenuItems = computed<MenuItem[]>(() => {
     const targetType = options.store.contextMenu.targetType;
     const targetNodeId = options.store.contextMenu.targetNodeId;
+
+    if (!options.canEdit()) {
+      if (targetType === 'node' && targetNodeId) {
+        const node = options.findStepNodeById(targetNodeId);
+        if (node) {
+          return [
+            { id: 'inspect', label: 'Inspect Step', icon: MagnifyingGlassIcon },
+            { id: 'divider-1', label: '', divider: true },
+            { id: 'fit-view', label: 'Fit to View', shortcut: '\u23181' },
+          ];
+        }
+      }
+
+      return [{ id: 'fit-view', label: 'Fit to View', shortcut: '\u23181' }];
+    }
 
     if (targetType === 'node' && targetNodeId) {
       const node = options.findStepNodeById(targetNodeId);
@@ -116,8 +132,15 @@ export function useContextMenu(options: UseContextMenuOptions) {
   });
 
   const handleContextMenuSelect = (itemId: string) => {
-    if (!options.canEdit()) return;
     const nodeId = options.store.contextMenu.targetNodeId;
+
+    if (!options.canEdit()) {
+      if (itemId === 'inspect' && nodeId) {
+        options.store.openConfigModal(nodeId);
+      }
+      options.store.hideContextMenu();
+      return;
+    }
 
     switch (itemId) {
       case 'group-selection':

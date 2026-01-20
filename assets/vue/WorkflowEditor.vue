@@ -3,7 +3,6 @@ import { reactive } from 'vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';
-import RevisionPanel from '@/components/flow/RevisionPanel.vue';
 import StepConfigModal from '@/components/flow/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
@@ -11,7 +10,6 @@ import { useWorkflowEditor } from '@/composables/workflow/useWorkflowEditor';
 import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowEditor';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
-  workflowVersions: () => [],
   stepTypes: () => [],
   nodeLibraryItems: () => [],
   execution: null,
@@ -32,29 +30,28 @@ const editor = reactive(useWorkflowEditor(props, emit));
       :workflow-name="editor.workflow?.name ?? 'Untitled Workflow'"
       :is-saving="false"
       :presences="editor.presences"
-      :can-undo="editor.undoStore.canUndo && !editor.revision.isRevisionPreviewActive"
-      :can-redo="editor.undoStore.canRedo && !editor.revision.isRevisionPreviewActive"
+      :can-undo="editor.undoStore.canUndo"
+      :can-redo="editor.undoStore.canRedo"
       :undo-tooltip="editor.undoStore.undoTooltip"
       :redo-tooltip="editor.undoStore.redoTooltip"
       :is-undo-pending="editor.undoStore.isPending"
-      :is-revision-open="editor.revision.isRevisionPanelOpen"
       @save="editor.handleSave"
       @undo="editor.handleUndo"
       @redo="editor.handleRedo"
       @run-test="editor.handleRunTest"
-      @toggle-revisions="editor.revision.toggleRevisionPanel"
+      @open-revisions="emit('navigate_revisions')"
     />
 
     <div class="relative flex flex-1 overflow-hidden">
       <NodeLibrary
-        v-if="editor.store.isLibraryOpen && !editor.revision.isRevisionPanelOpen"
+        v-if="editor.store.isLibraryOpen"
         :library-items="editor.nodeLibraryItems"
         class="shrink-0"
         @collapse="editor.store.isLibraryOpen = false"
       />
 
       <button
-        v-else-if="!editor.revision.isRevisionPanelOpen"
+        v-else
         class="btn btn-xs btn-circle bg-base-200 border-base-300 absolute top-1/2 left-0 z-50 ml-1 -translate-y-1/2"
         @click="editor.store.isLibraryOpen = true"
       >
@@ -76,8 +73,8 @@ const editor = reactive(useWorkflowEditor(props, emit));
           :node-types="editor.nodeTypes"
           :edge-types="editor.edgeTypes"
           :can-edit="editor.canEdit"
-          :is-revision-preview-active="editor.revision.isRevisionPreviewActive"
-          :preview-label="editor.revision.previewLabel"
+          :is-revision-preview-active="false"
+          preview-label=""
           :is-mounted="editor.isMounted"
           :other-user-presences="editor.otherUserPresences"
           :current-user-id="editor.currentUserId"
@@ -102,7 +99,6 @@ const editor = reactive(useWorkflowEditor(props, emit));
         />
 
         <ExecutionTracePanel
-          v-if="!editor.revision.isRevisionPreviewActive"
           :execution="editor.execution"
           :step-executions="editor.stepExecutions"
           :step-name-by-id="editor.stepNameById"
@@ -116,26 +112,8 @@ const editor = reactive(useWorkflowEditor(props, emit));
         />
       </div>
 
-      <RevisionPanel
-        :is-open="editor.revision.isRevisionPanelOpen"
-        :edit-stack="editor.revision.editStack"
-        :versions="editor.revision.revisionVersions"
-        :selected-revision="editor.revision.selectedRevision"
-        :is-loading="editor.revision.isRevisionPreviewLoading"
-        :preview-label="editor.revision.previewLabel"
-        :apply-action-label="editor.revision.applyActionLabel"
-        :current-version-tag="editor.workflow?.current_version_tag"
-        :workflow-updated-at="editor.workflow?.updated_at"
-        :has-preview-draft="!!editor.revision.previewDraft"
-        @close="editor.revision.toggleRevisionPanel"
-        @select-undo="editor.revision.selectUndoEntry"
-        @select-version="editor.revision.selectVersion"
-        @apply="editor.revision.applySelectedRevision"
-        @reset="editor.revision.resetRevisionPreview"
-      />
-
       <StepConfigModal
-        :is-open="editor.store.isConfigModalOpen && !editor.revision.isRevisionPreviewActive"
+        :is-open="editor.store.isConfigModalOpen"
         :node="editor.selectedNode"
         :step-type="editor.selectedStepType"
         :execution="editor.execution"
@@ -144,6 +122,7 @@ const editor = reactive(useWorkflowEditor(props, emit));
         :editor-state="editor.editorState"
         :step-name-by-id="editor.stepNameById"
         :upstream-step-ids="editor.upstreamStepIdsByStepId"
+        :can-edit="editor.canEdit"
         @close="editor.store.closeConfigModal"
         @save="editor.handleSaveConfig"
         @delete="editor.handleDeleteStep"

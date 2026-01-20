@@ -143,6 +143,7 @@ export interface StepNodeData {
   onRunNode?: (stepId: string) => void;
   onUpdate?: (stepId: string, changes: { name?: string }) => void;
   onTogglePin?: (stepId: string, isPinned: boolean) => void;
+  canEdit?: boolean;
 }
 
 export interface EdgeData {
@@ -166,6 +167,7 @@ export interface GroupNodeData {
     }
   ) => void;
   onMoveSteps?: (stepPositions: Record<string, { x: number; y: number }>) => void;
+  canEdit?: boolean;
 }
 
 export type WorkflowNodeData = StepNodeData | GroupNodeData;

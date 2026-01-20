@@ -22,6 +22,7 @@ function debounce<T extends (...args: any[]) => any>(
 const props = defineProps<NodeProps<GroupNodeData>>();
 const { getNodes, updateNode } = useVueFlow();
 const themeStore = useThemeStore();
+const canEdit = computed(() => props.data.canEdit ?? true);
 
 const DEFAULT_NAME = 'Group';
 const MIN_GROUP_WIDTH = 240;
@@ -96,7 +97,7 @@ const handleStyle = computed(() => ({
 
 const nodeClasses = computed(() => [
   'group relative h-full w-full rounded-3xl border bg-base-200/30 p-4 transition-all duration-200 ease-out',
-  props.dragging ? 'cursor-grabbing shadow-lg' : 'cursor-grab',
+  props.dragging ? 'cursor-grabbing shadow-lg' : canEdit.value ? 'cursor-grab' : 'cursor-default',
 ]);
 
 type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
@@ -126,9 +127,10 @@ const resizeHandles: Array<{ id: ResizeHandle; className: string }> = [
   { id: 'w', className: 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
 ];
 
-const resizeHandleVisibility = computed(() =>
-  isResizing.value || props.selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-);
+const resizeHandleVisibility = computed(() => {
+  if (!canEdit.value) return 'opacity-0';
+  return isResizing.value || props.selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+});
 
 const getStepPositions = () => {
   const positions: Record<string, { x: number; y: number }> = {};
@@ -256,6 +258,7 @@ const stopResize = () => {
 };
 
 const startResize = (handle: ResizeHandle, event: PointerEvent) => {
+  if (!canEdit.value) return;
   event.preventDefault();
   event.stopPropagation();
 
@@ -287,6 +290,7 @@ onBeforeUnmount(() => {
 });
 
 const startEditing = () => {
+  if (!canEdit.value) return;
   isEditing.value = true;
   nameDraft.value = props.data.name || DEFAULT_NAME;
   nextTick(() => nameInputRef.value?.focus());
@@ -317,6 +321,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 };
 
 const openColorPicker = () => {
+  if (!canEdit.value) return;
   colorInputRef.value?.click();
 };
 
@@ -325,6 +330,7 @@ const debouncedUpdateColor = debounce((color: string) => {
 }, 300);
 
 const handleColorInput = (event: Event) => {
+  if (!canEdit.value) return;
   const target = event.target as HTMLInputElement | null;
   if (!target?.value) return;
   debouncedUpdateColor(target.value);
@@ -355,7 +361,7 @@ const handleColorInput = (event: Event) => {
 
           <div class="flex items-center gap-2">
             <input
-              v-if="isEditing"
+              v-if="isEditing && canEdit"
               ref="nameInputRef"
               v-model="nameDraft"
               class="input input-xs nodrag bg-base-100/90 text-base-content/80 h-6 w-36 rounded-lg text-xs font-semibold"
@@ -367,12 +373,13 @@ const handleColorInput = (event: Event) => {
             <h3
               v-else
               class="text-base-content truncate text-sm font-semibold"
-              title="Double click to rename"
-              @dblclick.stop="startEditing"
+              :title="canEdit ? 'Double click to rename' : ''"
+              @dblclick.stop="canEdit && startEditing()"
             >
               {{ data.name || DEFAULT_NAME }}
             </h3>
             <button
+              v-if="canEdit"
               class="btn btn-ghost btn-xs nodrag text-base-content/60 hover:text-base-content"
               type="button"
               title="Rename group"
@@ -387,6 +394,7 @@ const handleColorInput = (event: Event) => {
 
       <div class="flex items-center gap-2">
         <button
+          v-if="canEdit"
           class="nodrag h-6 w-6 rounded-full border border-base-200 bg-base-100/90 shadow-sm"
           type="button"
           title="Edit group color"
@@ -395,6 +403,7 @@ const handleColorInput = (event: Event) => {
           @mousedown.stop
         ></button>
         <input
+          v-if="canEdit"
           ref="colorInputRef"
           class="absolute h-0 w-0 opacity-0"
           type="color"
@@ -412,16 +421,18 @@ const handleColorInput = (event: Event) => {
       {{ isGroupingTarget ? 'Release to add to group' : 'Drag nodes here to add them' }}
     </div>
 
-    <button
-      v-for="handle in resizeHandles"
-      :key="handle.id"
-      class="nodrag absolute z-20 size-3.5 rounded-full border shadow-sm transition hover:scale-110"
-      :class="[handle.className, resizeHandleVisibility]"
-      type="button"
-      :aria-label="`Resize group ${handle.id}`"
-      :style="handleStyle"
-      @pointerdown="startResize(handle.id, $event)"
-      @mousedown.stop
-    ></button>
+    <template v-if="canEdit">
+      <button
+        v-for="handle in resizeHandles"
+        :key="handle.id"
+        class="nodrag absolute z-20 size-3.5 rounded-full border shadow-sm transition hover:scale-110"
+        :class="[handle.className, resizeHandleVisibility]"
+        type="button"
+        :aria-label="`Resize group ${handle.id}`"
+        :style="handleStyle"
+        @pointerdown="startResize(handle.id, $event)"
+        @mousedown.stop
+      ></button>
+    </template>
   </div>
 </template>

@@ -2,7 +2,6 @@ import type { XYPosition } from '@vue-flow/core';
 
 import type {
   Workflow,
-  WorkflowVersion,
   Step,
   StepType,
   NodeLibraryItem,
@@ -10,12 +9,10 @@ import type {
   StepExecution,
   EditorState,
   UserPresence,
-  WorkflowDraft,
 } from '@/types/workflow';
 
 export interface WorkflowEditorProps {
   workflow: Workflow;
-  workflowVersions?: WorkflowVersion[];
   stepTypes?: StepType[];
   nodeLibraryItems?: NodeLibraryItem[];
   execution?: Execution | null;
@@ -106,11 +103,6 @@ export type WorkflowEditorEmits = {
   ): void;
   (e: 'save_workflow'): void;
   (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void;
-  (e: 'preview_revision', payload: { kind: 'undo'; depth: number }): void;
-  (
-    e: 'apply_revision',
-    payload: { kind: 'undo'; depth: number } | { kind: 'version'; version_id: string }
-  ): void;
   (
     e: 'mouse_move',
     payload: { x: number; y: number; dragging_steps?: Record<string, XYPosition> | null }
@@ -124,16 +116,5 @@ export type WorkflowEditorEmits = {
     e: 'toggle_webhook_test',
     payload: { step_id: string; action: 'start' | 'stop'; path?: string; method?: string }
   ): void;
+  (e: 'navigate_revisions'): void;
 };
-
-export type RevisionKind = 'undo' | 'version';
-
-export type RevisionSelection = {
-  kind: RevisionKind;
-  id: string;
-  label: string;
-  depth?: number;
-  versionTag?: string;
-};
-
-export type RevisionPreviewPayload = { kind?: string; depth?: number; draft?: WorkflowDraft };
