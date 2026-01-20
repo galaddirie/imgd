@@ -683,6 +683,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         Map.put(acc, se.step_id, Map.get(se, :output_data))
       end)
 
+    pinned_outputs = socket.assigns.editor_state.pinned_outputs || %{}
+    step_outputs = Map.merge(step_outputs, pinned_outputs)
+
     # Filter outputs to only include upstream steps
     draft = socket.assigns.workflow.draft
     graph = Imgd.Graph.from_workflow!(draft.steps, draft.connections, validate: false)
@@ -719,8 +722,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
                 Executions.get_execution_with_steps(socket.assigns.current_scope, latest.id)
 
               # Step ID is now the key-safe slug, no mapping needed
+              pinned_outputs = socket.assigns.editor_state.pinned_outputs || %{}
+
               so =
                 Map.new(full_execution.step_executions, fn se -> {se.step_id, se.output_data} end)
+                |> Map.merge(pinned_outputs)
                 |> Map.take(upstream_ids)
 
               ci =
@@ -1253,6 +1259,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     else
       preview_draft = build_preview_draft(draft, editor_state)
       pinned_outputs = editor_state.pinned_outputs || %{}
+      pinned_steps = Map.keys(pinned_outputs)
+      disabled_steps = MapSet.to_list(editor_state.disabled_steps || MapSet.new())
       trigger_data = find_trigger_data(preview_draft)
 
       attrs = %{
@@ -1262,7 +1270,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         metadata: %{
           extras:
             build_editor_execution_extras(%{
-              preview: true
+              preview: true,
+              pinned_steps: pinned_steps,
+              disabled_steps: disabled_steps
             })
         }
       }
@@ -1332,7 +1342,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
       with {:ok, partial_draft} <- build_partial_draft(preview_draft, step_id),
            {:ok, execution} <-
-             create_partial_execution(workflow.id, scope, partial_draft, step_id) do
+             create_partial_execution(workflow.id, scope, partial_draft, step_id, editor_state) do
         try do
           with :ok <- subscribe_execution(scope, execution.id),
                {:ok, _pid} <-
@@ -1395,8 +1405,11 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     end
   end
 
-  defp create_partial_execution(workflow_id, scope, draft, step_id) do
+  defp create_partial_execution(workflow_id, scope, draft, step_id, %EditorState{} = editor_state) do
     trigger_data = find_trigger_data(draft)
+    pinned_outputs = editor_state.pinned_outputs || %{}
+    pinned_steps = Map.keys(pinned_outputs)
+    disabled_steps = MapSet.to_list(editor_state.disabled_steps || MapSet.new())
 
     attrs = %{
       workflow_id: workflow_id,
@@ -1406,7 +1419,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         extras:
           build_editor_execution_extras(%{
             partial: true,
-            target_step_id: step_id
+            target_step_id: step_id,
+            pinned_steps: pinned_steps,
+            disabled_steps: disabled_steps
           })
       }
     }

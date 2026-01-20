@@ -16,6 +16,7 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
   alias Imgd.Workflows
   alias Imgd.Workflows.WorkflowDraft
   alias Imgd.Collaboration.EditOperation
+  alias Imgd.Collaboration.EditorState
 
   import Ecto.Query
 
@@ -42,7 +43,7 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
 
   @doc "Persist buffered operations and update draft."
   @spec persist(map()) :: :ok | {:error, term()}
-  def persist(%{workflow_id: _workflow_id, draft: draft, op_buffer: ops, seq: seq}) do
+  def persist(%{workflow_id: _workflow_id, draft: draft, op_buffer: ops, seq: seq} = state) do
     try do
       Repo.transaction(fn ->
         # 1. Batch insert any new operations.
@@ -55,22 +56,35 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
         # 2. Update (or create) the draft with current state.
         # Use a fresh DB copy so Ecto can detect changes even when the in-memory
         # draft already reflects the latest edits.
+        editor_state_payload =
+          case Map.get(state, :editor_state) do
+            %EditorState{} = editor_state -> EditorState.to_storage(editor_state)
+            _ -> nil
+          end
+
+        settings =
+          draft.settings
+          |> Kernel.||(%{})
+          |> Map.put("last_persisted_seq", seq)
+
         draft_attrs = %{
           steps: Enum.map(draft.steps || [], &ensure_map/1),
           connections: Enum.map(draft.connections || [], &ensure_map/1),
           groups: Enum.map(draft.groups || [], &ensure_map/1),
-          settings: Map.put(draft.settings || %{}, "last_persisted_seq", seq)
+          settings: settings
         }
 
         case Repo.get_by(WorkflowDraft, workflow_id: draft.workflow_id) do
           nil ->
             %WorkflowDraft{workflow_id: draft.workflow_id}
             |> WorkflowDraft.changeset(Map.put(draft_attrs, :workflow_id, draft.workflow_id))
+            |> maybe_put_editor_state(editor_state_payload)
             |> Repo.insert!()
 
           db_draft ->
             db_draft
             |> WorkflowDraft.changeset(draft_attrs)
+            |> maybe_put_editor_state(editor_state_payload)
             |> Repo.update!()
         end
       end)
@@ -123,4 +137,10 @@ defmodule Imgd.Collaboration.EditSession.Persistence do
   defp ensure_map(%_{} = struct), do: Map.from_struct(struct)
   defp ensure_map(map) when is_map(map), do: map
   defp ensure_map(nil), do: nil
+
+  defp maybe_put_editor_state(changeset, nil), do: changeset
+
+  defp maybe_put_editor_state(changeset, editor_state) do
+    Ecto.Changeset.put_change(changeset, :editor_state, editor_state)
+  end
 end

@@ -24,7 +24,7 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   @spec to_runic_workflow(source(), build_opts()) :: Workflow.t()
   def to_runic_workflow(source, opts \\ []) do
-    step_outputs = Keyword.get(opts, :step_outputs, Keyword.get(opts, :pinned_outputs, %{}))
+    step_outputs = Keyword.get(opts, :step_outputs, %{})
     steps = source.steps || []
     connections = source.connections || []
     groups = Map.get(source, :groups) || []
@@ -360,9 +360,17 @@ defmodule Imgd.Runtime.RunicAdapter do
     Process.delete(:imgd_step_skipped)
     Process.delete(:imgd_fan_out_context)
 
+    pinned_outputs = Keyword.get(parent_opts, :step_outputs, %{})
+    group_step_ids = MapSet.new(group.step_ids || [])
+
+    group_pinned_outputs =
+      pinned_outputs
+      |> Enum.filter(fn {step_id, _output} -> MapSet.member?(group_step_ids, step_id) end)
+      |> Map.new()
+
     group_opts =
       parent_opts
-      |> Keyword.put(:step_outputs, %{})
+      |> Keyword.put(:step_outputs, group_pinned_outputs)
       |> Keyword.put(:trigger_data, input)
       |> Keyword.put(:current_group, group)
 
@@ -448,23 +456,29 @@ defmodule Imgd.Runtime.RunicAdapter do
 
     # Determine if this aggregator should use fan-out or join semantics
     component =
-      if step.type_id == "aggregator" do
-        splitter_ids = Keyword.get(step_opts, :splitter_ids, MapSet.new())
-        upstream_lookup = Keyword.get(step_opts, :upstream_lookup, %{})
-        upstream_ids = Map.get(upstream_lookup, step.id, [])
+      case fetch_pinned_output(step_opts, step.id) do
+        {:ok, pinned_output} ->
+          create_pinned_component(step, pinned_output)
 
-        # Check if there's a splitter anywhere upstream
-        has_upstream_splitter = Enum.any?(upstream_ids, &MapSet.member?(splitter_ids, &1))
+        :error ->
+          if step.type_id == "aggregator" do
+            splitter_ids = Keyword.get(step_opts, :splitter_ids, MapSet.new())
+            upstream_lookup = Keyword.get(step_opts, :upstream_lookup, %{})
+            upstream_ids = Map.get(upstream_lookup, step.id, [])
 
-        if has_upstream_splitter do
-          # Fan-out context: use Runic.reduce to accumulate ALL items
-          create_fanout_aggregator(step, component_name)
-        else
-          # No fan-out upstream: use regular step that handles list input from join
-          create_join_aggregator(step, component_name)
-        end
-      else
-        create_component(step, component_name, step_opts)
+            # Check if there's a splitter anywhere upstream
+            has_upstream_splitter = Enum.any?(upstream_ids, &MapSet.member?(splitter_ids, &1))
+
+            if has_upstream_splitter do
+              # Fan-out context: use Runic.reduce to accumulate ALL items
+              create_fanout_aggregator(step, component_name)
+            else
+              # No fan-out upstream: use regular step that handles list input from join
+              create_join_aggregator(step, component_name)
+            end
+          else
+            create_component(step, component_name, step_opts)
+          end
       end
 
     workflow = connect_component(workflow, component, parent_ids, step_opts)
@@ -499,6 +513,22 @@ defmodule Imgd.Runtime.RunicAdapter do
   end
 
   defp maybe_connect_fan_in(workflow, _component), do: workflow
+
+  defp fetch_pinned_output(step_opts, step_id) do
+    pinned_outputs = Keyword.get(step_opts, :step_outputs, %{})
+
+    if Map.has_key?(pinned_outputs, step_id) do
+      {:ok, Map.get(pinned_outputs, step_id)}
+    else
+      :error
+    end
+  end
+
+  defp create_pinned_component(step, output) do
+    runic_step = Runic.step(fn _input -> output end, name: step.id)
+    unique_hash = :erlang.phash2({runic_step.hash, step.id}, 4_294_967_296)
+    %{runic_step | hash: unique_hash}
+  end
 
   defp track_mapped_path(workflow, fan_out, fan_in) do
     path = workflow.graph |> Graph.get_shortest_path(fan_out, fan_in)

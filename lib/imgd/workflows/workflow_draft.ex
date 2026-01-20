@@ -12,6 +12,7 @@ defmodule Imgd.Workflows.WorkflowDraft do
           steps: [Step.t()] | nil,
           connections: [Connection.t()] | nil,
           groups: [NodeGroup.t()] | nil,
+          editor_state: map(),
           settings: map(),
           workflow: Workflow.t() | Ecto.Association.NotLoaded.t(),
           inserted_at: DateTime.t(),
@@ -35,6 +36,8 @@ defmodule Imgd.Workflows.WorkflowDraft do
     embeds_many :steps, Step, on_replace: :delete
     embeds_many :connections, Connection, on_replace: :delete
     embeds_many :groups, NodeGroup, on_replace: :delete
+
+    field :editor_state, :map, default: %{}
 
     field :settings, :map,
       default: %{

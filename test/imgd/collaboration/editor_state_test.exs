@@ -180,8 +180,8 @@ defmodule Imgd.Collaboration.EditorStateTest do
     end
   end
 
-  describe "state persistence" do
-    test "editor state is ephemeral - pins and disabled steps don't persist across sessions" do
+  describe "state defaults" do
+    test "new editor state starts clean" do
       _state = %EditorState{
         workflow_id: "wf_1",
         pinned_outputs: %{"step_1" => %{"data" => "value"}},

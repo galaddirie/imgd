@@ -1,8 +1,9 @@
 defmodule Imgd.Collaboration.EditorState do
   @moduledoc """
-  In-memory editor state for a collaborative session.
+  Editor state for a collaborative session.
 
-  Not persisted - reconstructed when session starts.
+  This state is persisted into the workflow draft's `editor_state` column so
+  pins/disabled steps survive session restarts.
   """
 
   alias Imgd.Runtime.Serializer
@@ -58,7 +59,7 @@ defmodule Imgd.Collaboration.EditorState do
     %{state | webhook_test: nil}
   end
 
-  def to_settings(%__MODULE__{} = state) do
+  def to_storage(%__MODULE__{} = state) do
     %{
       "pinned_outputs" => normalize_pinned_outputs(state.pinned_outputs),
       "disabled_steps" => MapSet.to_list(state.disabled_steps),
@@ -66,21 +67,34 @@ defmodule Imgd.Collaboration.EditorState do
     }
   end
 
-  def from_settings(workflow_id, settings) when is_map(settings) do
-    editor_state =
-      Map.get(settings, "editor_state") || Map.get(settings, :editor_state) || %{}
+  @deprecated "Use to_storage/1"
+  def to_settings(%__MODULE__{} = state), do: to_storage(state)
+
+  def from_storage(workflow_id, editor_state, settings \\ %{})
+
+  def from_storage(workflow_id, editor_state, settings)
+      when is_map(editor_state) and is_map(settings) do
+    source =
+      if map_size(editor_state) > 0 do
+        editor_state
+      else
+        resolve_editor_state(settings)
+      end
 
     pinned_outputs =
-      Map.get(editor_state, "pinned_outputs") || Map.get(editor_state, :pinned_outputs) || %{}
+      source
+      |> Map.get("pinned_outputs") || Map.get(source, :pinned_outputs) ||
+        %{}
+        |> normalize_pinned_outputs()
 
     disabled_steps =
-      editor_state
-      |> Map.get("disabled_steps") || Map.get(editor_state, :disabled_steps) ||
+      source
+      |> Map.get("disabled_steps") || Map.get(source, :disabled_steps) ||
         []
         |> List.wrap()
 
     disabled_mode =
-      Map.get(editor_state, "disabled_mode") || Map.get(editor_state, :disabled_mode) || %{}
+      Map.get(source, "disabled_mode") || Map.get(source, :disabled_mode) || %{}
 
     %__MODULE__{
       workflow_id: workflow_id,
@@ -90,9 +104,15 @@ defmodule Imgd.Collaboration.EditorState do
     }
   end
 
-  def from_settings(workflow_id, _settings) do
-    %__MODULE__{workflow_id: workflow_id}
+  def from_storage(workflow_id, _editor_state, _settings),
+    do: %__MODULE__{workflow_id: workflow_id}
+
+  def from_settings(workflow_id, settings) when is_map(settings) do
+    from_storage(workflow_id, %{}, settings)
   end
+
+  def from_settings(workflow_id, _settings),
+    do: %__MODULE__{workflow_id: workflow_id}
 
   defp normalize_pinned_outputs(outputs) when is_map(outputs) do
     Map.new(outputs, fn {step_id, output} ->
@@ -101,6 +121,26 @@ defmodule Imgd.Collaboration.EditorState do
   end
 
   defp normalize_pinned_outputs(_outputs), do: %{}
+
+  defp resolve_editor_state(settings) do
+    case Map.get(settings, "editor_state") || Map.get(settings, :editor_state) do
+      nil ->
+        if has_editor_state_keys?(settings) do
+          settings
+        else
+          %{}
+        end
+
+      editor_state ->
+        editor_state
+    end
+  end
+
+  defp has_editor_state_keys?(settings) do
+    Enum.any?([:pinned_outputs, :disabled_steps, :disabled_mode], fn key ->
+      Map.has_key?(settings, key) || Map.has_key?(settings, Atom.to_string(key))
+    end)
+  end
 
   def acquire_lock(state, step_id, user_id) do
     now = DateTime.utc_now()

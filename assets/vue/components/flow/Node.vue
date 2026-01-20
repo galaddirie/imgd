@@ -314,9 +314,9 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 
     <!-- Pin Output Icon -->
     <component
-      :is="data.pinned ? BookmarkSolidIcon : BookmarkIcon"
+      :is="BookmarkSolidIcon"
       class="absolute -top-7 left-21 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
-      :class="{ 'opacity-70': props.selected || data.pinned }"
+      :class="{ 'opacity-70': props.selected }"
       :style="data.pinned ? { color: oklchToHex(colorMap.pinned) } : undefined"
       :aria-label="data.pinned ? 'Unpin output' : 'Pin output'"
       :title="data.pinned ? 'Unpin output' : 'Pin output'"

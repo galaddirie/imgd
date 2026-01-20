@@ -334,7 +334,13 @@ defmodule Imgd.Collaboration.EditSession.Server do
   defp load_initial_state(workflow_id) do
     with {:ok, draft} <- Workflows.get_draft(workflow_id),
          {:ok, last_seq, ops} <- Persistence.load_pending_ops(workflow_id) do
-      editor_state = EditorState.from_settings(workflow_id, draft.settings || %{})
+      editor_state =
+        EditorState.from_storage(
+          workflow_id,
+          Map.get(draft, :editor_state) || %{},
+          draft.settings || %{}
+        )
+
       {draft, editor_state, seq} = replay_operations(draft, editor_state, ops, last_seq)
 
       state = %State{

@@ -239,6 +239,14 @@ defmodule Imgd.Executions do
           updates
         end
 
+      # Add context if provided (allows preview executions to persist outputs)
+      updates =
+        if Keyword.has_key?(opts, :context) do
+          Map.put(updates, :context, Keyword.get(opts, :context))
+        else
+          updates
+        end
+
       execution
       |> Execution.changeset(updates)
       |> Repo.update()

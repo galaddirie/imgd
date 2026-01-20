@@ -7,6 +7,7 @@ defmodule Imgd.Collaboration.PreviewExecution do
   alias Imgd.Collaboration.EditSession.Server, as: EditServer
   alias Imgd.Collaboration.EditorState
   alias Imgd.Graph
+  alias Imgd.Runtime.ExecutionContext
   alias Imgd.Runtime.RunicAdapter
   alias Imgd.Executions
   alias Imgd.Accounts.Scope
@@ -29,8 +30,6 @@ defmodule Imgd.Collaboration.PreviewExecution do
   4. Builds execution subgraph based on mode
   5. Runs the execution
   """
-  @spec run(String.t(), Scope.t(), preview_opts()) ::
-          {:ok, Executions.Execution.t()} | {:error, term()}
   @spec run(String.t(), Scope.t(), preview_opts()) ::
           {:ok, Executions.Execution.t()} | {:error, term()}
   def run(workflow_id, scope, opts \\ []) do
@@ -190,9 +189,9 @@ defmodule Imgd.Collaboration.PreviewExecution do
     # Execute synchronously for preview
     case Runic.Workflow.react_until_satisfied(runic_workflow, %{}) do
       result_workflow ->
-        context = extract_context(result_workflow)
+        context = extract_context(result_workflow, editor_state.pinned_outputs)
 
-        case Executions.update_execution_status(scope, execution, :completed, output: context) do
+        case Executions.update_execution_status(scope, execution, :completed, context: context) do
           {:ok, updated_execution} -> {:ok, updated_execution}
           # Fallback to original if update fails
           {:error, _} -> {:ok, execution}
@@ -204,9 +203,8 @@ defmodule Imgd.Collaboration.PreviewExecution do
       {:error, e}
   end
 
-  defp extract_context(_workflow) do
-    # Extract step outputs from Runic workflow
-    # (Implementation depends on Runic internals)
-    %{}
+  defp extract_context(workflow, pinned_outputs) do
+    ctx = ExecutionContext.from_runic_workflow(workflow)
+    Map.merge(pinned_outputs || %{}, ctx.step_outputs)
   end
 end
