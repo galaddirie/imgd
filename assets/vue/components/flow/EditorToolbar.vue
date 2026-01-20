@@ -24,6 +24,9 @@ interface Props {
   hasUnsavedChanges?: boolean;
   canUndo?: boolean;
   canRedo?: boolean;
+  undoTooltip?: string;
+  redoTooltip?: string;
+  isUndoPending?: boolean;
   presences?: UserPresence[];
   validationErrors?: string[];
 }
@@ -36,6 +39,9 @@ const props = withDefaults(defineProps<Props>(), {
   hasUnsavedChanges: false,
   canUndo: false,
   canRedo: false,
+  undoTooltip: 'Undo (⌘Z)',
+  redoTooltip: 'Redo (⌘⇧Z)',
+  isUndoPending: false,
   presences: () => [],
   validationErrors: () => [],
 });
@@ -111,19 +117,21 @@ const hasErrors = computed(() => props.validationErrors.length > 0);
     <div class="bg-base-200/50 border-base-300/30 flex items-center gap-1 rounded-2xl border p-1.5">
       <button
         class="btn btn-ghost btn-xs btn-square tooltip tooltip-bottom hover:bg-base-100 rounded-lg disabled:opacity-30"
-        :disabled="!canUndo"
-        data-tip="Undo (⌘Z)"
+        :disabled="!canUndo || isUndoPending"
+        :data-tip="undoTooltip"
         @click="emit('undo')"
       >
-        <ArrowUturnLeftIcon class="h-4.5 w-4.5" />
+        <ArrowPathIcon v-if="isUndoPending" class="h-4 w-4 animate-spin" />
+        <ArrowUturnLeftIcon v-else class="h-4.5 w-4.5" />
       </button>
       <button
         class="btn btn-ghost btn-xs btn-square tooltip tooltip-bottom hover:bg-base-100 rounded-lg disabled:opacity-30"
-        :disabled="!canRedo"
-        data-tip="Redo (⌘⇧Z)"
+        :disabled="!canRedo || isUndoPending"
+        :data-tip="redoTooltip"
         @click="emit('redo')"
       >
-        <ArrowUturnRightIcon class="h-4.5 w-4.5" />
+        <ArrowPathIcon v-if="isUndoPending" class="h-4 w-4 animate-spin" />
+        <ArrowUturnRightIcon v-else class="h-4.5 w-4.5" />
       </button>
     </div>
 

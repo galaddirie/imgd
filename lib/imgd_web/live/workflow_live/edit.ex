@@ -125,14 +125,17 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           {nil, []}
       end
 
-    socket
-    |> assign(:workflow, %{socket.assigns.workflow | draft: draft})
-    |> assign(:editor_state, editor_state)
-    |> assign(:presences, presences)
-    |> assign(:execution, execution)
-    |> assign(:execution_id, if(execution, do: execution.id, else: nil))
-    |> assign(:step_executions, step_executions)
-    |> maybe_toggle_webhook_subscription(editor_state)
+    socket =
+      socket
+      |> assign(:workflow, %{socket.assigns.workflow | draft: draft})
+      |> assign(:editor_state, editor_state)
+      |> assign(:presences, presences)
+      |> assign(:execution, execution)
+      |> assign(:execution_id, if(execution, do: execution.id, else: nil))
+      |> assign(:step_executions, step_executions)
+      |> maybe_toggle_webhook_subscription(editor_state)
+
+    push_undo_state(socket)
   end
 
   @impl true
@@ -173,6 +176,9 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:run_test={JS.push("run_test")}
           v-on:run_node={JS.push("run_node")}
           v-on:cancel_execution={JS.push("cancel_execution")}
+          v-on:undo={JS.push("undo")}
+          v-on:redo={JS.push("redo")}
+          v-on:tidy_layout={JS.push("tidy_layout")}
           v-on:preview_expression={JS.push("preview_expression")}
           v-on:toggle_webhook_test={JS.push("toggle_webhook_test")}
           expressionPreviews={@expression_previews}
@@ -243,23 +249,37 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
       new_connections = build_duplicate_connections(connections, step_ids, id_map)
 
+      undo_group_id = UUID.generate()
+
+      undo_label =
+        "Duplicate #{length(new_steps)} Step#{if(length(new_steps) == 1, do: "", else: "s")}"
+
       operations =
         Enum.map(new_steps, fn step ->
           step_id = fetch_field(step, :id)
 
-          case Map.get(group_id_by_new_step_id, step_id) do
-            nil -> {:add_step, %{step: step}}
-            group_id -> {:add_step, %{step: step, group_id: group_id}}
-          end
+          payload =
+            case Map.get(group_id_by_new_step_id, step_id) do
+              nil -> %{step: step}
+              group_id -> %{step: step, group_id: group_id}
+            end
+
+          {:add_step, payload, %{undo_group_id: undo_group_id, undo_label: undo_label}}
         end) ++
           Enum.map(new_connections, fn connection ->
-            {:add_connection, %{connection: connection}}
+            {:add_connection, %{connection: connection},
+             %{undo_group_id: undo_group_id, undo_label: undo_label}}
           end)
 
       case apply_operations(socket, operations) do
         :ok ->
           new_step_ids = Enum.map(new_steps, &fetch_field(&1, :id))
-          socket = push_event(socket, "duplicate_selection", %{step_ids: new_step_ids})
+
+          socket =
+            socket
+            |> push_event("duplicate_selection", %{step_ids: new_step_ids})
+            |> push_undo_state()
+
           {:noreply, socket}
 
         {:error, reason} ->
@@ -272,6 +292,41 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   @impl true
   def handle_event("move_step", %{"step_id" => step_id, "position" => pos}, socket) do
     apply_operation(socket, :update_step_position, %{step_id: step_id, position: pos})
+  end
+
+  @impl true
+  def handle_event("tidy_layout", params, socket) do
+    steps = params |> Map.get("steps", []) |> List.wrap()
+    groups = params |> Map.get("groups", []) |> List.wrap()
+    label = Map.get(params, "label") || "Tidy Workflow"
+    undo_group_id = UUID.generate()
+
+    group_ops =
+      Enum.map(groups, fn group ->
+        group_id = fetch_payload_value(group, :group_id)
+        position = normalize_group_position(fetch_payload_value(group, :position) || %{})
+
+        {:update_group, %{group_id: group_id, changes: %{position: position}},
+         %{undo_group_id: undo_group_id, undo_label: label}}
+      end)
+
+    step_ops =
+      Enum.map(steps, fn step ->
+        step_id = fetch_payload_value(step, :step_id)
+        position = normalize_position(fetch_payload_value(step, :position) || %{})
+
+        {:update_step_position, %{step_id: step_id, position: position},
+         %{undo_group_id: undo_group_id, undo_label: label}}
+      end)
+
+    case apply_operations(socket, group_ops ++ step_ops) do
+      :ok ->
+        {:noreply, push_undo_state(socket)}
+
+      {:error, reason} ->
+        Logger.warning("tidy_layout failed: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Unable to tidy layout")}
+    end
   end
 
   @impl true
@@ -378,6 +433,60 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   def handle_event("remove_connection", %{"connection_id" => id}, socket) do
     Logger.info("Received remove_connection event for connection: #{id}")
     apply_operation(socket, :remove_connection, %{connection_id: id})
+  end
+
+  @impl true
+  def handle_event("undo", %{"count" => count}, socket) do
+    count = parse_count(count)
+
+    case Server.undo(socket.assigns.workflow.id, socket.assigns.current_user_id, count) do
+      {:ok, result} ->
+        socket =
+          socket
+          |> push_event("undo_applied", %{success: true, label: result.label})
+          |> push_undo_state()
+
+        {:noreply, socket}
+
+      {:error, {:conflict, reason, label}} ->
+        socket =
+          socket
+          |> push_event("undo_conflict", %{reason: inspect(reason), label: label})
+          |> push_undo_state()
+
+        {:noreply, socket}
+
+      {:error, _reason} ->
+        socket = push_undo_state(socket)
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("redo", %{"count" => count}, socket) do
+    count = parse_count(count)
+
+    case Server.redo(socket.assigns.workflow.id, socket.assigns.current_user_id, count) do
+      {:ok, result} ->
+        socket =
+          socket
+          |> push_event("redo_applied", %{success: true, label: result.label})
+          |> push_undo_state()
+
+        {:noreply, socket}
+
+      {:error, {:conflict, reason, label}} ->
+        socket =
+          socket
+          |> push_event("redo_conflict", %{reason: inspect(reason), label: label})
+          |> push_undo_state()
+
+        {:noreply, socket}
+
+      {:error, _reason} ->
+        socket = push_undo_state(socket)
+        {:noreply, socket}
+    end
   end
 
   # =============================================================================
@@ -661,7 +770,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     case Operations.apply(socket.assigns.workflow.draft, operation) do
       {:ok, new_draft} ->
         updated_workflow = %{socket.assigns.workflow | draft: new_draft}
-        {:noreply, assign(socket, :workflow, updated_workflow)}
+
+        socket =
+          socket
+          |> assign(:workflow, updated_workflow)
+          |> maybe_push_undo_state_for_operation(operation)
+
+        {:noreply, socket}
 
       {:error, reason} ->
         Logger.error(
@@ -742,6 +857,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       |> assign(:workflow, %{socket.assigns.workflow | draft: state.draft})
       |> assign(:editor_state, editor_state)
       |> maybe_toggle_webhook_subscription(editor_state)
+      |> push_undo_state()
 
     {:noreply, socket}
   end
@@ -834,23 +950,34 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   defp apply_operations(_socket, []), do: :ok
 
   defp apply_operations(socket, operations) do
-    Enum.reduce_while(operations, :ok, fn {type, payload}, :ok ->
-      operation = build_operation(socket, type, payload)
+    Enum.reduce_while(operations, :ok, fn
+      {type, payload}, :ok ->
+        operation = build_operation(socket, type, payload, %{})
 
-      case Server.apply_operation(socket.assigns.workflow.id, operation) do
-        {:ok, _result} -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
+        case Server.apply_operation(socket.assigns.workflow.id, operation) do
+          {:ok, _result} -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+
+      {type, payload, opts}, :ok ->
+        operation = build_operation(socket, type, payload, opts)
+
+        case Server.apply_operation(socket.assigns.workflow.id, operation) do
+          {:ok, _result} -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
     end)
   end
 
-  defp build_operation(socket, type, payload) do
+  defp build_operation(socket, type, payload, opts) do
     %{
       id: UUID.generate(),
       type: type,
       payload: payload,
       user_id: socket.assigns.current_user_id,
-      client_seq: nil
+      client_seq: nil,
+      undo_group_id: Map.get(opts, :undo_group_id),
+      undo_label: Map.get(opts, :undo_label)
     }
   end
 
@@ -1005,12 +1132,41 @@ defmodule ImgdWeb.WorkflowLive.Edit do
 
     case Server.apply_operation(socket.assigns.workflow.id, operation) do
       {:ok, _result} ->
-        {:noreply, socket}
+        {:noreply, push_undo_state(socket)}
 
       {:error, reason} ->
         require Logger
         Logger.warning("Operation failed: #{inspect(reason)}")
         {:noreply, put_flash(socket, :error, "Operation failed")}
+    end
+  end
+
+  defp parse_count(count) when is_integer(count) and count > 0, do: count
+
+  defp parse_count(count) when is_binary(count) do
+    case Integer.parse(count) do
+      {value, _} when value > 0 -> value
+      _ -> 1
+    end
+  end
+
+  defp parse_count(_count), do: 1
+
+  defp push_undo_state(socket) do
+    case Server.get_undo_state(socket.assigns.workflow.id, socket.assigns.current_user_id) do
+      {:ok, undo_state} ->
+        push_event(socket, "undo_state", undo_state)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp maybe_push_undo_state_for_operation(socket, operation) do
+    if operation.user_id == socket.assigns.current_user_id do
+      push_undo_state(socket)
+    else
+      socket
     end
   end
 

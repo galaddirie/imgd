@@ -45,6 +45,7 @@ import {
   EDGE_LABEL_POSITION,
 } from './constants/layout';
 import { useClientStore } from './store/clientStore';
+import { useUndoStore } from './store/undoStore';
 import { oklchToHex } from './lib/color';
 import { useLayout } from './lib/useLayout';
 
@@ -176,6 +177,16 @@ const emit = defineEmits<{
   (e: 'run_test', payload?: { step_ids?: string[] }): void;
   (e: 'run_node', payload: { step_id: string }): void;
   (e: 'cancel_execution'): void;
+  (e: 'undo', payload: { count: number }): void;
+  (e: 'redo', payload: { count: number }): void;
+  (
+    e: 'tidy_layout',
+    payload: {
+      steps: Array<{ step_id: string; position: { x: number; y: number } }>;
+      groups: Array<{ group_id: string; position: { x: number; y: number; width: number; height: number } }>;
+      label: string;
+    }
+  ): void;
   (e: 'save_workflow'): void;
   (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void;
   // Collaboration events
@@ -199,7 +210,11 @@ const emit = defineEmits<{
 // =============================================================================
 
 const store = useClientStore();
+const undoStore = useUndoStore();
 const live = useLiveVue();
+
+const sendUndo = () => emit('undo', { count: 1 });
+const sendRedo = () => emit('redo', { count: 1 });
 
 const {
   onPaneClick,
@@ -245,6 +260,17 @@ onMounted(() => {
       applyPendingDuplicateSelection();
     });
   });
+
+  live.handleEvent('undo_state', payload => {
+    if (payload && typeof payload === 'object') {
+      undoStore.handleStateUpdate(payload as any);
+    }
+  });
+
+  live.handleEvent('undo_applied', () => undoStore.handleUndoApplied());
+  live.handleEvent('undo_conflict', () => undoStore.handleUndoConflict());
+  live.handleEvent('redo_applied', () => undoStore.handleRedoApplied());
+  live.handleEvent('redo_conflict', () => undoStore.handleRedoConflict());
 });
 
 onBeforeUnmount(() => {
@@ -1179,6 +1205,9 @@ const handleLayout = (options: LayoutOptions = {}) => {
 
   const groupNodes = getNodes.value.filter(isGroupNode) as unknown as GraphNode<GroupNodeData>[];
   const groupNodeById = new Map(groupNodes.map(node => [node.id, node]));
+  const undoLabel = options.groupId
+    ? `Tidy Group: ${groupNodeById.get(options.groupId)?.data?.name ?? 'Group'}`
+    : 'Tidy Workflow';
 
   let nodesToLayout: LayoutNode[] = [];
   const groupsToResize = new Set<string>();
@@ -1254,6 +1283,9 @@ const handleLayout = (options: LayoutOptions = {}) => {
   });
 
   const groupBoundsById = new Map<string, { x: number; y: number; width: number; height: number }>();
+  const groupUpdates: Array<{ group_id: string; position: { x: number; y: number; width: number; height: number } }> =
+    [];
+  const stepMoves: Array<{ step_id: string; position: { x: number; y: number } }> = [];
   groupsToResize.forEach(groupId => {
     const groupNode = groupNodeById.get(groupId);
     if (!groupNode) return;
@@ -1266,7 +1298,7 @@ const handleLayout = (options: LayoutOptions = {}) => {
       position: { x: bounds.x, y: bounds.y },
       style: { width: `${bounds.width}px`, height: `${bounds.height}px` },
     });
-    emit('update_group', { group_id: groupId, changes: { position: bounds } });
+    groupUpdates.push({ group_id: groupId, position: bounds });
   });
 
   const currentGroupPositions = new Map<string, XYPosition>();
@@ -1305,7 +1337,7 @@ const handleLayout = (options: LayoutOptions = {}) => {
         });
       }
       if (positionChanged) {
-        emit('move_step', { step_id: node.id, position: relativePosition });
+        stepMoves.push({ step_id: node.id, position: relativePosition });
       }
     } else {
       const layoutNode = layoutById.get(node.id);
@@ -1319,10 +1351,18 @@ const handleLayout = (options: LayoutOptions = {}) => {
         });
       }
       if (positionChanged) {
-        emit('move_step', { step_id: node.id, position: desiredAbsolute });
+        stepMoves.push({ step_id: node.id, position: desiredAbsolute });
       }
     }
   });
+
+  if (stepMoves.length || groupUpdates.length) {
+    emit('tidy_layout', {
+      steps: stepMoves,
+      groups: groupUpdates,
+      label: undoLabel,
+    });
+  }
 };
 
 // =============================================================================
@@ -1447,6 +1487,16 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
   if (!event.metaKey && !event.ctrlKey) return;
 
   const key = event.key.toLowerCase();
+  if (key === 'z') {
+    event.preventDefault();
+    if (event.shiftKey) {
+      undoStore.redo(sendRedo);
+    } else {
+      undoStore.undo(sendUndo);
+    }
+    return;
+  }
+
   if (key === 'c') {
     const stepIds = resolveActiveNodeIds();
     if (!stepIds.length) return;
@@ -1873,7 +1923,14 @@ const requestNodeRemoval = (nodeId: string) => {
       :workflow-name="workflow?.name ?? 'Untitled Workflow'"
       :is-saving="false"
       :presences="presences"
+      :can-undo="undoStore.canUndo"
+      :can-redo="undoStore.canRedo"
+      :undo-tooltip="undoStore.undoTooltip"
+      :redo-tooltip="undoStore.redoTooltip"
+      :is-undo-pending="undoStore.isPending"
       @save="handleSave"
+      @undo="undoStore.undo(sendUndo)"
+      @redo="undoStore.redo(sendRedo)"
       @run-test="handleRunTest"
     />
 

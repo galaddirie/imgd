@@ -12,6 +12,7 @@ defmodule Imgd.Collaboration.EditorState do
     # %{step_id => output_data}
     pinned_outputs: %{},
     disabled_steps: MapSet.new(),
+    disabled_mode: %{},
     # step_id for partial execution
     execution_start: nil,
     # %{step_id => user_id} - soft locks
@@ -33,17 +34,19 @@ defmodule Imgd.Collaboration.EditorState do
     %{state | pinned_outputs: Map.delete(state.pinned_outputs, step_id)}
   end
 
-  def disable_step(state, step_id) do
+  def disable_step(state, step_id, mode \\ :skip) do
     %{
       state
-      | disabled_steps: MapSet.put(state.disabled_steps, step_id)
+      | disabled_steps: MapSet.put(state.disabled_steps, step_id),
+        disabled_mode: Map.put(state.disabled_mode, step_id, mode)
     }
   end
 
   def enable_step(state, step_id) do
     %{
       state
-      | disabled_steps: MapSet.delete(state.disabled_steps, step_id)
+      | disabled_steps: MapSet.delete(state.disabled_steps, step_id),
+        disabled_mode: Map.delete(state.disabled_mode, step_id)
     }
   end
 
@@ -58,7 +61,8 @@ defmodule Imgd.Collaboration.EditorState do
   def to_settings(%__MODULE__{} = state) do
     %{
       "pinned_outputs" => normalize_pinned_outputs(state.pinned_outputs),
-      "disabled_steps" => MapSet.to_list(state.disabled_steps)
+      "disabled_steps" => MapSet.to_list(state.disabled_steps),
+      "disabled_mode" => state.disabled_mode
     }
   end
 
@@ -75,10 +79,14 @@ defmodule Imgd.Collaboration.EditorState do
         []
         |> List.wrap()
 
+    disabled_mode =
+      Map.get(editor_state, "disabled_mode") || Map.get(editor_state, :disabled_mode) || %{}
+
     %__MODULE__{
       workflow_id: workflow_id,
       pinned_outputs: pinned_outputs,
-      disabled_steps: MapSet.new(disabled_steps)
+      disabled_steps: MapSet.new(disabled_steps),
+      disabled_mode: disabled_mode
     }
   end
 

@@ -14,8 +14,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
   require Logger
 
   alias Imgd.Collaboration.{EditorState, EditOperation}
-  alias Imgd.Collaboration.EditSession.{Operations, Persistence, Presence, PubSub}
+  alias Imgd.Collaboration.EditSession.{Inversion, Operations, Persistence, Presence, PubSub}
+  alias Imgd.Collaboration.EditSession.{UndoEntry, UndoStack}
   alias Imgd.Workflows
+  alias Ecto.UUID
 
   @idle_timeout :timer.minutes(30)
   @persist_interval :timer.seconds(5)
@@ -31,6 +33,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
       :seq,
       :op_buffer,
       :applied_ops,
+      :undo_stacks,
       :dirty,
       :persist_timer,
       :idle_timer,
@@ -54,6 +57,21 @@ defmodule Imgd.Collaboration.EditSession.Server do
   @doc "Apply an operation to the workflow."
   def apply_operation(workflow_id, operation) do
     GenServer.call(via_tuple(workflow_id), {:apply_operation, operation})
+  end
+
+  @doc "Undo the last operation group for a user."
+  def undo(workflow_id, user_id, count \\ 1) do
+    GenServer.call(via_tuple(workflow_id), {:undo, user_id, count})
+  end
+
+  @doc "Redo the last undone operation group for a user."
+  def redo(workflow_id, user_id, count \\ 1) do
+    GenServer.call(via_tuple(workflow_id), {:redo, user_id, count})
+  end
+
+  @doc "Get undo/redo state for UI."
+  def get_undo_state(workflow_id, user_id) do
+    GenServer.call(via_tuple(workflow_id), {:get_undo_state, user_id})
   end
 
   @doc "Get current state for a joining/reconnecting client."
@@ -151,7 +169,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
 
   @impl true
   def handle_call({:apply_operation, operation}, _from, state) do
-    case process_operation(state, operation) do
+    case process_operation(state, operation, track_undo: true) do
       {:ok, new_state, result} ->
         new_state = reset_idle_timer(new_state)
         {:reply, {:ok, result}, new_state}
@@ -159,6 +177,32 @@ defmodule Imgd.Collaboration.EditSession.Server do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call({:undo, user_id, count}, _from, state) do
+    case apply_undo(state, user_id, count) do
+      {:ok, new_state, result} ->
+        new_state = reset_idle_timer(new_state)
+        {:reply, {:ok, result}, new_state}
+
+      {:error, reason, new_state} ->
+        {:reply, {:error, reason}, new_state}
+    end
+  end
+
+  def handle_call({:redo, user_id, count}, _from, state) do
+    case apply_redo(state, user_id, count) do
+      {:ok, new_state, result} ->
+        new_state = reset_idle_timer(new_state)
+        {:reply, {:ok, result}, new_state}
+
+      {:error, reason, new_state} ->
+        {:reply, {:error, reason}, new_state}
+    end
+  end
+
+  def handle_call({:get_undo_state, user_id}, _from, state) do
+    {:reply, {:ok, build_undo_state(state, user_id)}, state}
   end
 
   def handle_call({:get_sync_state, client_seq}, _from, state) do
@@ -300,6 +344,7 @@ defmodule Imgd.Collaboration.EditSession.Server do
         seq: seq,
         op_buffer: ops,
         applied_ops: MapSet.new(Enum.map(ops, & &1.operation_id)),
+        undo_stacks: %{},
         dirty: false
       }
 
@@ -321,12 +366,15 @@ defmodule Imgd.Collaboration.EditSession.Server do
     end
   end
 
-  defp process_operation(state, operation) do
+  defp process_operation(state, operation, opts) do
+    track_undo = Keyword.get(opts, :track_undo, false)
+
     if MapSet.member?(state.applied_ops, operation.id) do
       existing_op = Enum.find(state.op_buffer, &(&1.operation_id == operation.id))
       {:ok, state, %{seq: existing_op.seq, status: :duplicate}}
     else
-      with :ok <- Operations.validate(state.draft, operation) do
+      with :ok <- Operations.validate(state.draft, operation),
+           {:ok, inverse_ops} <- maybe_compute_inverse(state, operation, track_undo) do
         new_seq = state.seq + 1
 
         {new_draft, new_editor_state, editor_state_changed} =
@@ -342,15 +390,15 @@ defmodule Imgd.Collaboration.EditSession.Server do
           workflow_id: state.workflow_id
         }
 
-        new_state = %{
+        new_state =
           state
-          | draft: new_draft,
-            editor_state: new_editor_state,
-            seq: new_seq,
-            op_buffer: append_to_buffer(state.op_buffer, op_record),
-            applied_ops: MapSet.put(state.applied_ops, operation.id),
-            dirty: true
-        }
+          |> Map.put(:draft, new_draft)
+          |> Map.put(:editor_state, new_editor_state)
+          |> Map.put(:seq, new_seq)
+          |> Map.put(:op_buffer, append_to_buffer(state.op_buffer, op_record))
+          |> Map.put(:applied_ops, MapSet.put(state.applied_ops, operation.id))
+          |> Map.put(:dirty, true)
+          |> maybe_track_undo(operation, inverse_ops, track_undo)
 
         # Broadcast the operation to all subscribers
         Logger.debug(
@@ -368,6 +416,310 @@ defmodule Imgd.Collaboration.EditSession.Server do
         {:ok, new_state, %{seq: new_seq, status: :applied}}
       end
     end
+  end
+
+  defp maybe_compute_inverse(_state, _operation, false), do: {:ok, []}
+
+  defp maybe_compute_inverse(state, operation, true) do
+    case Inversion.compute_inverse(state.draft, state.editor_state, operation) do
+      {:ok, inverse_ops} -> {:ok, inverse_ops}
+      {:error, reason} -> {:error, {:undo_inverse_failed, reason}}
+    end
+  end
+
+  defp maybe_track_undo(state, _operation, _inverse_ops, false), do: state
+
+  defp maybe_track_undo(state, operation, inverse_ops, true) do
+    user_id = operation.user_id
+    group_id = Map.get(operation, :undo_group_id)
+
+    label =
+      Map.get(operation, :undo_label) ||
+        infer_undo_label(state.draft, state.editor_state, operation)
+
+    entry = build_undo_entry(operation, inverse_ops, label, group_id)
+    update_user_undo_stack(state, user_id, entry, group_id)
+  end
+
+  defp build_undo_entry(operation, inverse_ops, label, group_id) do
+    %UndoEntry{
+      id: UUID.generate(),
+      group_id: group_id,
+      label: label,
+      timestamp: DateTime.utc_now(),
+      user_id: operation.user_id,
+      operations: [operation_for_entry(operation)],
+      inverse_ops: inverse_ops
+    }
+  end
+
+  defp update_user_undo_stack(state, user_id, entry, group_id) do
+    stack = get_user_undo_stack(state, user_id)
+
+    updated_stack =
+      case {group_id, stack.undo} do
+        {nil, _} ->
+          UndoStack.push(stack, entry)
+
+        {^group_id, [%UndoEntry{group_id: ^group_id} = head | rest]} ->
+          merged = merge_undo_entry(head, entry)
+          UndoStack.push(%{stack | undo: rest}, merged)
+
+        _ ->
+          UndoStack.push(stack, entry)
+      end
+
+    put_user_undo_stack(state, user_id, updated_stack)
+  end
+
+  defp merge_undo_entry(existing, incoming) do
+    %UndoEntry{
+      existing
+      | label: existing.label || incoming.label,
+        timestamp: incoming.timestamp,
+        operations: existing.operations ++ incoming.operations,
+        inverse_ops: incoming.inverse_ops ++ existing.inverse_ops
+    }
+  end
+
+  defp operation_for_entry(operation) do
+    %{type: operation.type, payload: operation.payload}
+  end
+
+  defp get_user_undo_stack(state, user_id) do
+    Map.get(state.undo_stacks || %{}, user_id, UndoStack.new())
+  end
+
+  defp put_user_undo_stack(state, user_id, stack) do
+    %{state | undo_stacks: Map.put(state.undo_stacks || %{}, user_id, stack)}
+  end
+
+  defp build_undo_state(state, user_id) do
+    stack = get_user_undo_stack(state, user_id)
+    next_undo = List.first(stack.undo)
+    next_redo = List.first(stack.redo)
+
+    %{
+      canUndo: stack.undo != [],
+      canRedo: stack.redo != [],
+      undoLabel: if(next_undo, do: next_undo.label, else: nil),
+      redoLabel: if(next_redo, do: next_redo.label, else: nil)
+    }
+  end
+
+  defp apply_undo(state, user_id, count) when count > 0 do
+    Enum.reduce_while(1..count, {:ok, state, %{label: nil, operation_count: 0}}, fn _,
+                                                                                    {:ok,
+                                                                                     acc_state,
+                                                                                     acc_result} ->
+      case apply_single_undo(acc_state, user_id) do
+        {:ok, new_state, result} ->
+          updated_result = %{
+            label: result.label,
+            operation_count: acc_result.operation_count + result.operation_count
+          }
+
+          {:cont, {:ok, new_state, updated_result}}
+
+        {:error, reason, new_state} ->
+          {:halt, {:error, reason, new_state}}
+      end
+    end)
+  end
+
+  defp apply_undo(state, _user_id, _count), do: {:error, :invalid_undo_count, state}
+
+  defp apply_redo(state, user_id, count) when count > 0 do
+    Enum.reduce_while(1..count, {:ok, state, %{label: nil, operation_count: 0}}, fn _,
+                                                                                    {:ok,
+                                                                                     acc_state,
+                                                                                     acc_result} ->
+      case apply_single_redo(acc_state, user_id) do
+        {:ok, new_state, result} ->
+          updated_result = %{
+            label: result.label,
+            operation_count: acc_result.operation_count + result.operation_count
+          }
+
+          {:cont, {:ok, new_state, updated_result}}
+
+        {:error, reason, new_state} ->
+          {:halt, {:error, reason, new_state}}
+      end
+    end)
+  end
+
+  defp apply_redo(state, _user_id, _count), do: {:error, :invalid_redo_count, state}
+
+  defp apply_single_undo(state, user_id) do
+    case UndoStack.pop_undo(get_user_undo_stack(state, user_id)) do
+      :empty ->
+        {:error, :nothing_to_undo, state}
+
+      {:ok, entry, stack_after_pop} ->
+        case simulate_operations(state, entry.inverse_ops) do
+          {:ok, _draft, _editor_state} ->
+            case apply_operations_without_tracking(state, user_id, entry.inverse_ops) do
+              {:ok, new_state} ->
+                updated_stack = %{stack_after_pop | redo: [entry | stack_after_pop.redo]}
+                new_state = put_user_undo_stack(new_state, user_id, updated_stack)
+                result = %{label: entry.label, operation_count: length(entry.inverse_ops)}
+                {:ok, new_state, result}
+
+              {:error, reason, new_state} ->
+                {:error, {:conflict, reason, entry.label}, new_state}
+            end
+
+          {:error, reason} ->
+            new_state = put_user_undo_stack(state, user_id, stack_after_pop)
+            {:error, {:conflict, reason, entry.label}, new_state}
+        end
+    end
+  end
+
+  defp apply_single_redo(state, user_id) do
+    case UndoStack.pop_redo(get_user_undo_stack(state, user_id)) do
+      :empty ->
+        {:error, :nothing_to_redo, state}
+
+      {:ok, entry, stack_after_pop} ->
+        case simulate_operations(state, entry.operations) do
+          {:ok, _draft, _editor_state} ->
+            case apply_operations_without_tracking(state, user_id, entry.operations) do
+              {:ok, new_state} ->
+                updated_stack = %{stack_after_pop | undo: [entry | stack_after_pop.undo]}
+                new_state = put_user_undo_stack(new_state, user_id, updated_stack)
+                result = %{label: entry.label, operation_count: length(entry.operations)}
+                {:ok, new_state, result}
+
+              {:error, reason, new_state} ->
+                {:error, {:conflict, reason, entry.label}, new_state}
+            end
+
+          {:error, reason} ->
+            new_state = put_user_undo_stack(state, user_id, stack_after_pop)
+            {:error, {:conflict, reason, entry.label}, new_state}
+        end
+    end
+  end
+
+  defp simulate_operations(state, operations) do
+    Enum.reduce_while(operations, {:ok, state.draft, state.editor_state}, fn op,
+                                                                             {:ok, draft,
+                                                                              editor_state} ->
+      case Operations.validate(draft, op) do
+        :ok ->
+          {new_draft, new_editor_state, _changed} = apply_to_state(draft, editor_state, op)
+          {:cont, {:ok, new_draft, new_editor_state}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp apply_operations_without_tracking(state, user_id, operations) do
+    Enum.reduce_while(operations, {:ok, state}, fn op, {:ok, acc_state} ->
+      operation = %{
+        id: UUID.generate(),
+        type: op.type,
+        payload: op.payload,
+        user_id: user_id,
+        client_seq: nil
+      }
+
+      case process_operation(acc_state, operation, track_undo: false) do
+        {:ok, new_state, _result} -> {:cont, {:ok, new_state}}
+        {:error, reason} -> {:halt, {:error, reason, acc_state}}
+      end
+    end)
+  end
+
+  defp infer_undo_label(draft, _editor_state, operation) do
+    type = operation.type
+    payload = operation.payload || %{}
+
+    case type do
+      :add_step ->
+        step = Map.get(payload, :step) || Map.get(payload, "step") || %{}
+        "Add Step: #{Map.get(step, :name) || Map.get(step, "name") || "Step"}"
+
+      :remove_step ->
+        step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
+        "Delete Step: #{lookup_step_name(draft, step_id)}"
+
+      :update_step_config ->
+        step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
+        "Edit Config: #{lookup_step_name(draft, step_id)}"
+
+      :update_step_position ->
+        step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
+        "Move Step: #{lookup_step_name(draft, step_id)}"
+
+      :update_step_metadata ->
+        step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
+        "Update Step: #{lookup_step_name(draft, step_id)}"
+
+      :add_connection ->
+        "Add Connection"
+
+      :remove_connection ->
+        "Remove Connection"
+
+      :add_group ->
+        group = Map.get(payload, :group) || Map.get(payload, "group") || %{}
+        "Add Group: #{Map.get(group, :name) || Map.get(group, "name") || "Group"}"
+
+      :update_group ->
+        group_id = Map.get(payload, :group_id) || Map.get(payload, "group_id")
+        "Update Group: #{lookup_group_name(draft, group_id)}"
+
+      :remove_group ->
+        group_id = Map.get(payload, :group_id) || Map.get(payload, "group_id")
+        "Remove Group: #{lookup_group_name(draft, group_id)}"
+
+      :set_group_membership ->
+        "Update Group Members"
+
+      :pin_step_output ->
+        step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
+        "Pin Output: #{lookup_step_name(draft, step_id)}"
+
+      :unpin_step_output ->
+        step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
+        "Unpin Output: #{lookup_step_name(draft, step_id)}"
+
+      :disable_step ->
+        step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
+        "Disable Step: #{lookup_step_name(draft, step_id)}"
+
+      :enable_step ->
+        step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
+        "Enable Step: #{lookup_step_name(draft, step_id)}"
+
+      _ ->
+        "Undo"
+    end
+  end
+
+  defp lookup_step_name(draft, step_id) do
+    draft.steps
+    |> List.wrap()
+    |> Enum.find_value("Step", fn step ->
+      if Map.get(step, :id) == step_id or Map.get(step, "id") == step_id do
+        Map.get(step, :name) || Map.get(step, "name")
+      end
+    end)
+  end
+
+  defp lookup_group_name(draft, group_id) do
+    draft.groups
+    |> List.wrap()
+    |> Enum.find_value("Group", fn group ->
+      if Map.get(group, :id) == group_id or Map.get(group, "id") == group_id do
+        Map.get(group, :name) || Map.get(group, "name")
+      end
+    end)
   end
 
   defp apply_to_state(draft, editor_state, operation) do
@@ -449,10 +801,14 @@ defmodule Imgd.Collaboration.EditSession.Server do
         {draft, new_editor_state, true}
 
       :disable_step ->
+        step_id = Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
+        mode = Map.get(operation.payload, :mode) || Map.get(operation.payload, "mode") || :skip
+
         new_editor_state =
           EditorState.disable_step(
             editor_state,
-            Map.get(operation.payload, :step_id) || Map.get(operation.payload, "step_id")
+            step_id,
+            mode
           )
 
         {draft, new_editor_state, true}
