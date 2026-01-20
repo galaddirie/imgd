@@ -2,20 +2,27 @@
 
 ### Core / Platform
 - [ ] Credentials system
-- [ ] Sub-workflows
+- [ ] Sub-workflows ( webhook triggers, add streaming outputs, and events users can subscribe to for workflow outputs etc before we do this, why? so that the step can subscribe to the execution without polling)
 - [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)
     - [ ] Add variable trigger nodes (ex. variable changed)
-- [ ] 
+- [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
+- [ ] Execution registry (for visbility in what executions are running on what node for observability and lifecycle management - future durability features)
+- [ ] Add debug execution mode 
+
 
 ### Editor UX
-- [ ] Add **Save** button
+- [ ] Add **Save** button ( debounce/throttle save and enable save button if there are unsaved changes)
 - [ ] Add **Publish** button
-- [ ] Unsaved changes indicator + autosave
-- [ ] Undo/redo (unsaved changes remain in session local storage)
+- [ ] Unsaved changes indicator + autosaving indicator
+- load edit stack on workflow edit page load
+- revision mode should be its own page
+-lets be efficent with edit stack, if a user moves a node 5 times, do we need to add 5 entries to the edit stack? no. if they move groups and nodes multiple times, ( not just 1 change but multiple changes that are relitively small and heavily related to each other) do we need to add multiple entries to the edit stack? no. we should be efficient with edit stack and only add entries when there are significant changes that are not related to each other, when they are far apart,  and or unique changes that are not related to each other. 
+maybe after edit stack is full we normalize / merge edits? 
+- we should be able to see the node config in the revision preview menu ( no editing of config in preview mode)
+- [bug] we can currently pin and unpin outputs in the revision preview menu, we can also edit colors, rename nodes and groups 
+- remove the collapsing functionality added to node library
 
-- [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
 
-- [ ] Execution registry (for visbility in what executions are running on what node for observability and lifecycle management - future durability features)
 
 
 ### Interoperability
@@ -95,3 +102,5 @@ Suport logs /traces for some nodes (ex. ai exeuction node should show openai ext
 
 
 - when we refresh we dont load duration data for steps only for fan out steps
+
+- random nil steps showing up in data
