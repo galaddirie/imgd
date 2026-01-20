@@ -10,6 +10,7 @@ import {
   CloudArrowUpIcon,
   ExclamationCircleIcon,
   ArrowPathIcon,
+  ClockIcon,
 } from '@heroicons/vue/24/outline';
 
 // =============================================================================
@@ -29,6 +30,7 @@ interface Props {
   isUndoPending?: boolean;
   presences?: UserPresence[];
   validationErrors?: string[];
+  isRevisionOpen?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -44,6 +46,7 @@ const props = withDefaults(defineProps<Props>(), {
   isUndoPending: false,
   presences: () => [],
   validationErrors: () => [],
+  isRevisionOpen: false,
 });
 
 // =============================================================================
@@ -57,6 +60,7 @@ const emit = defineEmits<{
   (e: 'run-test'): void;
   (e: 'publish'): void;
   (e: 'rename', name: string): void;
+  (e: 'toggle-revisions'): void;
 }>();
 
 // =============================================================================
@@ -155,6 +159,15 @@ const hasErrors = computed(() => props.validationErrors.length > 0);
       <div class="bg-base-200/50 border-base-300/30 rounded-full border p-1">
         <ThemeSelector />
       </div>
+
+      <button
+        class="btn btn-sm btn-ghost border-base-300 bg-base-100 hover:bg-base-200 text-base-content/70 flex gap-2 rounded-xl border px-4 text-sm font-semibold transition-all"
+        :class="isRevisionOpen ? 'border-primary/40 bg-primary/10 text-primary' : ''"
+        @click="emit('toggle-revisions')"
+      >
+        <ClockIcon class="h-5 w-5" />
+        Revisions
+      </button>
 
       <!-- Save Button -->
       <button

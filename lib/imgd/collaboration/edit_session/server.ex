@@ -74,6 +74,11 @@ defmodule Imgd.Collaboration.EditSession.Server do
     GenServer.call(via_tuple(workflow_id), {:get_undo_state, user_id})
   end
 
+  @doc "Preview draft state after undoing N entries (no mutation)."
+  def preview_undo(workflow_id, user_id, count \\ 1) do
+    GenServer.call(via_tuple(workflow_id), {:preview_undo, user_id, count})
+  end
+
   @doc "Get current state for a joining/reconnecting client."
   def get_sync_state(workflow_id, client_seq \\ nil) do
     GenServer.call(via_tuple(workflow_id), {:get_sync_state, client_seq})
@@ -203,6 +208,10 @@ defmodule Imgd.Collaboration.EditSession.Server do
 
   def handle_call({:get_undo_state, user_id}, _from, state) do
     {:reply, {:ok, build_undo_state(state, user_id)}, state}
+  end
+
+  def handle_call({:preview_undo, user_id, count}, _from, state) do
+    {:reply, preview_undo_state(state, user_id, count), state}
   end
 
   def handle_call({:get_sync_state, client_seq}, _from, state) do
@@ -504,13 +513,63 @@ defmodule Imgd.Collaboration.EditSession.Server do
     stack = get_user_undo_stack(state, user_id)
     next_undo = List.first(stack.undo)
     next_redo = List.first(stack.redo)
+    undo_stack = build_undo_entries(stack.undo)
+    redo_stack = build_undo_entries(stack.redo)
 
     %{
       canUndo: stack.undo != [],
       canRedo: stack.redo != [],
       undoLabel: if(next_undo, do: next_undo.label, else: nil),
-      redoLabel: if(next_redo, do: next_redo.label, else: nil)
+      redoLabel: if(next_redo, do: next_redo.label, else: nil),
+      undoStack: undo_stack,
+      redoStack: redo_stack
     }
+  end
+
+  defp build_undo_entries(entries) when is_list(entries) do
+    entries
+    |> Enum.with_index()
+    |> Enum.map(fn {entry, index} -> format_undo_entry(entry, index + 1) end)
+  end
+
+  defp build_undo_entries(_entries), do: []
+
+  defp format_undo_entry(%UndoEntry{} = entry, depth) do
+    %{
+      id: entry.id,
+      label: entry.label,
+      timestamp: format_timestamp(entry.timestamp),
+      depth: depth
+    }
+  end
+
+  defp format_timestamp(%DateTime{} = timestamp), do: DateTime.to_iso8601(timestamp)
+  defp format_timestamp(_timestamp), do: nil
+
+  defp preview_undo_state(state, user_id, count) do
+    count =
+      case count do
+        value when is_integer(value) and value > 0 ->
+          value
+
+        value when is_binary(value) ->
+          case Integer.parse(value) do
+            {parsed, _} when parsed > 0 -> parsed
+            _ -> 1
+          end
+
+        _ ->
+          1
+      end
+
+    stack = get_user_undo_stack(state, user_id)
+    entries = Enum.take(stack.undo, count)
+    operations = Enum.flat_map(entries, fn entry -> entry.inverse_ops || [] end)
+
+    case simulate_operations(state, operations) do
+      {:ok, draft, _editor_state} -> {:ok, draft}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp apply_undo(state, user_id, count) when count > 0 do

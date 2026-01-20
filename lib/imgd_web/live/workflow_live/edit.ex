@@ -32,6 +32,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               socket
               |> assign(:page_title, "Editing #{workflow.name}")
               |> assign(:workflow, workflow)
+              |> assign(
+                :workflow_versions,
+                serialize_workflow_versions(Workflows.list_workflow_versions(scope, workflow))
+              )
               |> assign(:step_types, step_types)
               |> assign(:node_library_items, node_library_items)
               |> assign(:editor_state, %EditorState{workflow_id: workflow.id})
@@ -148,6 +152,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-ssr={false}
           v-socket={@socket}
           workflow={@workflow}
+          workflowVersions={@workflow_versions}
           stepTypes={@step_types}
           nodeLibraryItems={@node_library_items}
           editorState={@editor_state}
@@ -178,6 +183,8 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:cancel_execution={JS.push("cancel_execution")}
           v-on:undo={JS.push("undo")}
           v-on:redo={JS.push("redo")}
+          v-on:preview_revision={JS.push("preview_revision")}
+          v-on:apply_revision={JS.push("apply_revision")}
           v-on:tidy_layout={JS.push("tidy_layout")}
           v-on:preview_expression={JS.push("preview_expression")}
           v-on:toggle_webhook_test={JS.push("toggle_webhook_test")}
@@ -488,6 +495,68 @@ defmodule ImgdWeb.WorkflowLive.Edit do
         {:noreply, socket}
     end
   end
+
+  @impl true
+  def handle_event("preview_revision", %{"kind" => "undo"} = params, socket) do
+    depth = parse_count(Map.get(params, "depth") || Map.get(params, "count"))
+
+    case Server.preview_undo(socket.assigns.workflow.id, socket.assigns.current_user_id, depth) do
+      {:ok, draft} ->
+        payload = %{kind: "undo", depth: depth, draft: serialize_draft(draft)}
+        {:noreply, push_event(socket, "revision_preview", payload)}
+
+      {:error, reason} ->
+        Logger.warning("Revision preview failed: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Unable to load revision preview")}
+    end
+  end
+
+  def handle_event("preview_revision", _params, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("apply_revision", %{"kind" => "undo"} = params, socket) do
+    depth = parse_count(Map.get(params, "depth") || Map.get(params, "count"))
+
+    case Server.undo(socket.assigns.workflow.id, socket.assigns.current_user_id, depth) do
+      {:ok, _result} ->
+        {:noreply, push_undo_state(socket)}
+
+      {:error, {:conflict, reason, label}} ->
+        Logger.warning("Revision apply conflict: #{inspect(reason)}")
+        socket = push_undo_state(socket)
+        {:noreply, put_flash(socket, :error, "Unable to revert: #{label}")}
+
+      {:error, reason} ->
+        Logger.warning("Revision apply failed: #{inspect(reason)}")
+        socket = push_undo_state(socket)
+        {:noreply, put_flash(socket, :error, "Unable to revert to that revision")}
+    end
+  end
+
+  def handle_event("apply_revision", %{"kind" => "version", "version_id" => version_id}, socket) do
+    draft = socket.assigns.workflow.draft
+
+    with %{} <- draft,
+         {:ok, version} <-
+           Workflows.get_workflow_version(socket.assigns.current_scope, version_id) do
+      label = "Restore v#{version.version_tag}"
+      operations = build_revision_operations(draft, version, label)
+
+      case apply_operations(socket, operations) do
+        :ok ->
+          {:noreply, push_undo_state(socket)}
+
+        {:error, reason} ->
+          Logger.warning("Revision apply failed: #{inspect(reason)}")
+          {:noreply, put_flash(socket, :error, "Unable to apply version")}
+      end
+    else
+      _ ->
+        {:noreply, put_flash(socket, :error, "Unable to apply version")}
+    end
+  end
+
+  def handle_event("apply_revision", _params, socket), do: {:noreply, socket}
 
   # =============================================================================
   # Editor State Operations
@@ -1157,6 +1226,125 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   defp parse_count(_count), do: 1
+
+  defp serialize_workflow_versions(versions) do
+    Enum.map(versions, fn version ->
+      %{
+        id: version.id,
+        version_tag: version.version_tag,
+        source_hash: version.source_hash,
+        changelog: version.changelog,
+        published_at: format_timestamp(version.published_at),
+        published_by: version.published_by,
+        steps: Enum.map(version.steps || [], &Map.from_struct/1),
+        connections: Enum.map(version.connections || [], &Map.from_struct/1),
+        groups: Enum.map(version.groups || [], &Map.from_struct/1)
+      }
+    end)
+  end
+
+  defp serialize_draft(draft) do
+    %{
+      workflow_id: draft.workflow_id,
+      steps: Enum.map(draft.steps || [], &Map.from_struct/1),
+      connections: Enum.map(draft.connections || [], &Map.from_struct/1),
+      groups: Enum.map(draft.groups || [], &Map.from_struct/1),
+      settings: draft.settings || %{}
+    }
+  end
+
+  defp format_timestamp(%DateTime{} = timestamp), do: DateTime.to_iso8601(timestamp)
+  defp format_timestamp(_timestamp), do: nil
+
+  defp build_revision_operations(draft, version, label) do
+    undo_group_id = UUID.generate()
+    opts = %{undo_group_id: undo_group_id, undo_label: label}
+
+    remove_group_ops =
+      draft.groups
+      |> List.wrap()
+      |> Enum.map(fn group ->
+        {:remove_group, %{group_id: fetch_field(group, :id)}, opts}
+      end)
+
+    remove_step_ops =
+      draft.steps
+      |> List.wrap()
+      |> Enum.map(fn step ->
+        {:remove_step, %{step_id: fetch_field(step, :id)}, opts}
+      end)
+
+    target_steps = List.wrap(fetch_field(version, :steps) || [])
+    target_groups = List.wrap(fetch_field(version, :groups) || [])
+    target_connections = List.wrap(fetch_field(version, :connections) || [])
+
+    add_step_ops =
+      Enum.map(target_steps, fn step ->
+        {:add_step, %{step: normalize_step(step)}, opts}
+      end)
+
+    add_group_ops =
+      Enum.map(target_groups, fn group ->
+        group_map = normalize_group(group)
+        step_positions = build_group_step_positions(target_steps, group_map)
+        {:add_group, %{group: group_map, step_positions: step_positions}, opts}
+      end)
+
+    add_connection_ops =
+      Enum.map(target_connections, fn connection ->
+        {:add_connection, %{connection: normalize_connection(connection)}, opts}
+      end)
+
+    remove_group_ops ++ remove_step_ops ++ add_step_ops ++ add_group_ops ++ add_connection_ops
+  end
+
+  defp normalize_step(step) do
+    %{
+      id: fetch_field(step, :id),
+      type_id: fetch_field(step, :type_id),
+      name: fetch_field(step, :name),
+      config: fetch_field(step, :config) || %{},
+      position: normalize_position(fetch_field(step, :position) || %{}),
+      notes: fetch_field(step, :notes)
+    }
+  end
+
+  defp normalize_connection(connection) do
+    %{
+      id: fetch_field(connection, :id),
+      source_step_id: fetch_field(connection, :source_step_id),
+      source_output: fetch_field(connection, :source_output) || "main",
+      target_step_id: fetch_field(connection, :target_step_id),
+      target_input: fetch_field(connection, :target_input) || "main"
+    }
+  end
+
+  defp normalize_group(group) do
+    %{
+      id: fetch_field(group, :id),
+      name: fetch_field(group, :name) || "Group",
+      step_ids: List.wrap(fetch_field(group, :step_ids) || []),
+      output_step_id: fetch_field(group, :output_step_id),
+      position: normalize_group_position(fetch_field(group, :position) || %{}),
+      color: fetch_field(group, :color),
+      collapsed: fetch_field(group, :collapsed) || false
+    }
+  end
+
+  defp build_group_step_positions(steps, group) do
+    step_ids = Map.get(group, :step_ids) || []
+
+    Enum.reduce(steps, %{}, fn step, acc ->
+      step_id = fetch_field(step, :id)
+
+      if step_id in step_ids do
+        position = normalize_position(fetch_field(step, :position) || %{})
+        Map.put(acc, step_id, position)
+      else
+        acc
+      end
+    end)
+  end
 
   defp push_undo_state(socket) do
     case Server.get_undo_state(socket.assigns.workflow.id, socket.assigns.current_user_id) do

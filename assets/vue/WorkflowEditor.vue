@@ -45,7 +45,7 @@ import {
   EDGE_LABEL_POSITION,
 } from '@/constants/layout';
 import { useClientStore } from '@/stores/clientStore';
-import { useUndoStore } from '@/stores/undoStore';
+import { useUndoStore, type UndoEntrySummary } from '@/stores/undoStore';
 import { oklchToHex } from '@/lib/color';
 import { useLayout } from '@/lib/useLayout';
 
@@ -65,6 +65,8 @@ import {
 } from '@heroicons/vue/24/outline';
 import type {
   Workflow,
+  WorkflowDraft,
+  WorkflowVersion,
   Step,
   StepType,
   NodeLibraryItem,
@@ -84,6 +86,7 @@ import type {
 
 interface Props {
   workflow: Workflow;
+  workflowVersions?: WorkflowVersion[];
   stepTypes?: StepType[];
   nodeLibraryItems?: NodeLibraryItem[];
   execution?: Execution | null;
@@ -95,6 +98,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  workflowVersions: () => [],
   stepTypes: () => [],
   nodeLibraryItems: () => [],
   execution: null,
@@ -189,6 +193,11 @@ const emit = defineEmits<{
   ): void;
   (e: 'save_workflow'): void;
   (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void;
+  (e: 'preview_revision', payload: { kind: 'undo'; depth: number }): void;
+  (
+    e: 'apply_revision',
+    payload: { kind: 'undo'; depth: number } | { kind: 'version'; version_id: string }
+  ): void;
   // Collaboration events
   (
     e: 'mouse_move',
@@ -215,6 +224,23 @@ const live = useLiveVue();
 
 const sendUndo = () => emit('undo', { count: 1 });
 const sendRedo = () => emit('redo', { count: 1 });
+
+type RevisionKind = 'undo' | 'version';
+type RevisionSelection = {
+  kind: RevisionKind;
+  id: string;
+  label: string;
+  depth?: number;
+  versionTag?: string;
+};
+
+const isRevisionPanelOpen = ref(false);
+const isRevisionPreviewLoading = ref(false);
+const previewDraft = ref<WorkflowDraft | null>(null);
+const selectedRevision = ref<RevisionSelection | null>(null);
+
+const isRevisionPreviewActive = computed(() => !!previewDraft.value);
+const canEdit = computed(() => !isRevisionPreviewActive.value);
 
 const {
   onPaneClick,
@@ -271,6 +297,17 @@ onMounted(() => {
   live.handleEvent('undo_conflict', () => undoStore.handleUndoConflict());
   live.handleEvent('redo_applied', () => undoStore.handleRedoApplied());
   live.handleEvent('redo_conflict', () => undoStore.handleRedoConflict());
+
+  live.handleEvent('revision_preview', payload => {
+    if (!payload || typeof payload !== 'object') return;
+    const data = payload as { kind?: string; depth?: number; draft?: WorkflowDraft };
+    if (data.kind !== 'undo') return;
+    if (!selectedRevision.value || selectedRevision.value.kind !== 'undo') return;
+    if (data.depth !== selectedRevision.value.depth) return;
+
+    previewDraft.value = buildPreviewDraft(data.draft ?? {});
+    isRevisionPreviewLoading.value = false;
+  });
 });
 
 onBeforeUnmount(() => {
@@ -279,15 +316,39 @@ onBeforeUnmount(() => {
 
 const { layout, previousDirection } = useLayout();
 
-const handleRunNode = (stepId: string) => emit('run_node', { step_id: stepId });
+const handleRunNode = (stepId: string) => {
+  if (!canEdit.value) return;
+  emit('run_node', { step_id: stepId });
+};
 const handleMoveSteps = (stepPositions: Record<string, XYPosition>) => {
   Object.entries(stepPositions).forEach(([stepId, position]) => {
     emit('move_step', { step_id: stepId, position });
   });
 };
 
+const activeWorkflow = computed(() =>
+  previewDraft.value ? { ...props.workflow, draft: previewDraft.value } : props.workflow
+);
+const activeDraft = computed(() => activeWorkflow.value.draft);
+
+const editStack = computed<UndoEntrySummary[]>(() => undoStore.state.undoStack ?? []);
+const revisionVersions = computed<WorkflowVersion[]>(() => props.workflowVersions ?? []);
+
+const formatRevisionTimestamp = (value?: string | null) => {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+};
+
+const previewLabel = computed(() => selectedRevision.value?.label ?? 'Revision preview');
+const applyActionLabel = computed(() =>
+  selectedRevision.value?.kind === 'version' ? 'Apply version' : 'Revert to this edit'
+);
+const isCurrentSelected = computed(() => !selectedRevision.value);
+
 const { nodes } = useWorkflowNodes({
-  workflow: () => props.workflow,
+  workflow: () => activeWorkflow.value,
   stepTypes: () => props.stepTypes,
   stepExecutions: () => props.stepExecutions,
   editorState: () => props.editorState,
@@ -302,11 +363,11 @@ const { nodes } = useWorkflowNodes({
 });
 
 const { edges } = useWorkflowEdges({
-  workflow: () => props.workflow,
+  workflow: () => activeWorkflow.value,
   stepExecutions: () => props.stepExecutions,
 });
 
-const { stepNameById, upstreamStepIdsByStepId } = useWorkflowGraph(() => props.workflow);
+const { stepNameById, upstreamStepIdsByStepId } = useWorkflowGraph(() => activeWorkflow.value);
 
 const nodeTypes = {
   step: markRaw(WorkflowStepNode),
@@ -319,7 +380,7 @@ const edgeTypes = {
 
 const groupByStepId = computed(() => {
   const map = new Map<string, string>();
-  for (const group of props.workflow.draft?.groups || []) {
+  for (const group of activeDraft.value?.groups || []) {
     for (const stepId of group.step_ids || []) {
       map.set(stepId, group.id);
     }
@@ -348,6 +409,83 @@ const emitInteraction = useThrottleFn(
   CURSOR_THROTTLE_MS
 );
 
+const buildPreviewDraft = (draft: Partial<WorkflowDraft>): WorkflowDraft => {
+  return {
+    id: draft.id ?? props.workflow.draft?.id ?? props.workflow.id,
+    workflow_id: draft.workflow_id ?? props.workflow.draft?.workflow_id ?? props.workflow.id,
+    steps: draft.steps ?? [],
+    connections: draft.connections ?? [],
+    groups: draft.groups ?? [],
+    triggers: draft.triggers ?? props.workflow.draft?.triggers ?? [],
+    settings: draft.settings ?? props.workflow.draft?.settings ?? {},
+  };
+};
+
+const resetRevisionPreview = () => {
+  previewDraft.value = null;
+  selectedRevision.value = null;
+  isRevisionPreviewLoading.value = false;
+  store.closeConfigModal();
+  store.hideContextMenu();
+  store.selectNode(null);
+};
+
+const toggleRevisionPanel = () => {
+  isRevisionPanelOpen.value = !isRevisionPanelOpen.value;
+  if (isRevisionPanelOpen.value) {
+    store.isLibraryOpen = false;
+    store.closeConfigModal();
+    store.hideContextMenu();
+  } else {
+    resetRevisionPreview();
+  }
+};
+
+const selectUndoEntry = (entry: UndoEntrySummary) => {
+  selectedRevision.value = {
+    kind: 'undo',
+    id: entry.id,
+    label: entry.label ?? 'Undo',
+    depth: entry.depth,
+  };
+  previewDraft.value = null;
+  isRevisionPreviewLoading.value = true;
+  emit('preview_revision', { kind: 'undo', depth: entry.depth });
+};
+
+const selectVersion = (version: WorkflowVersion) => {
+  selectedRevision.value = {
+    kind: 'version',
+    id: version.id,
+    label: `v${version.version_tag}`,
+    versionTag: version.version_tag,
+  };
+  previewDraft.value = buildPreviewDraft({
+    steps: version.steps ?? [],
+    connections: version.connections ?? [],
+    groups: version.groups ?? [],
+  });
+  isRevisionPreviewLoading.value = false;
+};
+
+const applySelectedRevision = () => {
+  if (!selectedRevision.value) return;
+
+  if (selectedRevision.value.kind === 'undo') {
+    emit('apply_revision', {
+      kind: 'undo',
+      depth: selectedRevision.value.depth ?? 1,
+    });
+  } else {
+    emit('apply_revision', {
+      kind: 'version',
+      version_id: selectedRevision.value.id,
+    });
+  }
+
+  resetRevisionPreview();
+};
+
 const isGroupNode = (
   node: GraphNode<WorkflowNodeData> | Node<WorkflowNodeData>
 ): node is GraphNode<GroupNodeData> => node.type === 'group';
@@ -355,6 +493,11 @@ const isGroupNode = (
 const isStepNode = (
   node: GraphNode<WorkflowNodeData> | Node<WorkflowNodeData>
 ): node is GraphNode<StepNodeData> => node.type === 'step';
+
+const findStepNodeById = (nodeId: string) => {
+  const node = nodes.value.find(n => n.id === nodeId);
+  return node && isStepNode(node) ? node : null;
+};
 
 const getFlowPositionFromEvent = (point: { clientX: number; clientY: number }) => {
   if (!canvasRef.value) return null;
@@ -367,6 +510,7 @@ const getFlowPositionFromEvent = (point: { clientX: number; clientY: number }) =
 };
 
 const handlePaneMouseMove = (event: MouseEvent) => {
+  if (!canEdit.value) return;
   const flowPosition = getFlowPositionFromEvent(event);
   if (!flowPosition) return;
 
@@ -702,6 +846,7 @@ const handleNodeDrag = (event: {
   node: GraphNode<WorkflowNodeData>;
   nodes: GraphNode<WorkflowNodeData>[];
 }) => {
+  if (!canEdit.value) return;
   // Get mouse position from drag event
   const mouseEvent = 'clientX' in event.event ? event.event : event.event.touches[0];
   const flowPosition = getFlowPositionFromEvent(mouseEvent);
@@ -726,6 +871,7 @@ onNodeDragStart((event: {
   event: MouseEvent | TouchEvent;
   nodes: GraphNode<WorkflowNodeData>[];
 }) => {
+  if (!canEdit.value) return;
   const shiftKey = 'shiftKey' in event.event ? event.event.shiftKey : false;
   const draggedStepNodes = event.nodes.filter(isStepNode);
   const hasGroupedSteps = draggedStepNodes.some(node => groupByStepId.value.has(node.id));
@@ -746,6 +892,7 @@ onNodeDragStart((event: {
 
 // Track selection changes and emit to server
 const handleSelectionChange = ({ nodes }: { nodes: Node<WorkflowNodeData>[] }) => {
+  if (!canEdit.value) return;
   const selectedIds = nodes.filter(isStepNode).map(n => n.id);
   // Update local store selection to match VueFlow's selection
   isUpdatingSelection.value = true;
@@ -758,6 +905,7 @@ const handleSelectionChange = ({ nodes }: { nodes: Node<WorkflowNodeData>[] }) =
 watch(
   () => getSelectedNodes.value,
   newSelection => {
+    if (!canEdit.value) return;
     const selectedIds = newSelection.filter(isStepNode).map(n => n.id);
     emit('selection_changed', { step_ids: selectedIds });
   },
@@ -768,6 +916,7 @@ watch(
 watch(
   () => store.selectedNodeId,
   newSelectedId => {
+    if (!canEdit.value) return;
     if (isUpdatingSelection.value) {
       return; // Avoid infinite loop
     }
@@ -800,7 +949,7 @@ const syncDraftState = async () => {
 };
 
 watch(
-  () => [props.workflow.draft?.steps, props.workflow.draft?.connections, props.workflow.draft?.groups],
+  () => [activeDraft.value?.steps, activeDraft.value?.connections, activeDraft.value?.groups],
   () => {
     syncDraftState();
   },
@@ -808,7 +957,7 @@ watch(
 );
 
 onNodesChange(((changes: NodeChange[]) => {
-  if (isSyncingDraft.value) return;
+  if (isSyncingDraft.value || !canEdit.value) return;
 
   const nextChanges: NodeChange[] = [];
 
@@ -834,7 +983,7 @@ onNodesChange(((changes: NodeChange[]) => {
 }) as any);
 
 onEdgesChange(((changes: EdgeChange[]) => {
-  if (isSyncingDraft.value) return;
+  if (isSyncingDraft.value || !canEdit.value) return;
 
   const nextChanges: EdgeChange[] = [];
 
@@ -989,8 +1138,9 @@ const contextMenuItems = computed<MenuItem[]>(() => {
       ];
     }
 
-    const isDisabled = node?.data?.disabled;
-    const isPinned = node?.data?.pinned;
+    const stepNode = node && isStepNode(node) ? node : null;
+    const isDisabled = stepNode?.data?.disabled;
+    const isPinned = stepNode?.data?.pinned;
     const groupItems: MenuItem[] = [];
     if (canGroupSelection.value) {
       groupItems.push({
@@ -1200,6 +1350,7 @@ const alignLayoutPositions = (
 type LayoutOptions = { groupId?: string };
 
 const handleLayout = (options: LayoutOptions = {}) => {
+  if (!canEdit.value) return;
   const stepNodes = getNodes.value.filter(isStepNode) as unknown as GraphNode<StepNodeData>[];
   if (!stepNodes.length) return;
 
@@ -1483,6 +1634,7 @@ const isEditableTarget = (target: EventTarget | null) => {
 };
 
 const handleGlobalKeydown = (event: KeyboardEvent) => {
+  if (!canEdit.value) return;
   if (event.repeat || isEditableTarget(event.target)) return;
   if (!event.metaKey && !event.ctrlKey) return;
 
@@ -1535,6 +1687,7 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
 };
 
 const handleNodeClick = (event: { node: Node<WorkflowNodeData> }) => {
+  if (!canEdit.value) return;
   const node = event.node;
 
   if (clickTimer.value) {
@@ -1553,6 +1706,7 @@ const handleNodeClick = (event: { node: Node<WorkflowNodeData> }) => {
 };
 
 const handleNodeDoubleClick = (event: { node: Node<WorkflowNodeData> }) => {
+  if (!canEdit.value) return;
   if (clickTimer.value) {
     clearTimeout(clickTimer.value);
     clickTimer.value = null;
@@ -1588,6 +1742,7 @@ const findNodeUnderCursor = (event: MouseEvent, nodes: GraphNode<WorkflowNodeDat
 };
 
 const handleNodeContextMenu = (event: NodeMouseEvent) => {
+  if (!canEdit.value) return;
   event.event.preventDefault();
   event.event.stopPropagation();
   const mouseEvent = event.event as MouseEvent;
@@ -1595,6 +1750,7 @@ const handleNodeContextMenu = (event: NodeMouseEvent) => {
 };
 
 const handleSelectionContextMenu = ({ event, nodes }: SelectionContextMenuEvent) => {
+  if (!canEdit.value) return;
   event.preventDefault();
   event.stopPropagation();
   const targetNode = findNodeUnderCursor(event, nodes) ?? nodes[0] ?? null;
@@ -1607,11 +1763,13 @@ const handleSelectionContextMenu = ({ event, nodes }: SelectionContextMenuEvent)
 };
 
 const handlePaneContextMenu = (event: MouseEvent) => {
+  if (!canEdit.value) return;
   event.preventDefault();
   store.showContextMenu(event.clientX, event.clientY, 'pane');
 };
 
 const handleContextMenuSelect = (itemId: string) => {
+  if (!canEdit.value) return;
   const nodeId = store.contextMenu.targetNodeId;
 
   switch (itemId) {
@@ -1647,8 +1805,9 @@ const handleContextMenuSelect = (itemId: string) => {
       break;
     case 'toggle-disable':
       if (nodeId) {
-        const node = nodes.value.find(n => n.id === nodeId);
-        if (node?.data?.disabled) {
+        const stepNode = findStepNodeById(nodeId);
+        if (!stepNode) break;
+        if (stepNode.data?.disabled) {
           emit('enable_step', { step_id: nodeId });
         } else {
           emit('disable_step', { step_id: nodeId, mode: 'skip' });
@@ -1657,8 +1816,9 @@ const handleContextMenuSelect = (itemId: string) => {
       break;
     case 'toggle-pin':
       if (nodeId) {
-        const node = nodes.value.find(n => n.id === nodeId);
-        handleTogglePin(nodeId, !!node?.data?.pinned);
+        const stepNode = findStepNodeById(nodeId);
+        if (!stepNode) break;
+        handleTogglePin(nodeId, !!stepNode.data?.pinned);
       }
       break;
     case 'add-step':
@@ -1678,11 +1838,13 @@ const handleContextMenuSelect = (itemId: string) => {
 const closeContextMenu = () => store.hideContextMenu();
 
 const handleDragOver = (event: DragEvent) => {
+  if (!canEdit.value) return;
   event.preventDefault();
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 };
 
 const handleDrop = (event: DragEvent) => {
+  if (!canEdit.value) return;
   const typeId = event.dataTransfer?.getData('application/vueflow');
   if (!typeId) return;
 
@@ -1708,6 +1870,7 @@ const handleDrop = (event: DragEvent) => {
 onPaneClick(() => store.hideContextMenu());
 
 onConnect((params: VueFlowConnection) => {
+  if (!canEdit.value) return;
   if (!isValidConnection(params)) {
     console.warn('Invalid connection: cycles are not allowed.');
     return;
@@ -1723,6 +1886,7 @@ onConnect((params: VueFlowConnection) => {
 type EdgeUpdatePayload = { edge: Edge<EdgeData>; connection: VueFlowConnection };
 
 const handleEdgeUpdate = ({ edge, connection }: EdgeUpdatePayload) => {
+  if (!canEdit.value) return;
   if (!connection?.source || !connection?.target) return;
   if (!isValidConnection(connection)) {
     console.warn('Invalid connection: cycles are not allowed.');
@@ -1767,6 +1931,7 @@ const restoreExpandParent = () => {
 };
 
 onNodeDragStop((event: { event: MouseEvent | TouchEvent; nodes: GraphNode<WorkflowNodeData>[] }) => {
+  if (!canEdit.value) return;
   // Clear transient drag positions and emit final positions for persistence
   // We can just emit null for dragging_steps to clear it.
   // For now, we use 0,0 for the cursor as it will be updated by the next mousemove anyway.
@@ -1854,16 +2019,26 @@ const handleSaveConfig = (payload: {
   config: Record<string, unknown>;
   notes?: string;
 }) => {
+  if (!canEdit.value) return;
   emit('update_step', {
     step_id: payload.id,
     changes: { name: payload.name, config: payload.config, notes: payload.notes },
   });
 };
 
-const handleDeleteStep = (stepId: string) => requestNodeRemoval(stepId);
+const handleDeleteStep = (stepId: string) => {
+  if (!canEdit.value) return;
+  requestNodeRemoval(stepId);
+};
 
-const handleSave = () => emit('save_workflow');
-const handleRunTest = () => emit('run_test');
+const handleSave = () => {
+  if (!canEdit.value) return;
+  emit('save_workflow');
+};
+const handleRunTest = () => {
+  if (!canEdit.value) return;
+  emit('run_test');
+};
 const handleCancelExecution = () => emit('cancel_execution');
 const handlePreviewExpression = (payload: {
   step_id: string;
@@ -1923,27 +2098,29 @@ const requestNodeRemoval = (nodeId: string) => {
       :workflow-name="workflow?.name ?? 'Untitled Workflow'"
       :is-saving="false"
       :presences="presences"
-      :can-undo="undoStore.canUndo"
-      :can-redo="undoStore.canRedo"
+      :can-undo="undoStore.canUndo && !isRevisionPreviewActive"
+      :can-redo="undoStore.canRedo && !isRevisionPreviewActive"
       :undo-tooltip="undoStore.undoTooltip"
       :redo-tooltip="undoStore.redoTooltip"
       :is-undo-pending="undoStore.isPending"
+      :is-revision-open="isRevisionPanelOpen"
       @save="handleSave"
       @undo="undoStore.undo(sendUndo)"
       @redo="undoStore.redo(sendRedo)"
       @run-test="handleRunTest"
+      @toggle-revisions="toggleRevisionPanel"
     />
 
     <div class="relative flex flex-1 overflow-hidden">
       <NodeLibrary
-        v-if="store.isLibraryOpen"
+        v-if="store.isLibraryOpen && !isRevisionPanelOpen"
         :library-items="nodeLibraryItems"
         class="shrink-0"
         @collapse="store.isLibraryOpen = false"
       />
 
       <button
-        v-else
+        v-else-if="!isRevisionPanelOpen"
         class="btn btn-xs btn-circle bg-base-200 border-base-300 absolute top-1/2 left-0 z-50 ml-1 -translate-y-1/2"
         @click="store.isLibraryOpen = true"
       >
@@ -1975,9 +2152,9 @@ const requestNodeRemoval = (nodeId: string) => {
             :edges="edges"
             :node-types="nodeTypes"
             :edge-types="edgeTypes"
-            :nodes-connectable="true"
-            :nodes-draggable="true"
-            :edges-updatable="true"
+            :nodes-connectable="canEdit"
+            :nodes-draggable="canEdit"
+            :edges-updatable="canEdit"
             :apply-default="false"
             :default-viewport="DEFAULT_VIEWPORT"
             fit-view-on-init
@@ -1995,6 +2172,14 @@ const requestNodeRemoval = (nodeId: string) => {
             <Controls position="bottom-right" />
             <MiniMap position="bottom-left" :node-color="miniMapNodeColor" />
           </VueFlow>
+
+          <div
+            v-if="isRevisionPreviewActive"
+            class="pointer-events-none absolute left-5 top-5 z-[1100] rounded-2xl border border-primary/20 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary"
+          >
+            <div class="text-[10px] uppercase tracking-[0.2em]">Preview mode</div>
+            <div class="text-xs font-semibold">{{ previewLabel }}</div>
+          </div>
 
           <!-- Execution Failure Overlay -->
           <div
@@ -2028,6 +2213,7 @@ const requestNodeRemoval = (nodeId: string) => {
           </div>
 
           <div
+            v-if="!isRevisionPreviewActive"
             class="pointer-events-auto absolute bottom-16 left-1/2 z-[1100] -translate-x-1/2 transform transition-all duration-300 ease-in-out"
           >
             <button
@@ -2050,6 +2236,7 @@ const requestNodeRemoval = (nodeId: string) => {
         </div>
 
         <ExecutionTracePanel
+          v-if="!isRevisionPreviewActive"
           :execution="execution"
           :step-executions="stepExecutions"
           :step-name-by-id="stepNameById"
@@ -2063,8 +2250,155 @@ const requestNodeRemoval = (nodeId: string) => {
         />
       </div>
 
+      <aside
+        v-if="isRevisionPanelOpen"
+        class="bg-base-100 border-base-200 flex h-full w-96 shrink-0 flex-col border-l p-5"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-sm font-semibold text-base-content">Revisions</h2>
+            <p class="text-xs text-base-content/50">
+              Preview and restore past edits or published versions.
+            </p>
+          </div>
+          <button class="btn btn-ghost btn-xs" @click="toggleRevisionPanel">Close</button>
+        </div>
+
+        <div class="mt-4 flex-1 space-y-6 overflow-y-auto pr-1">
+          <div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-base-content/40">
+              Current
+            </div>
+            <button
+              class="mt-3 flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left text-xs transition-all"
+              :class="[
+                isCurrentSelected
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
+              ]"
+              @click="resetRevisionPreview"
+            >
+              <div>
+                <div class="text-sm font-semibold text-base-content">Current draft</div>
+                <div class="text-[11px] text-base-content/50">
+                  Last updated {{ formatRevisionTimestamp(workflow?.updated_at) }}
+                </div>
+              </div>
+              <span
+                v-if="workflow?.current_version_tag"
+                class="badge badge-ghost badge-xs"
+              >
+                v{{ workflow.current_version_tag }}
+              </span>
+            </button>
+          </div>
+
+          <div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-base-content/40">
+              Edit stack
+            </div>
+            <div
+              v-if="editStack.length === 0"
+              class="mt-3 rounded-xl border border-dashed border-base-300 bg-base-200/50 p-3 text-xs text-base-content/50"
+            >
+              No edits yet.
+            </div>
+            <div v-else class="mt-3 space-y-2">
+              <button
+                v-for="entry in editStack"
+                :key="entry.id"
+                class="flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-2 text-left text-xs transition-all"
+                :class="[
+                  selectedRevision?.kind === 'undo' && selectedRevision?.id === entry.id
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
+                ]"
+                @click="selectUndoEntry(entry)"
+              >
+                <div>
+                  <div class="text-sm font-semibold text-base-content">
+                    {{ entry.label || 'Untitled change' }}
+                  </div>
+                  <div class="text-[11px] text-base-content/50">
+                    {{ formatRevisionTimestamp(entry.timestamp) }}
+                  </div>
+                </div>
+                <span class="text-[10px] uppercase tracking-wide text-base-content/40">
+                  Undo {{ entry.depth }}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-base-content/40">
+              Published versions
+            </div>
+            <div
+              v-if="revisionVersions.length === 0"
+              class="mt-3 rounded-xl border border-dashed border-base-300 bg-base-200/50 p-3 text-xs text-base-content/50"
+            >
+              No published versions yet.
+            </div>
+            <div v-else class="mt-3 space-y-2">
+              <button
+                v-for="version in revisionVersions"
+                :key="version.id"
+                class="flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-2 text-left text-xs transition-all"
+                :class="[
+                  selectedRevision?.kind === 'version' && selectedRevision?.id === version.id
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
+                ]"
+                @click="selectVersion(version)"
+              >
+                <div>
+                  <div class="text-sm font-semibold text-base-content">v{{ version.version_tag }}</div>
+                  <div class="text-[11px] text-base-content/50">
+                    {{ formatRevisionTimestamp(version.published_at) }}
+                  </div>
+                </div>
+                <span
+                  v-if="workflow?.current_version_tag === version.version_tag"
+                  class="badge badge-xs"
+                >
+                  Current
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 border-t border-base-200 pt-4">
+          <div v-if="selectedRevision" class="space-y-3">
+            <div class="text-xs text-base-content/70">
+              Previewing <span class="font-semibold">{{ previewLabel }}</span>
+            </div>
+            <div v-if="isRevisionPreviewLoading" class="text-xs text-base-content/50">
+              Loading preview...
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                class="btn btn-primary btn-sm"
+                :disabled="isRevisionPreviewLoading || !previewDraft"
+                @click="applySelectedRevision"
+              >
+                {{ applyActionLabel }}
+              </button>
+              <button class="btn btn-ghost btn-sm" @click="resetRevisionPreview">
+                Exit preview
+              </button>
+            </div>
+            <p class="text-[11px] text-base-content/40">This change is fully undoable.</p>
+          </div>
+          <div v-else class="text-xs text-base-content/60">
+            Select a revision to preview.
+          </div>
+        </div>
+      </aside>
+
       <StepConfigModal
-        :is-open="store.isConfigModalOpen"
+        :is-open="store.isConfigModalOpen && !isRevisionPreviewActive"
         :node="selectedNode"
         :step-type="selectedStepType"
         :execution="execution"

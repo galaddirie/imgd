@@ -1,11 +1,20 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 
+export type UndoEntrySummary = {
+  id: string;
+  label: string | null;
+  timestamp?: string | null;
+  depth: number;
+};
+
 export type UndoState = {
   canUndo: boolean;
   canRedo: boolean;
   undoLabel: string | null;
   redoLabel: string | null;
+  undoStack?: UndoEntrySummary[];
+  redoStack?: UndoEntrySummary[];
 };
 
 export const useUndoStore = defineStore('undo', () => {
@@ -14,6 +23,8 @@ export const useUndoStore = defineStore('undo', () => {
     canRedo: false,
     undoLabel: null,
     redoLabel: null,
+    undoStack: [],
+    redoStack: [],
   });
 
   const isPending = ref(false);
@@ -40,7 +51,11 @@ export const useUndoStore = defineStore('undo', () => {
   };
 
   const handleStateUpdate = (payload: UndoState) => {
-    state.value = payload;
+    state.value = {
+      ...payload,
+      undoStack: payload.undoStack ?? [],
+      redoStack: payload.redoStack ?? [],
+    };
     isPending.value = false;
   };
 

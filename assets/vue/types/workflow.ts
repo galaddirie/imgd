@@ -55,6 +55,18 @@ export interface NodeGroup {
   collapsed: boolean;
 }
 
+export interface WorkflowVersion {
+  id: string;
+  version_tag: string;
+  source_hash?: string;
+  changelog?: string | null;
+  published_at?: string | null;
+  published_by?: string | null;
+  steps: Step[];
+  connections: Connection[];
+  groups: NodeGroup[];
+}
+
 export interface Trigger {
   id: string;
   type: string;
