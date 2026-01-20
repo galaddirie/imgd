@@ -29,17 +29,13 @@ import {
 // Props - will receive library items from LiveView
 interface Props {
   libraryItems?: NodeLibraryItem[];
-  isCollapsed?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   libraryItems: () => [],
-  isCollapsed: false,
 });
 
 const emit = defineEmits<{
-  (e: 'collapse'): void;
-  (e: 'expand'): void;
   (e: 'dragStart', type: string, event: DragEvent): void;
 }>();
 
@@ -136,10 +132,7 @@ const getIcon = (iconName: string) => iconMap[iconName] || CodeBracketIcon;
 </script>
 
 <template>
-  <aside
-    class="bg-base-100 border-base-200 flex h-full flex-col overflow-hidden border-r transition-all duration-300"
-    :class="isCollapsed ? 'w-0' : 'w-72'"
-  >
+  <aside class="bg-base-100 border-base-200 flex h-full w-72 flex-col overflow-hidden border-r">
     <!-- Header -->
     <div class="border-base-200 shrink-0 border-b px-5 py-5">
       <div class="mb-4 flex items-center justify-between">

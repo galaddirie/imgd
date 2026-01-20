@@ -43,28 +43,7 @@ const editor = reactive(useWorkflowEditor(props, emit));
     />
 
     <div class="relative flex flex-1 overflow-hidden">
-      <NodeLibrary
-        v-if="editor.store.isLibraryOpen"
-        :library-items="editor.nodeLibraryItems"
-        class="shrink-0"
-        @collapse="editor.store.isLibraryOpen = false"
-      />
-
-      <button
-        v-else
-        class="btn btn-xs btn-circle bg-base-200 border-base-300 absolute top-1/2 left-0 z-50 ml-1 -translate-y-1/2"
-        @click="editor.store.isLibraryOpen = true"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          class="h-4 w-4 rotate-90"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
+      <NodeLibrary :library-items="editor.nodeLibraryItems" class="shrink-0" />
 
       <div class="relative flex min-w-0 flex-1 flex-col">
         <WorkflowCanvas
