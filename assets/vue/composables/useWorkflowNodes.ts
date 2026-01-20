@@ -139,7 +139,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const groupingColor = groupingPreview.color ?? undefined;
 
     const groupByStepId = new Map<string, string>();
-    const groupNodes: Node<GroupNodeData>[] = groups.map(group => {
+    const groupNodes = groups.map(group => {
       const position = group.position || {};
       const width =
         typeof position.width === 'number' && position.width > 0
@@ -155,7 +155,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         groupByStepId.set(stepId, group.id);
       }
 
-      return {
+      const node = {
         id: group.id,
         type: 'group',
         position: {
@@ -183,6 +183,8 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         deletable: false,
         zIndex: 0,
       } satisfies Node<GroupNodeData>;
+
+      return node as Node<WorkflowNodeData>;
     });
 
     const stepNodes = steps.map(step => {
@@ -246,7 +248,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         }
       }
 
-      return {
+      const node = {
         id: step.id,
         type: 'step',
         position: transientPositions.value[step.id] || step.position,
@@ -281,9 +283,11 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           onTogglePin: options.onTogglePin,
         } satisfies StepNodeData,
       };
+
+      return node as Node<WorkflowNodeData>;
     });
 
-    return groupNodes.concat(stepNodes);
+    return [...groupNodes, ...stepNodes];
   });
 
   return { nodes, transientPositions, stepExecutionsByStepId };
