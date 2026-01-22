@@ -14,7 +14,6 @@
 - [ ] Add **Save** button ( debounce/throttle save and enable save button if there are unsaved changes)
 - [ ] Add **Publish** button
 - [ ] Unsaved changes indicator + autosaving indicator
-- load edit stack on workflow edit page load
 -lets be efficent with edit stack, if a user moves a node 5 times, do we need to add 5 entries to the edit stack? no. if they move groups and nodes multiple times, ( not just 1 change but multiple changes that are relitively small and heavily related to each other) do we need to add multiple entries to the edit stack? no. we should be efficient with edit stack and only add entries when there are significant changes that are not related to each other, when they are far apart,  and or unique changes that are not related to each other. 
 maybe after edit stack is full we normalize / merge edits? 
 

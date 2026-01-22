@@ -11,6 +11,9 @@ import type {
   UserPresence,
 } from '@/types/workflow';
 
+import { useUndoStore } from '@/stores/undoStore';
+type UndoState = ReturnType<typeof useUndoStore>['state'];
+
 export interface WorkflowEditorProps {
   workflow: Workflow;
   stepTypes?: StepType[];
@@ -18,6 +21,7 @@ export interface WorkflowEditorProps {
   execution?: Execution | null;
   stepExecutions?: StepExecution[];
   editorState?: EditorState;
+  undoState?: UndoState;
   presences?: UserPresence[];
   currentUserId?: string;
   expressionPreviews?: Record<string, unknown>;

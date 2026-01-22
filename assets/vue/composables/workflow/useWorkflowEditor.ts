@@ -34,6 +34,11 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const store = useClientStore();
   const undoStore = useUndoStore();
   const live = useLiveVue();
+
+  // Initialize undo state from props if available
+  if (props.undoState) {
+    undoStore.handleStateUpdate(props.undoState);
+  }
   const sendUndo = () => emit('undo', { count: 1 });
   const sendRedo = () => emit('redo', { count: 1 });
   const handleUndo = () => undoStore.undo(sendUndo);
@@ -61,7 +66,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     viewport,
   } = useVueFlow();
   const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
-  const syncResetRef = ref<() => void>(() => {});
+  const syncResetRef = ref<() => void>(() => { });
   const canEdit = computed(() => true);
   const activeWorkflow = computed<Workflow>(() => props.workflow);
   const activeDraft = computed<WorkflowDraft | undefined>(() => props.workflow.draft);
@@ -239,7 +244,20 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const executionState = useWorkflowExecutionState({ execution: () => props.execution });
   const miniMap = useMiniMapNodeColor();
   const closeContextMenu = () => store.hideContextMenu();
-  onMounted(() => keyboard.registerShortcuts());
+  onMounted(() => {
+    keyboard.registerShortcuts();
+
+    // Listen for undo state updates
+    live.handleEvent('undo_state', (payload: any) => {
+      undoStore.handleStateUpdate(payload);
+    });
+
+    // Listen for undo/redo application results
+    live.handleEvent('undo_applied', () => undoStore.handleUndoApplied());
+    live.handleEvent('undo_conflict', () => undoStore.handleUndoConflict());
+    live.handleEvent('redo_applied', () => undoStore.handleRedoApplied());
+    live.handleEvent('redo_conflict', () => undoStore.handleRedoConflict());
+  });
   onBeforeUnmount(() => keyboard.unregisterShortcuts());
   onPaneClick(() => store.hideContextMenu());
   return {

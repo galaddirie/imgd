@@ -42,6 +42,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               |> assign(:execution_id, nil)
               |> assign(:expression_previews, %{})
               |> assign(:webhook_execution_subscribed, false)
+              |> assign(:undo_state, nil)
 
             # Only set up collaboration when WebSocket is connected
             socket =
@@ -133,6 +134,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       |> assign(:execution, execution)
       |> assign(:execution_id, if(execution, do: execution.id, else: nil))
       |> assign(:step_executions, step_executions)
+      |> assign(:undo_state, fetch_undo_state(workflow_id, user.id))
       |> maybe_toggle_webhook_subscription(editor_state)
 
     push_undo_state(socket)
@@ -155,6 +157,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           currentUserId={@current_user_id}
           execution={@execution}
           stepExecutions={@step_executions}
+          undoState={@undo_state}
           v-on:add_step={JS.push("add_step")}
           v-on:duplicate_steps={JS.push("duplicate_steps")}
           v-on:move_step={JS.push("move_step")}
@@ -1928,6 +1931,13 @@ defmodule ImgdWeb.WorkflowLive.Edit do
       end
     catch
       :exit, _ -> {fallback_draft, fallback_editor_state}
+    end
+  end
+
+  defp fetch_undo_state(workflow_id, user_id) do
+    case Server.get_undo_state(workflow_id, user_id) do
+      {:ok, undo_state} -> undo_state
+      _ -> nil
     end
   end
 
