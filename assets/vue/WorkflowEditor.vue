@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { reactive } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
+import { useLiveVue } from 'live_vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';
+import PublishModal from '@/components/flow/PublishModal.vue';
 import StepConfigModal from '@/components/flow/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
@@ -22,6 +24,41 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
 
 const emit = defineEmits<WorkflowEditorEmits>();
 const editor = reactive(useWorkflowEditor(props, emit));
+const live = useLiveVue();
+
+// Publish modal state
+const isPublishModalOpen = ref(false);
+const isPublishing = ref(false);
+const publishError = ref<string | null>(null);
+
+function openPublishModal() {
+  publishError.value = null;
+  isPublishModalOpen.value = true;
+}
+
+function closePublishModal() {
+  if (!isPublishing.value) {
+    isPublishModalOpen.value = false;
+  }
+}
+
+function handlePublish(payload: { version_tag: string; changelog: string }) {
+  isPublishing.value = true;
+  publishError.value = null;
+  emit('publish_workflow', payload);
+}
+
+// Listen for publish result from backend
+onMounted(() => {
+  live.handleEvent('publish_result', (payload: { success: boolean; error?: string }) => {
+    isPublishing.value = false;
+    if (payload.success) {
+      isPublishModalOpen.value = false;
+    } else if (payload.error) {
+      publishError.value = payload.error;
+    }
+  });
+});
 </script>
 
 <template>
@@ -40,6 +77,7 @@ const editor = reactive(useWorkflowEditor(props, emit));
       @redo="editor.handleRedo"
       @run-test="editor.handleRunTest"
       @open-revisions="emit('navigate_revisions')"
+      @publish="openPublishModal"
     />
 
     <div class="relative flex flex-1 overflow-hidden">
@@ -118,6 +156,16 @@ const editor = reactive(useWorkflowEditor(props, emit));
         :items="editor.contextMenuItems"
         @select="editor.handleContextMenuSelect"
         @close="editor.closeContextMenu"
+      />
+
+      <PublishModal
+        :is-open="isPublishModalOpen"
+        :workflow-name="editor.workflow?.name ?? 'Workflow'"
+        :current-version-tag="editor.workflow?.current_version_tag"
+        :is-publishing="isPublishing"
+        :publish-error="publishError"
+        @close="closePublishModal"
+        @publish="handlePublish"
       />
     </div>
   </div>

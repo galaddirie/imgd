@@ -35,7 +35,7 @@ defmodule Imgd.Workflows.WorkflowVersion do
         }
 
   schema "workflow_versions" do
-    # Human-friendly semver, e.g. "1.0.0", "1.2.0-beta.1"
+    # Human-friendly version tag can be semver or anything else
     field :version_tag, :string
 
     # Content hash of steps + connections (SHA-256)
@@ -70,18 +70,8 @@ defmodule Imgd.Workflows.WorkflowVersion do
     |> cast_embed(:connections)
     |> cast_embed(:groups)
     |> validate_required([:version_tag, :workflow_id, :source_hash])
-    |> validate_version_tag()
     |> validate_hex_hash(:source_hash, length: 64)
     |> unique_constraint([:workflow_id, :version_tag])
-  end
-
-  defp validate_version_tag(changeset) do
-    validate_change(changeset, :version_tag, fn :version_tag, tag ->
-      case Version.parse(tag) do
-        {:ok, _} -> []
-        :error -> [version_tag: "must be a valid semantic version (e.g., 1.2.0)"]
-      end
-    end)
   end
 
   @doc """

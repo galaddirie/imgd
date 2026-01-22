@@ -11,6 +11,7 @@ import {
   ExclamationCircleIcon,
   ArrowPathIcon,
   ClockIcon,
+  RocketLaunchIcon,
 } from '@heroicons/vue/24/outline';
 
 // =============================================================================
@@ -175,6 +176,15 @@ const hasErrors = computed(() => props.validationErrors.length > 0);
         <span v-if="isSaving" class="loading loading-spinner loading-xs text-primary"></span>
         <CloudArrowUpIcon v-else class="h-5 w-5" />
         {{ isSaving ? 'Saving...' : 'Save' }}
+      </button>
+
+      <!-- Publish Button -->
+      <button
+        class="btn btn-sm btn-primary text-primary-content flex gap-2 rounded-xl px-5 text-sm font-semibold shadow-md transition-all hover:shadow-lg"
+        @click="emit('publish')"
+      >
+        <RocketLaunchIcon class="h-5 w-5" />
+        Publish
       </button>
     </div>
   </header>

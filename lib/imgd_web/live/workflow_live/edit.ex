@@ -5,6 +5,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   use ImgdWeb, :live_view
 
   alias Imgd.Workflows
+  alias Imgd.Repo
   alias Imgd.Steps
   alias Imgd.Steps.Registry, as: StepRegistry
   alias Imgd.Collaboration.EditorState
@@ -170,6 +171,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:add_connection={JS.push("add_connection")}
           v-on:remove_connection={JS.push("remove_connection")}
           v-on:save_workflow={JS.push("save_workflow")}
+          v-on:publish_workflow={JS.push("publish_workflow")}
           v-on:mouse_move={JS.push("mouse_move")}
           v-on:selection_changed={JS.push("selection_changed")}
           v-on:pin_output={JS.push("pin_output")}
@@ -595,6 +597,51 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   end
 
   @impl true
+  def handle_event("publish_workflow", %{"version_tag" => version_tag} = params, socket) do
+    workflow = socket.assigns.workflow
+    scope = socket.assigns.current_scope
+    changelog = Map.get(params, "changelog", "")
+
+    # First, persist any unsaved draft changes
+    _ = Server.persist_sync(workflow.id)
+
+    version_attrs = %{
+      version_tag: version_tag,
+      changelog: changelog
+    }
+
+    case Workflows.publish_workflow(scope, workflow, version_attrs) do
+      {:ok, {updated_workflow, _version}} ->
+        socket =
+          socket
+          |> assign(:workflow, Repo.preload(updated_workflow, :draft, force: true))
+          |> push_event("publish_result", %{success: true})
+          |> put_flash(:info, "Workflow published as version #{version_tag}")
+
+        {:noreply, socket}
+
+      {:error, {:invalid_workflow, errors}} ->
+        error_msg = format_validation_errors(errors)
+
+        socket =
+          socket
+          |> push_event("publish_result", %{success: false, error: error_msg})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        Logger.error("Failed to publish workflow: #{inspect(reason)}")
+        error_msg = format_publish_error(reason)
+
+        socket =
+          socket
+          |> push_event("publish_result", %{success: false, error: error_msg})
+
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_event("run_test", _params, socket) do
     case start_preview_execution(socket) do
       {:ok, socket} ->
@@ -961,6 +1008,28 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   # =============================================================================
   # Private Helpers
   # =============================================================================
+
+  defp format_validation_errors(errors) when is_list(errors) do
+    errors
+    |> Enum.take(3)
+    |> Enum.map_join(", ", fn
+      %{message: msg} -> msg
+      msg when is_binary(msg) -> msg
+      other -> inspect(other)
+    end)
+  end
+
+  defp format_validation_errors(errors), do: inspect(errors)
+
+  defp format_publish_error(:access_denied),
+    do: "You don't have permission to publish this workflow"
+
+  defp format_publish_error(%Ecto.Changeset{} = changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
+    |> Enum.map_join(", ", fn {field, errors} -> "#{field}: #{Enum.join(errors, ", ")}" end)
+  end
+
+  defp format_publish_error(reason), do: "Failed to publish: #{inspect(reason)}"
 
   defp apply_operations(_socket, []), do: :ok
 
