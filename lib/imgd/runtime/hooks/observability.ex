@@ -184,9 +184,17 @@ defmodule Imgd.Runtime.Hooks.Observability do
       Process.delete(:imgd_step_skipped)
 
       unless skipped? do
-        acc_outputs = Process.get(:imgd_accumulated_outputs, %{})
-        step_name = get_step_name(step)
-        Process.put(:imgd_accumulated_outputs, Map.put(acc_outputs, step_name, result_fact.value))
+        metadata = get_step_metadata(step, workflow)
+
+        if metadata[:step_id] do
+          step_name = get_step_name(step)
+          acc_outputs = Process.get(:imgd_accumulated_outputs, %{})
+
+          Process.put(
+            :imgd_accumulated_outputs,
+            Map.put(acc_outputs, step_name, result_fact.value)
+          )
+        end
       end
 
       workflow
@@ -360,7 +368,8 @@ defmodule Imgd.Runtime.Hooks.Observability do
   end
 
   defp skip_observability?(step, workflow) do
-    get_step_metadata(step, workflow)[:skip_observability] == true
+    metadata = get_step_metadata(step, workflow)
+    metadata == %{} or metadata[:skip_observability] == true
   end
 
   defp get_step_type_id(step, workflow) do
