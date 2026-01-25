@@ -32,7 +32,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
           myself={@myself}
         />
       <% else %>
-        <%= if is_oauth_type?(@selected_type.slug) do %>
+        <%= if is_oauth_type?(@selected_type.id) do %>
           <.render_oauth_config
             form={@form}
             selected_type={@selected_type}
@@ -196,7 +196,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
           field={@form[:name]}
           type="text"
           label="Name"
-          placeholder={"e.g. My #{provider_display_name(@selected_type.slug)} Account"}
+          placeholder={"e.g. My #{provider_display_name(@selected_type.id)} Account"}
           required
           autocomplete="off"
         />
@@ -420,13 +420,13 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
   end
 
   def handle_event("select_type", %{"type-id" => type_id}, socket) do
-    # Since we are filtering on server, the selected type MUST be in @filtered_types (or we fetch it specifically if needed, but here it should be present)
+    # Since we are filtering on server, the selected type MUST be in @filtered_types
     selected_type = Enum.find(socket.assigns.filtered_types, &(&1.id == type_id))
 
     if selected_type do
-      if is_oauth_type?(selected_type.slug) do
+      if is_oauth_type?(selected_type.id) do
         # OAuth credential - derive provider from type slug
-        changeset = build_oauth_changeset(selected_type.slug, %{})
+        changeset = build_oauth_changeset(selected_type.id, %{})
 
         {:noreply,
          socket
@@ -463,7 +463,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
 
   def handle_event("validate_oauth", %{"credential" => params}, socket) do
     changeset =
-      build_oauth_changeset(socket.assigns.selected_type.slug, params)
+      build_oauth_changeset(socket.assigns.selected_type.id, params)
       |> Map.put(:action, :validate)
 
     {:noreply, assign(socket, :form, to_form(changeset, as: "credential"))}
@@ -480,7 +480,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
       name: params["name"],
       domain_restriction: String.to_existing_atom(params["domain_restriction"] || "all"),
       allowed_domains_pattern: params["allowed_domains_pattern"],
-      credential_type_id: selected_type.id,
+      type_id: selected_type.id,
       data: data
     }
 
@@ -507,7 +507,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
     scopes = parse_scopes(params["scopes"])
 
     # Derive provider slug from credential type
-    provider_slug = derive_oauth_provider(selected_type.slug)
+    provider_slug = derive_oauth_provider(selected_type.id)
 
     attrs = %{
       name: params["name"],
@@ -519,7 +519,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
       allowed_domains_pattern: params["allowed_domains_pattern"],
       client_id: params["client_id"],
       client_secret: params["client_secret"],
-      credential_type_id: selected_type.id
+      type_id: selected_type.id
     }
 
     case Credentials.create_oauth_credential(scope, attrs) do
@@ -555,7 +555,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
   end
 
   # Build a changeset for OAuth credentials
-  defp build_oauth_changeset(type_slug, params) do
+  defp build_oauth_changeset(type_id, params) do
     types = %{
       name: :string,
       client_id: :string,
@@ -568,7 +568,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
     }
 
     # Get default scopes for the provider
-    provider_slug = derive_oauth_provider(type_slug)
+    provider_slug = derive_oauth_provider(type_id)
 
     default_scopes =
       provider_slug
@@ -666,7 +666,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
     |> Enum.join(" ")
   end
 
-  defp is_oauth_type?(slug), do: slug in @oauth_types
+  defp is_oauth_type?(id), do: id in @oauth_types
 
   # Derive OAuth provider slug from credential type slug
   defp derive_oauth_provider("google"), do: :google

@@ -8,7 +8,7 @@ defmodule Imgd.Credentials do
   import Ecto.Query, warn: false
   alias Imgd.Repo
 
-  alias Imgd.Credentials.{Credential, CredentialType, AuditLog, DynamicOAuth}
+  alias Imgd.Credentials.{Credential, AuditLog, DynamicOAuth, Registry}
   alias Imgd.Accounts.Scope
 
   @doc """
@@ -19,10 +19,10 @@ defmodule Imgd.Credentials do
 
     from(c in Credential,
       where: c.user_id == ^user_id,
-      order_by: [desc: c.inserted_at],
-      preload: [:credential_type]
+      order_by: [desc: c.inserted_at]
     )
     |> Repo.all()
+    |> populate_types()
   end
 
   @doc """
@@ -30,11 +30,13 @@ defmodule Imgd.Credentials do
   User must own the credential to access it.
   """
   def get_credential(%Scope{} = scope, id) do
-    case Repo.get(Credential, id) |> Repo.preload([:credential_type]) do
+    case Repo.get(Credential, id) do
       nil ->
         {:error, :not_found}
 
       credential ->
+        credential = populate_type(credential)
+
         if Scope.can_view_credential?(scope, credential) do
           {:ok, credential}
         else
@@ -109,39 +111,50 @@ defmodule Imgd.Credentials do
   Lists all available credential types.
   """
   def list_credential_types(opts \\ []) do
-    base_query = from(t in CredentialType, order_by: [asc: t.name])
+    Registry.all()
+    |> filter_types(opts)
+  end
 
-    base_query
+  defp filter_types(types, opts) do
+    types
     |> filter_by_search(opts[:search])
     |> filter_by_category(opts[:category])
     |> limit_results(opts[:limit])
-    |> Repo.all()
   end
 
-  defp filter_by_search(query, nil), do: query
-  defp filter_by_search(query, ""), do: query
+  defp filter_by_search(types, nil), do: types
+  defp filter_by_search(types, ""), do: types
 
-  defp filter_by_search(query, search_term) do
-    search_pattern = "%#{search_term}%"
+  defp filter_by_search(types, search_term) do
+    search_pattern = String.downcase(search_term)
 
-    from t in query,
-      where:
-        ilike(t.name, ^search_pattern) or
-          ilike(t.slug, ^search_pattern) or
-          ilike(t.category, ^search_pattern)
+    Enum.filter(types, fn type ->
+      String.contains?(String.downcase(type.name), search_pattern) or
+        String.contains?(String.downcase(type.id), search_pattern) or
+        String.contains?(String.downcase(type.category), search_pattern)
+    end)
   end
 
-  defp filter_by_category(query, nil), do: query
-  defp filter_by_category(query, category), do: from(t in query, where: t.category == ^category)
+  defp filter_by_category(types, nil), do: types
 
-  defp limit_results(query, nil), do: query
-  defp limit_results(query, limit), do: from(t in query, limit: ^limit)
+  defp filter_by_category(types, category) do
+    Enum.filter(types, &(&1.category == category))
+  end
+
+  defp limit_results(types, nil), do: types
+
+  defp limit_results(types, limit) do
+    Enum.take(types, limit)
+  end
 
   @doc """
-  Gets a credential type by slug.
+  Gets a credential type by ID.
   """
-  def get_credential_type_by_slug(slug) do
-    Repo.get_by(CredentialType, slug: slug)
+  def get_credential_type_by_id(id) do
+    case Registry.get(id) do
+      {:ok, type} -> type
+      {:error, _} -> nil
+    end
   end
 
   # ============================================================================
@@ -267,9 +280,20 @@ defmodule Imgd.Credentials do
   def create_oauth_credential(%Scope{} = scope, attrs) when is_map(attrs) do
     type_slug = to_string(attrs[:oauth_provider_slug] || attrs["oauth_provider_slug"])
 
+    # Map provider slug to credential type slug if needed
+    # (For backward compatibility or simple mapping)
+    type_slug =
+      case type_slug do
+        "github" -> "github_oauth"
+        # Assuming we create this later or map to oauth2
+        "google" -> "google_oauth"
+        "slack" -> "slack_oauth"
+        other -> other
+      end
+
     type =
-      case get_credential_type_by_slug(type_slug) do
-        nil -> get_credential_type_by_slug("oauth2")
+      case get_credential_type_by_id(type_slug) do
+        nil -> get_credential_type_by_id("oauth2")
         found -> found
       end
 
@@ -284,7 +308,7 @@ defmodule Imgd.Credentials do
 
       credential_attrs =
         attrs
-        |> Map.put(:credential_type_id, type.id)
+        |> Map.put(:type_id, type.id)
         |> Map.put(:data, data)
         |> Map.put(:status, :needs_reconnect)
 
@@ -366,6 +390,17 @@ defmodule Imgd.Credentials do
         require Logger
         Logger.error("Failed to write credential audit log: #{inspect(e)}")
         :ok
+    end
+  end
+
+  defp populate_types(credentials) when is_list(credentials) do
+    Enum.map(credentials, &populate_type/1)
+  end
+
+  defp populate_type(%Credential{type_id: type_id} = credential) do
+    case Registry.get(type_id) do
+      {:ok, type} -> %{credential | type: type}
+      _ -> credential
     end
   end
 end

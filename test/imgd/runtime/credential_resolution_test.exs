@@ -48,8 +48,6 @@ defmodule Imgd.Runtime.CredentialResolutionTest do
 
   describe "Credential Resolver" do
     setup do
-      seed_credential_types()
-
       user = AccountsFixtures.user_fixture()
       scope = Imgd.Accounts.Scope.for_user(user)
 
@@ -58,7 +56,7 @@ defmodule Imgd.Runtime.CredentialResolutionTest do
         Credentials.create_credential(scope, %{
           name: "Test API Key",
           data: %{"token" => "secret-value-123", "url" => "https://api.example.com"},
-          credential_type_id: Credentials.get_credential_type_by_slug("api_key").id
+          type_id: "api_key"
         })
 
       %{scope: scope, user: user, credential: cred}
@@ -113,32 +111,8 @@ defmodule Imgd.Runtime.CredentialResolutionTest do
     end
 
     test "fails if environment mismatch (if enforced)", %{scope: scope, credential: cred} do
-      # By default we don't enforce strict environment separation in query unless specified.
-      # But resolve_credential/3 takes environment arg and filters by it in internal query logic?
-      # Let's check credentials.ex behavior.
-      # list_credentials filters by env if provided.
-      # resolve_credential uses get_credential which uses ID directly.
-      # Credentials.resolve_credential implementation:
-      # def resolve_credential(scope, id, _env) do -> get_credential(scope, id) ...
-      # It currently IGNORES environment arg in logic (it names it _environment).
-      # Plan said "prepares for future env-agnostic refs".
-      # So for now, it should still resolve even if we ask for :staging but cred is :production (since we query by ID).
-      # UNLESS I change implementation to enforce it.
-
-      # Let's modify behavior or skip this check.
-      # The implementation in credentials.ex line 143: `resolve_credential(scope, credential_id, _environment)`
-      # It ignores environment. So this test would pass (resolve successfully).
-
       config = %{"key" => "$credential:#{cred.id}"}
       {:ok, _} = CredentialResolver.resolve(config, scope, :staging)
-    end
-  end
-
-  defp seed_credential_types do
-    for type <- Imgd.Credentials.CredentialType.built_in_types() do
-      %Imgd.Credentials.CredentialType{}
-      |> Imgd.Credentials.CredentialType.changeset(type)
-      |> Imgd.Repo.insert!(on_conflict: :nothing)
     end
   end
 end

@@ -998,7 +998,7 @@ defmodule ImgdWeb.CoreComponents do
       <.icon name="hero-x-mark" />
       <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
   """
-  attr :name, :string, required: true
+  attr :name, :any, required: true
   attr :class, :any, default: "size-4"
 
   def icon(%{name: "hero-" <> _} = assigns) do
@@ -1006,6 +1006,54 @@ defmodule ImgdWeb.CoreComponents do
     <span class={[@name, @class]} />
     """
   end
+
+  def icon(%{name: %{src: src} = config} = assigns) do
+    assigns = assign(assigns, :src, src) |> assign(:config, config)
+
+    ~H"""
+    <div
+      class={[@class, "inline-block flex-shrink-0 adaptive-icon"]}
+      style={adaptive_icon_style(@config)}
+    >
+      <%= if !@config[:light_color] && !@config[:dark_color] do %>
+        <img src={@src} class="w-full h-full object-contain" />
+      <% end %>
+    </div>
+    """
+  end
+
+  def icon(%{name: name} = assigns) do
+    if is_image_path?(name) do
+      ~H"""
+      <img src={@name} class={@class} />
+      """
+    else
+      ~H"""
+      <span class={["hero-question-mark-circle", @class]} />
+      """
+    end
+  end
+
+  defp adaptive_icon_style(%{src: src} = config) do
+    light = config[:light_color]
+    dark = config[:dark_color] || light
+
+    mask_style =
+      "-webkit-mask-image: url('#{src}'); mask-image: url('#{src}'); -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center;"
+
+    if light || dark do
+      mask_style <> " --icon-light: #{light}; --icon-dark: #{dark};"
+    else
+      ""
+    end
+  end
+
+  defp is_image_path?(name) when is_binary(name) do
+    String.starts_with?(name, "/") or
+      String.ends_with?(name, [".svg", ".png", ".jpg", ".jpeg", ".webp"])
+  end
+
+  defp is_image_path?(_), do: false
 
   ## JS Commands
 

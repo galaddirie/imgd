@@ -18,6 +18,8 @@ defmodule Imgd.Application do
         {Oban, Application.fetch_env!(:imgd, Oban)},
         {DNSCluster, query: Application.get_env(:imgd, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Imgd.PubSub},
+        # Credential type registry
+        Imgd.Credentials.Registry,
         # Step type registry - must start before endpoint so types are available
         Imgd.Steps.Registry,
         {Registry, keys: :unique, name: Imgd.Runtime.Execution.Registry},

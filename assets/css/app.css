@@ -186,3 +186,13 @@ dark svg .tick line {
   stroke-dasharray: 5, 5;
   animation: vue-flow__edge-animation 1s linear infinite;
 }
+
+@utility adaptive-icon {
+  background-color: var(--icon-light);
+}
+
+@variant dark {
+  .adaptive-icon {
+    background-color: var(--icon-dark);
+  }
+}

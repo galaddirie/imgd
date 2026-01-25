@@ -18,14 +18,14 @@ defmodule Imgd.Credentials.Credential do
         name: "My Google Account",
         oauth_provider_slug: :google,
         oauth_scopes: ["email", "profile"],
-        credential_type: %CredentialType{slug: "google"},
+        type: "google",
         # encrypted_data holds client_id, client_secret, tokens
         # data is virtual, populated only during resolution
       }
   """
   use Imgd.Schema
 
-  alias Imgd.Credentials.{CredentialType, Encryption, AuditLog}
+  alias Imgd.Credentials.{Encryption, AuditLog, Registry}
   alias Imgd.Accounts.User
 
   @oauth_provider_slugs [:google, :github, :slack, :custom]
@@ -45,9 +45,8 @@ defmodule Imgd.Credentials.Credential do
              :metadata,
              :last_used_at,
              :expires_at,
-             :credential_type_id,
-             :inserted_at,
-             :updated_at
+             :updated_at,
+             :type_id
            ]}
 
   @type t :: %__MODULE__{
@@ -67,7 +66,9 @@ defmodule Imgd.Credentials.Credential do
           expires_at: DateTime.t() | nil,
           data: map() | nil,
           user: User.t() | Ecto.Association.NotLoaded.t(),
-          credential_type: CredentialType.t() | Ecto.Association.NotLoaded.t()
+          user: User.t() | Ecto.Association.NotLoaded.t(),
+          # Virtual field for the resolved type definition
+          type: map() | nil
         }
 
   schema "credentials" do
@@ -91,7 +92,11 @@ defmodule Imgd.Credentials.Credential do
     field :data, :map, virtual: true
 
     belongs_to :user, User
-    belongs_to :credential_type, CredentialType
+    field :type_id, :string
+
+    # Virtual field for populated type definition
+    field :type, :any, virtual: true
+
     has_many :audit_logs, AuditLog
 
     timestamps()
@@ -128,15 +133,15 @@ defmodule Imgd.Credentials.Credential do
       :metadata,
       :expires_at,
       :user_id,
-      :credential_type_id
+      :type_id
     ])
-    |> validate_required([:name, :user_id, :credential_type_id])
+    |> validate_required([:name, :user_id, :type_id])
     |> unique_constraint([:user_id, :name])
     |> foreign_key_constraint(:user_id)
-    |> foreign_key_constraint(:credential_type_id)
     |> validate_future_expiration()
     |> validate_domain_restriction()
     |> validate_custom_oauth_provider()
+    |> validate_type_exists()
     |> validate_against_schema(attrs)
     |> encrypt_data(attrs)
   end
@@ -344,16 +349,16 @@ defmodule Imgd.Credentials.Credential do
   end
 
   defp validate_against_schema(changeset, attrs) do
-    credential_type_id = get_field(changeset, :credential_type_id)
+    type_id = get_field(changeset, :type_id)
     data = Map.get(attrs, :data) || Map.get(attrs, "data")
 
-    if credential_type_id && is_map(data) do
-      case Imgd.Repo.get(CredentialType, credential_type_id) do
-        nil ->
+    if type_id && is_map(data) do
+      case Registry.get(type_id) do
+        {:error, _} ->
           changeset
 
-        credential_type ->
-          do_validate_schema(changeset, credential_type.field_schema, data)
+        {:ok, type_def} ->
+          do_validate_schema(changeset, type_def.field_schema, data)
       end
     else
       changeset
@@ -362,13 +367,28 @@ defmodule Imgd.Credentials.Credential do
 
   defp maybe_validate_against_schema(changeset, credential, attrs) do
     data = Map.get(attrs, :data) || Map.get(attrs, "data")
+    # For updates, we use the existing type
+    type_id = credential.type_id
 
-    if is_map(data) do
-      # Load credential type if not already loaded
-      credential = Imgd.Repo.preload(credential, :credential_type)
+    if is_map(data) && type_id do
+      case Registry.get(type_id) do
+        {:ok, type_def} ->
+          do_validate_schema(changeset, type_def.field_schema, data)
 
-      if credential.credential_type do
-        do_validate_schema(changeset, credential.credential_type.field_schema, data)
+        _ ->
+          changeset
+      end
+    else
+      changeset
+    end
+  end
+
+  defp validate_type_exists(changeset) do
+    type_id = get_field(changeset, :type_id)
+
+    if type_id do
+      if Registry.get(type_id) == {:error, :not_found} do
+        add_error(changeset, :type_id, "is invalid")
       else
         changeset
       end

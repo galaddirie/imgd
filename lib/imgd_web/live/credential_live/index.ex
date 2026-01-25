@@ -8,7 +8,7 @@ defmodule ImgdWeb.CredentialLive.Index do
   def mount(_params, _session, socket) do
     scope = socket.assigns.current_scope
     credentials = Credentials.list_credentials(scope)
-    credential_types = Credentials.list_credential_types(limit: 50)
+    credential_types = Credentials.list_credential_types()
 
     {:ok,
      socket
@@ -204,14 +204,14 @@ defmodule ImgdWeb.CredentialLive.Index do
   end
 
   defp get_type_icon(credential) do
-    case credential.credential_type do
+    case credential.type do
       %{icon: icon} when is_binary(icon) -> icon
       _ -> "hero-key"
     end
   end
 
   defp get_type_name(credential) do
-    case credential.credential_type do
+    case credential.type do
       %{name: name} when is_binary(name) -> name
       _ -> "Unknown"
     end

@@ -1,4 +1,4 @@
-defmodule Imgd.Credentials.Providers.BuiltIn do
+defmodule Imgd.Credentials.Providers.Local do
   @moduledoc """
   Default credential provider using the internal encrypted database.
   """
