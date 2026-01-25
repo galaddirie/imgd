@@ -8,7 +8,7 @@ defmodule ImgdWeb.CredentialLive.Index do
   def mount(_params, _session, socket) do
     scope = socket.assigns.current_scope
     credentials = Credentials.list_credentials(scope)
-    credential_types = Credentials.list_credential_types()
+    credential_types = Credentials.list_credential_types(limit: 50)
 
     {:ok,
      socket

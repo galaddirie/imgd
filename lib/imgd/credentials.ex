@@ -108,9 +108,34 @@ defmodule Imgd.Credentials do
   @doc """
   Lists all available credential types.
   """
-  def list_credential_types do
-    Repo.all(from t in CredentialType, order_by: [asc: t.name])
+  def list_credential_types(opts \\ []) do
+    base_query = from(t in CredentialType, order_by: [asc: t.name])
+
+    base_query
+    |> filter_by_search(opts[:search])
+    |> filter_by_category(opts[:category])
+    |> limit_results(opts[:limit])
+    |> Repo.all()
   end
+
+  defp filter_by_search(query, nil), do: query
+  defp filter_by_search(query, ""), do: query
+
+  defp filter_by_search(query, search_term) do
+    search_pattern = "%#{search_term}%"
+
+    from t in query,
+      where:
+        ilike(t.name, ^search_pattern) or
+          ilike(t.slug, ^search_pattern) or
+          ilike(t.category, ^search_pattern)
+  end
+
+  defp filter_by_category(query, nil), do: query
+  defp filter_by_category(query, category), do: from(t in query, where: t.category == ^category)
+
+  defp limit_results(query, nil), do: query
+  defp limit_results(query, limit), do: from(t in query, limit: ^limit)
 
   @doc """
   Gets a credential type by slug.

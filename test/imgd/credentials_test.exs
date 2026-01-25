@@ -19,10 +19,51 @@ defmodule Imgd.CredentialsTest do
   end
 
   defp seed_credential_types do
-    for type <- CredentialType.built_in_types() do
+    types =
+      CredentialType.built_in_types() ++
+        [
+          %{
+            slug: "z_searchable_api",
+            name: "Z Searchable API",
+            icon: "hero-star",
+            category: "Integration",
+            field_schema: %{},
+            built_in: false
+          }
+        ]
+
+    for type <- types do
       %CredentialType{}
       |> CredentialType.changeset(type)
       |> Imgd.Repo.insert!(on_conflict: :nothing)
+    end
+  end
+
+  describe "credential types" do
+    test "list_credential_types/1 filters by search" do
+      # Should find "OpenAI"
+      results = Credentials.list_credential_types(search: "open")
+      assert Enum.any?(results, &(&1.name == "OpenAI"))
+
+      # Should not find random string
+      results = Credentials.list_credential_types(search: "xyzabc")
+      assert results == []
+
+      # Should find by category
+      results = Credentials.list_credential_types(search: "Integration")
+      assert Enum.any?(results, &(&1.name == "Z Searchable API"))
+    end
+
+    test "list_credential_types/1 limits results" do
+      # We have enough built-in types to test limit
+      results = Credentials.list_credential_types(limit: 2)
+      assert length(results) == 2
+    end
+
+    test "list_credential_types/1 filters by category" do
+      results = Credentials.list_credential_types(category: "AI")
+      assert length(results) > 0
+      assert Enum.all?(results, &(&1.category == "AI"))
     end
   end
 

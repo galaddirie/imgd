@@ -82,30 +82,35 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
           </div>
         <% else %>
           <div class="divide-y divide-base-300">
-            <%= for type <- @filtered_types do %>
-              <button
-                type="button"
-                phx-click="select_type"
-                phx-value-type-id={type.id}
-                phx-target={@myself}
-                class="w-full flex items-center gap-3 p-3 hover:bg-base-200 transition-colors text-left"
-              >
-                <div class="flex-shrink-0 rounded-full bg-base-200 p-2">
-                  <.icon name={type.icon || "hero-key"} class="size-5 text-primary" />
-                </div>
-                <div class="flex-1 min-w-0">
-                  <p class="font-medium text-base-content truncate">{type.name}</p>
-                  <p class="text-xs text-muted truncate">{type.category}</p>
-                </div>
-                <.icon name="hero-chevron-right" class="size-4 text-muted flex-shrink-0" />
-              </button>
+            <%= for {category, types} <- Enum.group_by(@filtered_types, & &1.category) |> Enum.sort() do %>
+              <div class="bg-base-200/50 px-4 py-2 text-xs font-semibold text-muted uppercase tracking-wider sticky top-0 z-10 backdrop-blur-sm">
+                {category}
+              </div>
+              <%= for type <- types do %>
+                <button
+                  type="button"
+                  phx-click="select_type"
+                  phx-value-type-id={type.id}
+                  phx-target={@myself}
+                  class="w-full flex items-center gap-3 p-3 hover:bg-base-200 transition-colors text-left"
+                >
+                  <div class="flex-shrink-0 rounded-full bg-base-200 p-2">
+                    <.icon name={type.icon || "hero-key"} class="size-5 text-primary" />
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="font-medium text-base-content truncate">{type.name}</p>
+                    <p class="text-xs text-muted truncate">{type.category}</p>
+                  </div>
+                  <.icon name="hero-chevron-right" class="size-4 text-muted flex-shrink-0" />
+                </button>
+              <% end %>
             <% end %>
           </div>
         <% end %>
       </div>
 
       <p class="text-xs text-muted text-center">
-        {length(@filtered_types)} of {length(@credential_types)} credential types
+        {length(@filtered_types)} types found
       </p>
     </div>
     """
@@ -185,6 +190,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
         phx-target={@myself}
         phx-change="validate_oauth"
         phx-submit="save_oauth"
+        autocomplete="off"
       >
         <.input
           field={@form[:name]}
@@ -192,6 +198,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
           label="Name"
           placeholder={"e.g. My #{provider_display_name(@selected_type.slug)} Account"}
           required
+          autocomplete="off"
         />
 
         <.input
@@ -217,6 +224,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
           type="text"
           label="Scopes"
           placeholder="Space-separated scopes (e.g. email profile)"
+          autocomplete="off"
         />
 
         <div
@@ -249,6 +257,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
                   type="text"
                   label="Allowed Domains Pattern"
                   placeholder="e.g. ^api\\.example\\.com$|^.*\\.mycompany\\.com$"
+                  autocomplete="off"
                 />
                 <p class="text-xs text-muted -mt-2">
                   Enter a regex pattern to match allowed domains.
@@ -260,6 +269,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
                 type="text"
                 label="Custom Authorization URL"
                 placeholder="Leave blank to use default"
+                autocomplete="off"
               />
 
               <.input
@@ -267,6 +277,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
                 type="text"
                 label="Custom Token URL"
                 placeholder="Leave blank to use default"
+                autocomplete="off"
               />
             </div>
           </details>
@@ -315,6 +326,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
           label="Name"
           placeholder={"e.g. My #{@selected_type.name}"}
           required
+          autocomplete="off"
         />
 
         <%= for {field_name, field_config} <- get_schema_fields(@selected_type) do %>
@@ -357,6 +369,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
                   type="text"
                   label="Allowed Domains Pattern"
                   placeholder="e.g. ^api\\.example\\.com$|^.*\\.mycompany\\.com$"
+                  autocomplete="off"
                 />
                 <p class="text-xs text-muted -mt-2">
                   Enter a regex pattern to match allowed domains.
@@ -395,15 +408,9 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
   def handle_event("search", %{"value" => query}, socket) do
     filtered =
       if String.trim(query) == "" do
-        socket.assigns.credential_types
+        Credentials.list_credential_types(limit: 50)
       else
-        query_down = String.downcase(query)
-
-        Enum.filter(socket.assigns.credential_types, fn type ->
-          String.contains?(String.downcase(type.name), query_down) ||
-            String.contains?(String.downcase(type.category || ""), query_down) ||
-            String.contains?(String.downcase(type.slug), query_down)
-        end)
+        Credentials.list_credential_types(search: query, limit: 50)
       end
 
     {:noreply,
@@ -413,7 +420,8 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
   end
 
   def handle_event("select_type", %{"type-id" => type_id}, socket) do
-    selected_type = Enum.find(socket.assigns.credential_types, &(&1.id == type_id))
+    # Since we are filtering on server, the selected type MUST be in @filtered_types (or we fetch it specifically if needed, but here it should be present)
+    selected_type = Enum.find(socket.assigns.filtered_types, &(&1.id == type_id))
 
     if selected_type do
       if is_oauth_type?(selected_type.slug) do
