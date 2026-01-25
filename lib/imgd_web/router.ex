@@ -66,10 +66,22 @@ defmodule ImgdWeb.Router do
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
       live "/users/settings/api-keys", ApiKeyLive.Index, :index
       live "/users/settings/api-keys/new", ApiKeyLive.Index, :new
+      live "/users/settings/credentials", CredentialLive.Index, :index
+      live "/users/settings/credentials/new", CredentialLive.Index, :new
+
       live "/vue_demo", VueDemoLive
     end
 
     post "/users/update-password", UserSessionController, :update_password
+  end
+
+  # OAuth Credentials
+  scope "/auth/credentials", ImgdWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    get "/:credential_id/connect", AuthController, :request
+    get "/callback", AuthController, :callback
+    post "/callback", AuthController, :callback
   end
 
   scope "/", ImgdWeb do

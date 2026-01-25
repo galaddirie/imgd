@@ -10,6 +10,7 @@ defmodule Imgd.Runtime.RunicAdapter do
   alias Imgd.Runtime.ExecutionContext
   alias Imgd.Runtime.Hooks.Observability
   alias Imgd.Runtime.Steps.StepRunner
+  alias Imgd.Runtime.CredentialResolver
 
   @type source :: Imgd.Workflows.WorkflowDraft.t() | map()
   @type build_opts :: [
@@ -90,6 +91,50 @@ defmodule Imgd.Runtime.RunicAdapter do
 
   @spec create_component(Imgd.Workflows.Embeds.Step.t(), String.t(), build_opts()) :: term()
   def create_component(step, component_name, opts \\ []) do
+    # Resolve credentials before creating component
+    scope = Keyword.get(opts, :scope)
+    environment = Keyword.get(opts, :environment, :production)
+
+    # Only attempt resolution if scope is provided (safety check)
+    step =
+      if scope do
+        case CredentialResolver.resolve(step.config, scope, environment) do
+          {:ok, resolved_config} ->
+            %{step | config: resolved_config}
+
+          {:error, {:resolution_failed, {ref, reason}}} ->
+            require Logger
+
+            Logger.error(
+              "Failed to resolve credential for step #{step.id}: " <>
+                "credential_id=#{ref.credential_id}, field=#{ref.field}, reason=#{inspect(reason)}"
+            )
+
+            # Fail fast - don't proceed with unresolved config
+            raise "Credential resolution failed for step #{step.id}: #{inspect(reason)}"
+
+          {:error, reason} ->
+            require Logger
+            Logger.error("Failed to resolve credentials for step #{step.id}: #{inspect(reason)}")
+            raise "Credential resolution failed for step #{step.id}: #{inspect(reason)}"
+        end
+      else
+        # If no scope provided, check if step has credential references
+        refs = CredentialResolver.extract_refs(step.config)
+
+        if Enum.empty?(refs) do
+          step
+        else
+          require Logger
+
+          Logger.warning(
+            "Step #{step.id} has credential references but no scope provided for resolution"
+          )
+
+          step
+        end
+      end
+
     case step.type_id do
       "splitter" ->
         create_splitter(step, component_name, opts)

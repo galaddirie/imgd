@@ -136,6 +136,30 @@ defmodule Imgd.Accounts.Scope do
   def owns_workflow?(_, _), do: false
 
   # ============================================================================
+  # Credential Permissions
+  # ============================================================================
+
+  @doc """
+  Checks if the scope can view the given credential.
+
+  A user can view a credential if:
+  - They own the credential
+  """
+  @spec can_view_credential?(t() | nil, map()) :: boolean()
+  def can_view_credential?(%__MODULE__{user: %User{id: user_id}}, %{user_id: owner_id})
+      when user_id == owner_id,
+      do: true
+
+  def can_view_credential?(_, _), do: false
+
+  @doc """
+  Checks if the scope can use the given credential.
+  Currently same as view permission.
+  """
+  @spec can_use_credential?(t() | nil, map()) :: boolean()
+  def can_use_credential?(scope, credential), do: can_view_credential?(scope, credential)
+
+  # ============================================================================
   # Execution Permissions
   # ============================================================================
 

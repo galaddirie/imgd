@@ -204,7 +204,7 @@ defmodule Imgd.Runtime.Execution.Server do
     execution =
       Execution
       |> Repo.get(id)
-      |> Repo.preload(workflow: [:draft, :published_version])
+      |> Repo.preload(workflow: [:user, :draft, :published_version])
 
     if execution, do: {:ok, execution}, else: {:error, :not_found}
   end
@@ -259,7 +259,8 @@ defmodule Imgd.Runtime.Execution.Server do
           trigger_data: (execution.trigger && execution.trigger.data) || %{},
           trigger_type: (execution.trigger && execution.trigger.type) || :manual,
           metadata: metadata,
-          step_outputs: Keyword.get(runtime_opts, :step_outputs, %{})
+          step_outputs: Keyword.get(runtime_opts, :step_outputs, %{}),
+          scope: Imgd.Accounts.Scope.for_user(execution.workflow.user)
         ]
 
         RunicAdapter.to_runic_workflow(source, opts)

@@ -71,6 +71,10 @@ defmodule Imgd.MixProject do
       {:runic, git: "https://github.com/galaddirie/runic.git", branch: "main"},
       {:oban, "~> 2.20"},
       {:jsv, "~> 0.13.1"},
+      {:ueberauth, "~> 0.10"},
+      {:ueberauth_google, "~> 0.12"},
+      {:ueberauth_github, "~> 0.8"},
+      {:ueberauth_slack, "~> 0.6"},
 
       # runtime
       {:wasmex, "~> 0.13.0"},

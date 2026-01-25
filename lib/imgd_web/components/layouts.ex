@@ -97,6 +97,16 @@ defmodule ImgdWeb.Layouts do
                       </.link>
                     </li>
                     <li>
+                      <.link href={~p"/users/settings/credentials"}>
+                        <.icon name="hero-key" class="size-4" /> Credentials
+                      </.link>
+                    </li>
+                    <li>
+                      <.link href={~p"/users/settings/api-keys"}>
+                        <.icon name="hero-command-line" class="size-4" /> API Keys
+                      </.link>
+                    </li>
+                    <li>
                       <.link href={~p"/users/log-out"} method="delete">
                         <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
                       </.link>
@@ -169,6 +179,16 @@ defmodule ImgdWeb.Layouts do
                     <li>
                       <.link href={~p"/users/settings"} class="gap-2">
                         <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+                      </.link>
+                    </li>
+                    <li>
+                      <.link href={~p"/users/settings/credentials"} class="gap-2">
+                        <.icon name="hero-key" class="size-4" /> Credentials
+                      </.link>
+                    </li>
+                    <li>
+                      <.link href={~p"/users/settings/api-keys"} class="gap-2">
+                        <.icon name="hero-command-line" class="size-4" /> API Keys
                       </.link>
                     </li>
                     <li>

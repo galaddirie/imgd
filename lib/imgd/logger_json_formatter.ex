@@ -1,7 +1,10 @@
 defmodule Imgd.LoggerJSONFormatter do
   @moduledoc """
   Logger formatter that emits flat JSON lines.
+  Automatically redacts sensitive keys.
   """
+
+  @sensitive_patterns ~w(password secret token key authorization)
 
   @spec format(Logger.level(), Logger.message(), Logger.Formatter.time(), Logger.metadata()) ::
           iodata()
@@ -49,7 +52,17 @@ defmodule Imgd.LoggerJSONFormatter do
   defp sanitize(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
   defp sanitize(%NaiveDateTime{} = ndt), do: NaiveDateTime.to_iso8601(ndt)
   defp sanitize(%Time{} = t), do: Time.to_iso8601(t)
-  defp sanitize(%{} = map), do: Map.new(map, fn {k, v} -> {k, sanitize(v)} end)
+
+  defp sanitize(%{} = map) do
+    Map.new(map, fn {k, v} ->
+      if sensitive_key?(k) do
+        {k, "***REDACTED***"}
+      else
+        {k, sanitize(v)}
+      end
+    end)
+  end
+
   defp sanitize(list) when is_list(list), do: Enum.map(list, &sanitize/1)
   defp sanitize(value) when is_pid(value), do: inspect(value)
   defp sanitize(value) when is_reference(value), do: inspect(value)
@@ -58,4 +71,9 @@ defmodule Imgd.LoggerJSONFormatter do
   defp sanitize(value) when is_number(value) or is_boolean(value), do: value
   defp sanitize(value) when is_binary(value), do: value
   defp sanitize(value), do: inspect(value)
+
+  defp sensitive_key?(k) do
+    key = to_string(k) |> String.downcase()
+    Enum.any?(@sensitive_patterns, &String.contains?(key, &1))
+  end
 end
