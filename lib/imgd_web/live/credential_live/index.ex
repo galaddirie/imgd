@@ -205,7 +205,7 @@ defmodule ImgdWeb.CredentialLive.Index do
 
   defp get_type_icon(credential) do
     case credential.type do
-      %{icon: icon} when is_binary(icon) -> icon
+      %{icon: icon} when not is_nil(icon) -> icon
       _ -> "hero-key"
     end
   end

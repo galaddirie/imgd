@@ -94,12 +94,11 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
                   phx-target={@myself}
                   class="w-full flex items-center gap-3 p-3 hover:bg-base-200 transition-colors text-left"
                 >
-                  <div class="flex-shrink-0 rounded-full bg-base-200 p-2">
+                  <div class="flex shrink-0 items-center justify-center rounded-full bg-base-200 w-8 h-8">
                     <.icon name={type.icon || "hero-key"} class="size-5 text-primary" />
                   </div>
                   <div class="flex-1 min-w-0">
                     <p class="font-medium text-base-content truncate">{type.name}</p>
-                    <p class="text-xs text-muted truncate">{type.category}</p>
                   </div>
                   <.icon name="hero-chevron-right" class="size-4 text-muted flex-shrink-0" />
                 </button>
@@ -129,7 +128,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
           <.icon name="hero-arrow-left" class="size-4" /> Back
         </button>
         <div class="flex items-center gap-2">
-          <div class="rounded-full bg-base-200 p-1.5">
+          <div class="flex items-center justify-center rounded-full bg-base-200 w-7 h-7">
             <.icon name={@selected_type.icon || "hero-key"} class="size-4 text-primary" />
           </div>
           <span class="text-sm font-medium text-base-content">{@selected_type.name}</span>
@@ -306,7 +305,7 @@ defmodule ImgdWeb.CredentialLive.CreateCredentialComponent do
           <.icon name="hero-arrow-left" class="size-4" /> Back
         </button>
         <div class="flex items-center gap-2">
-          <div class="rounded-full bg-base-200 p-1.5">
+          <div class="flex items-center justify-center rounded-full bg-base-200 w-7 h-7">
             <.icon name={@selected_type.icon || "hero-key"} class="size-4 text-primary" />
           </div>
           <span class="text-sm font-medium text-base-content">{@selected_type.name}</span>
