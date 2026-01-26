@@ -130,11 +130,20 @@ defmodule Imgd.Executions do
 
       %Execution{} = execution ->
         if Scope.can_view_workflow?(scope, execution.workflow) do
-          {:ok, execution}
+          {:ok, attach_step_execution_durations(execution)}
         else
           {:error, :not_found}
         end
     end
+  end
+
+  defp attach_step_execution_durations(%Execution{} = execution) do
+    step_executions =
+      Enum.map(execution.step_executions || [], fn step_execution ->
+        %{step_execution | duration_us: StepExecution.duration_us(step_execution)}
+      end)
+
+    %{execution | step_executions: step_executions}
   end
 
   @doc """

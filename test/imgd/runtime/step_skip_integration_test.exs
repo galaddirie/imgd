@@ -65,6 +65,11 @@ defmodule Imgd.Runtime.StepSkipIntegrationTest do
     runic_step = StepRunner.create(step, opts)
     wf = Workflow.add(wf, runic_step)
 
+    wf =
+      Map.put(wf, :__step_metadata__, %{
+        "manual_trigger" => %{type_id: step.type_id, step_id: step.id, name: step.id}
+      })
+
     # Attach hooks
     wf = Observability.attach_all_hooks(wf, execution_id: execution.id, workflow_id: workflow.id)
 

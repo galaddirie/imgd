@@ -136,6 +136,36 @@ defmodule Imgd.ExecutionsTest do
       assert fetched.triggered_by_user.id == scope.user.id
     end
 
+    test "get_execution_with_steps/2 includes computed duration_us for step executions", %{
+      scope: scope,
+      workflow: workflow,
+      version: version
+    } do
+      {:ok, execution} = create_test_execution(workflow, version, scope)
+
+      step_attrs = %{execution_id: execution.id, step_id: "step1", step_type_id: "input_step"}
+      {:ok, step_execution} = Executions.create_step_execution(scope, step_attrs)
+
+      assert {:ok, running} =
+               Executions.update_step_execution_status(scope, step_execution, :running)
+
+      assert {:ok, _completed} =
+               Executions.update_step_execution_status(scope, running, :completed,
+                 output_data: %{"ok" => true}
+               )
+
+      assert {:ok, fetched} = Executions.get_execution_with_steps(scope, execution.id)
+
+      fetched_step =
+        Enum.find(fetched.step_executions, fn execution_step ->
+          execution_step.step_id == "step1"
+        end)
+
+      assert fetched_step != nil
+      assert is_integer(fetched_step.duration_us)
+      assert fetched_step.duration_us >= 0
+    end
+
     test "get_execution/2 returns error for non-existent execution", %{scope: scope} do
       assert {:error, :not_found} = Executions.get_execution(scope, Ecto.UUID.generate())
     end

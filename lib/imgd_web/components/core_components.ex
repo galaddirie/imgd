@@ -320,7 +320,7 @@ defmodule ImgdWeb.CoreComponents do
       </.simple_form>
   """
   attr :for, :any, required: true, doc: "the datastructure for the form"
-  attr :rest, :global, include: ~w(phx-change phx-submit phx-target multipart as)
+  attr :rest, :global, include: ~w(phx-change phx-submit phx-target multipart as autocomplete)
 
   slot :inner_block, required: true
   slot :actions, doc: "the slot for form actions, such as a submit button"

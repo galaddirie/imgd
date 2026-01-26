@@ -26,7 +26,7 @@ defmodule Imgd.CredentialsTest do
       assert results == []
 
       # Should find by category
-      results = Credentials.list_credential_types(search: "Integration")
+      _results = Credentials.list_credential_types(search: "Integration")
       # "AI" category exists
       ai_results = Credentials.list_credential_types(search: "AI")
       assert Enum.any?(ai_results, &(&1.category == "AI"))

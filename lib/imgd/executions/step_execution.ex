@@ -24,6 +24,7 @@ defmodule Imgd.Executions.StepExecution do
              :queued_at,
              :started_at,
              :completed_at,
+             :duration_us,
              :metadata,
              :inserted_at,
              :updated_at
@@ -64,6 +65,7 @@ defmodule Imgd.Executions.StepExecution do
           queued_at: DateTime.t() | nil,
           started_at: DateTime.t() | nil,
           completed_at: DateTime.t() | nil,
+          duration_us: integer() | nil,
           attempt: pos_integer(),
           retry_of_id: Ecto.UUID.t() | nil,
           inserted_at: DateTime.t(),
@@ -99,6 +101,7 @@ defmodule Imgd.Executions.StepExecution do
     field :queued_at, :utc_datetime_usec
     field :started_at, :utc_datetime_usec
     field :completed_at, :utc_datetime_usec
+    field :duration_us, :integer, virtual: true
 
     # Retry tracking
     field :attempt, :integer, default: 1
