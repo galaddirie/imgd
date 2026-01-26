@@ -100,7 +100,9 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     stepExecutions: () => props.stepExecutions ?? [],
   });
   const draftSync = useDraftSync({ activeDraft: () => activeDraft.value, nodes: () => nodes.value, edges: () => edges.value, setNodes, setEdges, onSyncComplete: () => syncResetRef.value() });
-  const { stepNameById, upstreamStepIdsByStepId } = useWorkflowGraph(() => activeWorkflow.value);
+  const { stepNameById, incomingStepIdsByStepId, upstreamStepIdsByStepId } = useWorkflowGraph(
+    () => activeWorkflow.value
+  );
   const nodeTypes: NodeTypesObject = { step: markRaw(WorkflowStepNode), group: markRaw(GroupNode) };
   const edgeTypes: EdgeTypesObject = { custom: markRaw(CustomEdge as any) };
   const collaboration = useCollaboration({
@@ -275,6 +277,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     selectedNode: selection.selectedNode,
     selectedStepType: selection.selectedStepType,
     stepNameById,
+    incomingStepIdsByStepId,
     upstreamStepIdsByStepId,
     isExecutionFailed: executionState.isExecutionFailed,
     isExecutionRunning: executionState.isExecutionRunning,

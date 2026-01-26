@@ -7,6 +7,7 @@ import type {
   EditorState,
   Execution,
   StepExecution,
+  StepExecutionStatus,
   StepNodeData,
   StepType,
 } from '@/types/workflow';
@@ -51,6 +52,7 @@ interface Props {
   expressionPreviews?: Record<string, unknown>;
   editorState?: EditorState;
   stepNameById?: Record<string, string>;
+  incomingStepIds?: Record<string, string[]>;
   upstreamStepIds?: Record<string, string[]>;
 }
 
@@ -62,6 +64,7 @@ const emit = defineEmits([
   'toggle_webhook_test',
   'pin_output',
   'unpin_output',
+  'run_node',
 ]);
 
 const activeTab = ref<'config' | 'output' | 'pinned'>('config');
@@ -333,10 +336,161 @@ const evaluatedConfig = computed<Record<string, unknown>>(() => {
   return evaluated ?? {};
 });
 
+const isTriggerStep = computed(() => {
+  return (
+    props.stepType?.step_kind === 'trigger' || props.node?.data?.step_kind === 'trigger' || false
+  );
+});
+
+const directUpstreamStepIds = computed(() => {
+  if (!props.node) return [];
+  return props.incomingStepIds?.[props.node.id] ?? [];
+});
+
+const inputIndexLabels = computed(() => {
+  const upstreamIds = directUpstreamStepIds.value;
+  return upstreamIds.map(stepId => props.stepNameById?.[stepId] || stepId);
+});
+
+const timestampFor = (value: unknown): number => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+const executionTimestamp = (execution: StepExecution): number => {
+  return Math.max(
+    timestampFor(execution.completed_at),
+    timestampFor(execution.started_at),
+    timestampFor(execution.inserted_at)
+  );
+};
+
+const pickLatestExecution = (executions: StepExecution[]): StepExecution | null => {
+  if (executions.length === 0) return null;
+  return executions.reduce((latest, current) => {
+    if (!latest) return current;
+    return executionTimestamp(current) >= executionTimestamp(latest) ? current : latest;
+  }, null as StepExecution | null);
+};
+
+const resolveLatestExecution = (stepId: string, itemIndex: number | null): StepExecution | null => {
+  const executions = props.stepExecutions?.filter(se => se.step_id === stepId) ?? [];
+  if (executions.length === 0) return null;
+
+  if (itemIndex !== null) {
+    const matching = executions.filter(se => se.item_index === itemIndex);
+    const latestMatching = pickLatestExecution(matching);
+    if (latestMatching) return latestMatching;
+  }
+
+  const singleItemExecutions = executions.filter(se => se.item_index === null || se.item_index === undefined);
+  return pickLatestExecution(singleItemExecutions.length > 0 ? singleItemExecutions : executions);
+};
+
+const currentInputState = computed(() => {
+  const upstreamIds = directUpstreamStepIds.value;
+  const itemIndex = selectedItemIndex.value;
+
+  if (!props.node) {
+    return { status: 'missing', reason: 'no_step', data: null };
+  }
+
+  if (upstreamIds.length === 0) {
+    const triggerData = props.execution?.trigger?.data;
+    if (isTriggerStep.value && triggerData !== undefined) {
+      return { status: 'available', reason: null, data: unwrapData(triggerData) };
+    }
+    return { status: 'missing', reason: 'no_upstream', data: null };
+  }
+
+  const outputs: unknown[] = [];
+  const missingStatuses: Array<StepExecutionStatus | string | undefined> = [];
+
+  upstreamIds.forEach(stepId => {
+    const latest = resolveLatestExecution(stepId, itemIndex ?? null);
+    if (!latest) {
+      missingStatuses.push('not_run');
+      return;
+    }
+
+    if (latest.status === 'completed') {
+      outputs.push(unwrapData(latest.output_data));
+      return;
+    }
+
+    if (latest.status === 'skipped' || latest.status === 'cancelled') {
+      outputs.push(null);
+      return;
+    }
+
+    if (latest.status === 'failed') {
+      missingStatuses.push(latest.status);
+      return;
+    }
+
+    missingStatuses.push(latest.status);
+  });
+
+  if (missingStatuses.length > 0) {
+    const reason = missingStatuses.includes('failed') ? 'failed' : 'not_run';
+    return { status: 'missing', reason, data: null };
+  }
+
+  if (upstreamIds.length === 1) {
+    return { status: 'available', reason: null, data: outputs[0] };
+  }
+
+  return { status: 'available', reason: null, data: outputs };
+});
+
+const currentInputEmptyState = computed(() => {
+  const reason = currentInputState.value.reason;
+  const hasSingleUpstream = directUpstreamStepIds.value.length === 1;
+  const runHint = hasSingleUpstream
+    ? 'Run the previous step to fetch the latest upstream output.'
+    : 'Run to this step to compute the latest upstream outputs.';
+
+  if (reason === 'failed') {
+    return {
+      title: 'Upstream step failed',
+      description: `The last upstream run failed, so input data is unavailable. ${runHint}`,
+    };
+  }
+
+  if (reason === 'no_upstream') {
+    return {
+      title: isTriggerStep.value ? 'Waiting for trigger data' : 'No upstream input',
+      description: isTriggerStep.value
+        ? 'This trigger has not fired yet. Run to this step to capture input data.'
+        : 'This step has no upstream connection yet. Run to this step to generate input data.',
+    };
+  }
+
+  return {
+    title: 'No input data yet',
+    description: runHint,
+  };
+});
+
+const runInputLabel = computed(() => {
+  return directUpstreamStepIds.value.length === 1 ? 'Run previous step' : 'Run to this step';
+});
+
+const runInput = () => {
+  if (!canEdit.value) return;
+  if (!props.node) return;
+  emit('run_node', props.node.id);
+};
+
 const contextData = computed(() => {
-  if (!props.execution) return {};
   const upstreamIds = props.node ? props.upstreamStepIds?.[props.node.id] || [] : [];
-  const metadata = toRecord(props.execution.metadata);
+  const metadata = toRecord(props.execution?.metadata);
   const extras = toRecord(metadata?.extras);
 
   const steps =
@@ -352,7 +506,7 @@ const contextData = computed(() => {
     }, {}) ?? {};
 
   return {
-    json: unwrapData(activeStepExecution.value?.input_data) || {},
+    json: currentInputState.value.data,
     trigger: props.execution?.trigger?.data || {},
     variables: metadata?.variables ?? {},
     request: extras?.request ?? {},
@@ -365,14 +519,15 @@ const explorerData = computed(() => {
 
   const wrapPrimitive = (val: unknown, key: string) => {
     if (val === null || val === undefined) return val;
-    if (typeof val === 'object' && !Array.isArray(val)) return val;
+    if (Array.isArray(val)) return val;
+    if (typeof val === 'object') return val;
     return { [key]: val };
   };
 
   return [
     {
       id: 'json',
-      label: 'Current Input',
+      label: 'Input Data',
       icon: ArrowRightOnRectangleIcon,
       data: wrapPrimitive(data.json, 'json'),
     },
@@ -512,6 +667,18 @@ const copyExpression = (sectionId: string, key?: string) => {
   const expression = getExpressionFor(sectionId, key);
   navigator.clipboard.writeText(expression);
   // Could add toast notification here
+};
+
+const formatSectionKey = (sectionId: string, key: string) => {
+  if (sectionId !== 'json') return key;
+  if (!Array.isArray(currentInputState.value.data)) return key;
+  if (directUpstreamStepIds.value.length <= 1) return key;
+
+  const index = Number(key);
+  if (Number.isNaN(index)) return key;
+
+  const label = inputIndexLabels.value[index];
+  return label ? `${key} - ${label}` : key;
 };
 
 const toggleWebhookListening = () => {
@@ -693,8 +860,25 @@ const toggleWebhookListening = () => {
                 v-if="expandedSections[section.id]"
                 class="border-base-200 mt-1 ml-4 space-y-1 border-l py-1 pl-2 text-wrap"
               >
+                <template v-if="section.id === 'json' && currentInputState.status !== 'available'">
+                  <div class="bg-base-300/20 space-y-2 rounded-xl p-3">
+                    <div class="text-base-content text-[11px] font-semibold">
+                      {{ currentInputEmptyState.title }}
+                    </div>
+                    <p class="text-base-content/60 text-[10px] leading-relaxed">
+                      {{ currentInputEmptyState.description }}
+                    </p>
+                    <button
+                      class="btn btn-xs btn-primary w-full"
+                      :disabled="!canEdit"
+                      @click.stop="runInput"
+                    >
+                      {{ runInputLabel }}
+                    </button>
+                  </div>
+                </template>
                 <template
-                  v-if="
+                  v-else-if="
                     section.data &&
                     typeof section.data === 'object' &&
                     Object.keys(section.data).length > 0
@@ -706,7 +890,9 @@ const toggleWebhookListening = () => {
                     class="hover:bg-base-200 group cursor-pointer rounded-lg p-1.5 transition-all"
                   >
                     <div class="flex items-center justify-between">
-                      <span class="text-base-content font-mono text-[11px]">{{ key }}</span>
+                      <span class="text-base-content font-mono text-[11px]">{{
+                        formatSectionKey(section.id, String(key))
+                      }}</span>
                       <button
                         @click.stop="copyExpression(section.id, String(key))"
                         class="btn btn-xs btn-ghost btn-square h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"

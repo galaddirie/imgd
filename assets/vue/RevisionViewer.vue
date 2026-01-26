@@ -190,6 +190,7 @@ const noop = () => {};
       :expression-previews="{}"
       :editor-state="props.editorState"
       :step-name-by-id="viewer.stepNameById"
+      :incoming-step-ids="viewer.incomingStepIdsByStepId"
       :upstream-step-ids="viewer.upstreamStepIdsByStepId"
       :can-edit="false"
       @close="viewer.closeInspector"

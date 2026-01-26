@@ -49,7 +49,9 @@ export function useRevisionViewer(props: RevisionViewerProps) {
     setEdges,
   });
 
-  const { stepNameById, upstreamStepIdsByStepId } = useWorkflowGraph(() => activeWorkflow.value);
+  const { stepNameById, incomingStepIdsByStepId, upstreamStepIdsByStepId } = useWorkflowGraph(
+    () => activeWorkflow.value
+  );
   const { miniMapNodeColor } = useMiniMapNodeColor();
 
   const nodeTypes = { step: markRaw(WorkflowStepNode), group: markRaw(GroupNode) };
@@ -149,6 +151,7 @@ export function useRevisionViewer(props: RevisionViewerProps) {
     selectedStepType,
     isInspectorOpen,
     stepNameById,
+    incomingStepIdsByStepId,
     upstreamStepIdsByStepId,
     handleNodeClick,
     handleNodeDoubleClick,
