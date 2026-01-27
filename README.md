@@ -3,136 +3,110 @@
 
 A fast, lightweight, embeddable workflow orchestration platform built with Elixir and Phoenix. Design, execute, and manage complex workflows.
 
-## ✨ Features
+## Overview
+Imgd is a workflow platform that combines a real-time collaborative editor with a high-performance execution engine. It is built on Phoenix LiveView + LiveVue for the UI and Runic for execution, so workflows are both **interactive** and **deeply inspectable**. The system is designed to be embedded inside your product, not bolted on later.
 
-### Workflow design & governance
-- Draft-first editing with immutable published versions (semantic version tags + content hash)
-- Workflow visibility and sharing with roles (`viewer`, `editor`, `owner`) plus public access
-- DAG-based workflow modeling with validated steps/connections and graph utilities
-- Automatic DAG layout metadata for UI rendering (layered layout + edge paths)
+If you want a workflow engine that is expressive, versioned, and traceable, with a UI that feels like a first-class product feature, Imgd is built for that.
 
-### Step system
-- Step types are code-defined with JSON schemas for config/input/output
-- Registry loads step types at startup (fast ETS lookups, category/kind grouping)
-- Built-in step library includes:
-  - Triggers: Manual Input, Webhook Trigger, Schedule Trigger
-  - Control Flow: If/Else, Switch
-  - Data & Transform: Format String, JSON Parser, Math, Splitter, Aggregator, Data Filter, Data Transform
-  - Integrations & Utilities: HTTP Request, Debug
-  - Output & Communication: Data Output, Respond to Webhook
+## Highlights
+- **Runic execution engine**: immutable workflow graph that unifies definition + execution state for time-travel debugging and deterministic replay.
+- **Draft + publish lifecycle**: edit privately, publish versioned workflows, and restore prior versions.
+- **Real-time collaboration**: multi-user presence, live cursor/selection updates, locks, and undo/redo stacks.
+- **Partial runs and debugging**: run-to-here execution, preview runs, and pinned outputs for fast iteration.
+- **Expressions everywhere**: Liquid-style expressions (Solid) with n8n-compatible syntax, previews in the editor, and custom filters.
+- **Triggers and automation**: manual, schedule, webhook, and event triggers; clean execution tracking per run and per step.
+- **Workflow contracts**: derive input/output contracts from the workflow draft for safe embedding and API integrations.
+- **Credentials system**: encrypted credential storage with typed providers (API key, OAuth, etc.).
+- **Observability hooks**: structured logging, telemetry, and real-time execution events.
 
-### Execution runtime
-- Runic-backed dataflow engine with per-execution OTP processes
-- StepRunner resolves Liquid (Solid) expressions against execution context
-- Step-level execution tracking with retries, timing, input/output/error capture
-- Execution events + PubSub broadcasting for real-time UI updates
-- Compute targets per step: local, cluster nodes, or FLAME pools
+## Core Concepts
+- **Workflow**: the top-level automation container. It has a private draft and one or more published versions.
+- **Draft**: mutable working state. It is not public until published.
+- **Version**: immutable snapshot created on publish, tagged with a version string.
+- **Step**: a node in the graph (trigger, action, transform, control flow).
+- **Execution**: a single run of a workflow, with status and step-level outputs.
+- **Contract**: derived input/output schema to safely integrate workflows with external systems.
 
-### Triggers & scheduling
-- Webhook triggers with configurable path/method and response modes
-- Schedule triggers managed via Oban jobs with automatic rescheduling
-- Manual trigger and preview executions with custom input payloads
-- Active trigger registry for efficient webhook routing
+## Built-in Steps (selection)
+- Triggers: manual input, schedule, webhook, event
+- Flow: condition, switch, join, split/aggregate
+- Data: JSON parser, formatter, math, data transform/filter
+- Utilities: wait, debug, workflow output
+- Integrations: HTTP request, respond to webhook
 
-### Collaboration & preview tooling
-- Collaborative edit sessions with operation linearization and persistence
-- Presence tracking (cursor/selection/focus) and soft step locks
-- Editor state features: pinned outputs, disabled steps, test webhook listeners
-- Preview execution modes: full, from-step, to-step, or selected steps
+## Imgd vs n8n (where Imgd differentiates)
+If you are evaluating Imgd alongside n8n, these are the areas where Imgd focuses:
+- **Embedded-first**: the editor and runtime live inside your Phoenix app using LiveView + LiveVue.
+- **Immutable execution graph**: Runic keeps the full execution history inside the workflow, enabling time-travel and replay.
+- **Draft/publish with version tags**: clear lifecycle from private edits to published versions.
+- **Collaboration built in**: presence, step locks, and undo/redo designed for teams.
+- **Fast iteration tools**: partial execution, pinned outputs, and execution previews.
+- **Deterministic contracts**: derived workflow I/O contracts for safer integrations.
 
-### Expressions & data flow
-- Liquid templates with access to `json`, `steps`, `execution`, `workflow`, `variables`, `metadata`, `request`, and `env`
-- Custom filters for JSON, hashing, encoding, data manipulation, math, and dates
-- Safe expression validation/evaluation with timeouts and strict modes
+n8n is an excellent general-purpose automation tool. Imgd is optimized for teams that want a workflow engine embedded inside their own product, with strong versioning and deep execution introspection.
 
-### Observability & operations
-- Telemetry events for engine lifecycle, steps, and expression evaluation
-- PromEx metrics with custom dashboards plus Phoenix/Ecto/Oban metrics
-- OpenTelemetry tracing with trace-context propagation
-- JSON log formatter for log aggregation pipelines
+## Architecture Overview
+- **Phoenix + LiveView** for backend, auth, and server-driven UI.
+- **LiveVue + Vue Flow** for a high-fidelity, reactive workflow editor.
+- **Runic** for immutable workflow execution and event-sourced state.
+- **Ecto + Postgres** for persistence (workflows, versions, executions, credentials).
+- **Phoenix PubSub + Presence** for real-time collaboration and execution events.
 
-### Security & access
-- Scope-based authorization for workflows, executions, and edit sessions
-- Email/password auth plus magic-link login flows
-- User API keys with hashed storage and partial key previews
+## Roadmap
+Based on the current TODO list, the roadmap includes:
 
-### Sandboxed scripting
-- QuickJS-in-Wasm sandbox with fuel, memory, and timeout limits
-- FLAME-backed isolation with captured stdout/stderr and structured errors
+### Core Runtime
+- Sub-workflows and streaming outputs
+- Workflow-level variables with scoping rules
+- Cross-execution memory (state machines / saga patterns)
+- Debug execution mode
 
+### Editor UX
+- Smarter edit stack grouping for undo/redo
+- Inline add-node flow from existing nodes
+- Better connection UX (drop node between edges)
+- Node wrangler / Blender-style group tools
+- Disable node mode refinements
 
-## 🚀 Quick Start
+### Interoperability
+- n8n workflow import
+- Versioned executor namespaces (e.g., `Nodes.V1.HttpRequest`)
 
-### Prerequisites
+### Triggers + Streaming
+- WebSocket trigger (long-lived execution modeling)
+- Stream trigger model and optimized high-frequency handling
+- Optional low-overhead mode for heavy workloads
 
-- Elixir 1.15+
-- PostgreSQL 13+
-- Node.js 18+ (for asset compilation)
+### Examples / Demos
+- FLAME example: input video -> streaming thumbnails
+- Multi-node example: distribute execution across devices
+- Game server workflow example
 
-### Installation
+### Future
+- Docker and Kubernetes system nodes
+- UI builder (Kino / Notion inspired)
+- Datasets + evaluations
+- AI chat workflow builder
+- Lightweight deployments (Raspberry Pi)
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/your-username/imgd.git
-   cd imgd
-   ```
-
-2. **Setup the application**
-   ```bash
-   # Install dependencies and setup database
-   mix setup
-   ```
-
-3. **Start development services**
-   ```bash
-   # Start PostgreSQL and Adminer (optional)
-   task up
-   ```
-
-4. **Run the application**
-   ```bash
-   # Start the Phoenix server
-   mix phx.server
-   ```
-
-5. **Visit the application**
-   Open [`http://localhost:4000`](http://localhost:4000) in your browser.
-
-
-
-
-
-## 🛠️ Development
-
-### Task Commands
+## Development
+Prereqs: Elixir, Node.js, and Postgres.
 
 ```bash
-# Development services
-task up          # Start PostgreSQL + Adminer
-task down        # Stop services
-task restart     # Restart services
-task logs        # View service logs
-
-# Application
-mix setup        # Initial setup
-mix phx.server   # Start development server
-mix test         # Run test suite
-mix precommit    # Run pre-commit checks
+mix setup
+mix phx.server
 ```
 
-### Architecture
+Run the test + formatting gate:
 
+```bash
+mix precommit
 ```
-lib/
-├── imgd/                 # Core business logic
-│   ├── accounts/         # User management
-│   ├── workflows/        # Workflow orchestration
-│   ├── executions/       # Runtime execution engine
-│   ├── steps/           # Node type definitions
-│   ├── runtime/         # WebAssembly runtime
-│   └── observability/   # Monitoring & logging
-└── imgd_web/            # Phoenix web interface
-    ├── live/           # LiveView components
-    ├── controllers/    # HTTP controllers
-    └── components/     # Reusable UI components
-```
+
+## Docs
+- `docs/runic_guide.md`
+- `docs/runic_architectural _overview.md`
+- `lib/imgd/steps/executors/README.md`
+
+## License
+MIT
