@@ -169,6 +169,14 @@ defmodule ImgdWeb.ExecutionLive.Show do
                 <span>Workflow details</span>
               </.link>
               <.link
+                id="execution-debug-link"
+                navigate={~p"/workflows/#{@workflow.id}/edit?debug_execution_id=#{@execution.id}"}
+                class="inline-flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-800 transition hover:border-amber-400/70 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
+              >
+                <.icon name="hero-bug-ant" class="size-4" />
+                <span>Debug in editor</span>
+              </.link>
+              <.link
                 id="execution-edit-link"
                 navigate={~p"/workflows/#{@workflow.id}/edit"}
                 class="inline-flex items-center gap-2 rounded-full border border-transparent bg-primary px-4 py-2 text-xs font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"

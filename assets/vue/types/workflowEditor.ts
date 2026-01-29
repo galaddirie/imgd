@@ -25,6 +25,7 @@ export interface WorkflowEditorProps {
   presences?: UserPresence[];
   currentUserId?: string;
   expressionPreviews?: Record<string, unknown>;
+  debugExecutionId?: string | null;
 }
 
 export type WorkflowEditorEmits = {

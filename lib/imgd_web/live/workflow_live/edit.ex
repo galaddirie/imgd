@@ -18,9 +18,10 @@ defmodule ImgdWeb.WorkflowLive.Edit do
   require Logger
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
+  def mount(%{"id" => id} = params, _session, socket) do
     scope = socket.assigns.current_scope
     user = scope.user
+    debug_execution_id = normalize_debug_execution_id(params)
 
     case Workflows.get_workflow_with_draft(id, scope) do
       {:ok, workflow} ->
@@ -44,11 +45,14 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               |> assign(:expression_previews, %{})
               |> assign(:webhook_execution_subscribed, false)
               |> assign(:undo_state, nil)
+              |> assign(:debug_execution_id, nil)
 
             # Only set up collaboration when WebSocket is connected
             socket =
               if connected?(socket) do
-                setup_collaboration(socket, workflow.id, user)
+                socket
+                |> setup_collaboration(workflow.id, user)
+                |> maybe_load_debug_execution(debug_execution_id)
               else
                 socket
               end
@@ -141,6 +145,42 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     push_undo_state(socket)
   end
 
+  defp normalize_debug_execution_id(params) when is_map(params) do
+    case Map.get(params, "debug_execution_id") do
+      nil -> nil
+      "" -> nil
+      id -> id
+    end
+  end
+
+  defp normalize_debug_execution_id(_params), do: nil
+
+  defp maybe_load_debug_execution(socket, nil), do: socket
+
+  defp maybe_load_debug_execution(socket, debug_execution_id) do
+    case Executions.get_execution_with_steps(socket.assigns.current_scope, debug_execution_id) do
+      {:ok, execution} ->
+        if execution.workflow_id == socket.assigns.workflow.id do
+          _ = subscribe_execution(socket.assigns.current_scope, execution.id)
+
+          socket
+          |> assign(:execution, execution)
+          |> assign(:execution_id, execution.id)
+          |> assign(:step_executions, execution.step_executions || [])
+          |> assign(:debug_execution_id, execution.id)
+        else
+          socket
+          |> assign(:debug_execution_id, nil)
+          |> put_flash(:error, "Debug execution does not belong to this workflow")
+        end
+
+      {:error, :not_found} ->
+        socket
+        |> assign(:debug_execution_id, nil)
+        |> put_flash(:error, "Debug execution not found")
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -188,6 +228,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
           v-on:preview_expression={JS.push("preview_expression")}
           v-on:toggle_webhook_test={JS.push("toggle_webhook_test")}
           expressionPreviews={@expression_previews}
+          debugExecutionId={@debug_execution_id}
         />
       </div>
     </Layouts.app>
@@ -1310,6 +1351,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
     |> assign(:execution, execution)
     |> assign(:execution_id, execution.id)
     |> assign(:step_executions, step_executions)
+    |> assign(:debug_execution_id, nil)
   end
 
   defp start_preview_execution(socket) do
@@ -1370,6 +1412,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               |> assign(:execution, execution)
               |> assign(:execution_id, execution.id)
               |> assign(:step_executions, step_executions)
+              |> assign(:debug_execution_id, nil)
 
             {:ok, socket}
           else
@@ -1435,6 +1478,7 @@ defmodule ImgdWeb.WorkflowLive.Edit do
               |> assign(:execution, execution)
               |> assign(:execution_id, execution.id)
               |> assign(:step_executions, step_executions)
+              |> assign(:debug_execution_id, nil)
 
             {:ok, socket}
           else

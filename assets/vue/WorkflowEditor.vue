@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useLiveVue } from 'live_vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
@@ -10,6 +10,7 @@ import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
 import { useWorkflowEditor } from '@/composables/workflow/useWorkflowEditor';
 import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowEditor';
+import { BugAntIcon } from '@heroicons/vue/24/outline';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   stepTypes: () => [],
@@ -20,6 +21,7 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   presences: () => [],
   currentUserId: undefined,
   expressionPreviews: () => ({}),
+  debugExecutionId: null,
 });
 
 const emit = defineEmits<WorkflowEditorEmits>();
@@ -47,6 +49,41 @@ function handlePublish(payload: { version_tag: string; changelog: string }) {
   publishError.value = null;
   emit('publish_workflow', payload);
 }
+
+const isDebugMode = computed(() => !!props.debugExecutionId);
+const debugExecutionShortId = computed(() => {
+  const id = props.debugExecutionId ?? props.execution?.id ?? '';
+  return id ? id.slice(0, 8) : '';
+});
+const debugExecutionTimestamp = computed(() => {
+  const timestamp = props.execution?.started_at ?? props.execution?.inserted_at;
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+});
+const debugExecutionStatus = computed(() => props.execution?.status ?? 'pending');
+const debugStatusConfig = {
+  pending: { class: 'bg-base-200 text-base-content/70', label: 'Pending' },
+  running: { class: 'bg-primary/15 text-primary', label: 'Running' },
+  paused: { class: 'bg-warning/15 text-warning', label: 'Paused' },
+  completed: { class: 'bg-success/15 text-success', label: 'Completed' },
+  failed: { class: 'bg-error/15 text-error', label: 'Failed' },
+  cancelled: { class: 'bg-base-200 text-base-content/70', label: 'Cancelled' },
+  timeout: { class: 'bg-warning/15 text-warning', label: 'Timeout' },
+} as const;
+const debugStatusBadge = computed(() => {
+  const key = debugExecutionStatus.value as keyof typeof debugStatusConfig;
+  return debugStatusConfig[key] ?? debugStatusConfig.pending;
+});
+const debugExecutionLink = computed(() => {
+  if (!props.workflow?.id || !props.debugExecutionId) return null;
+  return `/workflows/${props.workflow.id}/execution/${props.debugExecutionId}`;
+});
+const debugExitLink = computed(() => {
+  if (!props.workflow?.id) return null;
+  return `/workflows/${props.workflow.id}/edit`;
+});
 
 // Listen for publish result from backend
 onMounted(() => {
@@ -79,6 +116,55 @@ onMounted(() => {
       @open-revisions="emit('navigate_revisions')"
       @publish="openPublishModal"
     />
+
+    <div
+      v-if="isDebugMode"
+      class="border-base-200 bg-warning/5 text-base-content/80 border-b px-6 py-3 text-xs shadow-sm"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div
+            class="bg-warning/15 text-warning flex h-10 w-10 items-center justify-center rounded-2xl"
+          >
+            <BugAntIcon class="h-5 w-5" />
+          </div>
+          <div class="space-y-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-warning/80 text-[10px] font-semibold tracking-[0.3em] uppercase">
+                Debug Mode
+              </span>
+              <span
+                class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                :class="debugStatusBadge.class"
+              >
+                {{ debugStatusBadge.label }}
+              </span>
+            </div>
+            <p class="text-base-content/60 text-[11px]">
+              Using execution {{ debugExecutionShortId }}
+              <span v-if="debugExecutionTimestamp">- {{ debugExecutionTimestamp }}</span>
+              - Pin outputs on nodes to reuse this data in previews.
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <a
+            v-if="debugExecutionLink"
+            :href="debugExecutionLink"
+            class="btn btn-xs btn-ghost border-base-300 bg-base-100/80 text-base-content/70 hover:bg-base-200"
+          >
+            View execution
+          </a>
+          <a
+            v-if="debugExitLink"
+            :href="debugExitLink"
+            class="btn btn-xs btn-primary text-primary-content shadow-primary/20 shadow-sm"
+          >
+            Exit debug
+          </a>
+        </div>
+      </div>
+    </div>
 
     <div class="relative flex flex-1 overflow-hidden">
       <NodeLibrary :library-items="editor.nodeLibraryItems" class="shrink-0" />
