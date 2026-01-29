@@ -157,6 +157,23 @@ defineProps<Props>();
   stroke-width: 2.5 !important;
 }
 
+.vue-flow__node-group {
+  z-index: 0 !important;
+}
+
+.vue-flow__node-group.vue-flow__node.selected,
+.vue-flow__node-group.vue-flow__node.dragging {
+  z-index: 0 !important;
+}
+
+.vue-flow__node:not(.vue-flow__node-group) {
+  z-index: 10;
+}
+
+.vue-flow__edge {
+  z-index: 15;
+}
+
 .vue-flow__minimap {
   border-radius: 12px;
   background-color: var(--color-base-100);

@@ -184,7 +184,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         selectable: true,
         connectable: false,
         deletable: false,
-        zIndex: 0,
+        zIndex: -10,
       } satisfies Node<GroupNodeData>;
 
       return node as Node<WorkflowNodeData>;
@@ -257,7 +257,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         position: transientPositions.value[step.id] || step.position,
         parentNode: parentGroupId,
         expandParent: parentGroupId ? true : undefined,
-        zIndex: parentGroupId ? 10 : 1,
+        zIndex: parentGroupId ? 20 : 10,
         data: {
           id: step.id,
           type_id: step.type_id,

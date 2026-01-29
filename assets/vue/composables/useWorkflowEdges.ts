@@ -30,6 +30,7 @@ export function useWorkflowEdges(options: UseWorkflowEdgesOptions) {
       sourceHandle: conn.source_output,
       targetHandle: conn.target_input,
       type: 'custom',
+      zIndex: 15,
       data: { animated: runningIds.has(conn.source_step_id) } satisfies EdgeData,
     }));
   });

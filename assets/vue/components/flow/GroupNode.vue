@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useVueFlow } from '@vue-flow/core';
 import type { NodeProps } from '@vue-flow/core';
 import type { GroupNodeData } from '@/types/workflow';
-import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
+import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS, DEFAULT_NODE_DIMENSIONS } from '@/constants/layout';
+import { DEFAULT_GROUP_PADDING } from '@/lib/workflowGeometry';
 import { useThemeStore } from '@/stores/theme';
 import { PencilIcon, Squares2X2Icon } from '@heroicons/vue/24/outline';
 
@@ -110,6 +111,8 @@ type ResizeState = {
   startRight: number;
   startBottom: number;
   stepPositions: Record<string, { x: number; y: number }>;
+  stepSizes: Record<string, { width: number; height: number }>;
+  lastStepPositions?: Record<string, { x: number; y: number }>;
   lastBounds?: { x: number; y: number; width: number; height: number };
 };
 
@@ -146,6 +149,25 @@ const getStepPositions = () => {
   return positions;
 };
 
+const getStepSizes = (stepPositions: ResizeState['stepPositions']) => {
+  const sizes: ResizeState['stepSizes'] = {};
+  const stepIds = Object.keys(stepPositions);
+  if (stepIds.length === 0) return sizes;
+
+  const nodeById = new Map(getNodes.value.map(node => [node.id, node]));
+  stepIds.forEach(stepId => {
+    const node = nodeById.get(stepId);
+    const width = node?.dimensions?.width ?? 0;
+    const height = node?.dimensions?.height ?? 0;
+    sizes[stepId] = {
+      width: width > 0 ? width : DEFAULT_NODE_DIMENSIONS.width,
+      height: height > 0 ? height : DEFAULT_NODE_DIMENSIONS.height,
+    };
+  });
+
+  return sizes;
+};
+
 const updateGroupBounds = (bounds: { x: number; y: number; width: number; height: number }) => {
   updateNode(props.id, {
     position: { x: bounds.x, y: bounds.y },
@@ -153,16 +175,146 @@ const updateGroupBounds = (bounds: { x: number; y: number; width: number; height
   });
 };
 
-const updateChildPositions = (delta: { x: number; y: number }, stepPositions: ResizeState['stepPositions']) => {
-  if (delta.x === 0 && delta.y === 0) return;
+const applyStepPositions = (stepPositions: ResizeState['stepPositions']) => {
   Object.entries(stepPositions).forEach(([stepId, position]) => {
     updateNode(stepId, {
       position: {
-        x: position.x - delta.x,
-        y: position.y - delta.y,
+        x: position.x,
+        y: position.y,
       },
     });
   });
+};
+
+const hasStepPositionChanges = (
+  nextPositions: ResizeState['stepPositions'],
+  prevPositions: ResizeState['stepPositions']
+) => {
+  for (const [stepId, position] of Object.entries(nextPositions)) {
+    const prev = prevPositions[stepId];
+    if (!prev || prev.x !== position.x || prev.y !== position.y) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const buildAdjustedStepPositions = (
+  state: ResizeState,
+  delta: { x: number; y: number },
+  bounds: { width: number; height: number }
+) => {
+  const basePositions: ResizeState['stepPositions'] = {};
+  const stepIds = Object.keys(state.stepPositions);
+  if (stepIds.length === 0) return basePositions;
+
+  stepIds.forEach(stepId => {
+    const position = state.stepPositions[stepId];
+    basePositions[stepId] = {
+      x: position.x - delta.x,
+      y: position.y - delta.y,
+    };
+  });
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  stepIds.forEach(stepId => {
+    const position = basePositions[stepId];
+    const size = state.stepSizes[stepId] ?? DEFAULT_NODE_DIMENSIONS;
+    minX = Math.min(minX, position.x);
+    minY = Math.min(minY, position.y);
+    maxX = Math.max(maxX, position.x + size.width);
+    maxY = Math.max(maxY, position.y + size.height);
+  });
+
+  if (!isFinite(minX) || !isFinite(minY)) return basePositions;
+
+  const paddingX = Math.min(DEFAULT_GROUP_PADDING, bounds.width / 2);
+  const paddingY = Math.min(DEFAULT_GROUP_PADDING, bounds.height / 2);
+  const innerLeft = paddingX;
+  const innerTop = paddingY;
+  const innerRight = bounds.width - paddingX;
+  const innerBottom = bounds.height - paddingY;
+  const innerWidth = innerRight - innerLeft;
+  const innerHeight = innerBottom - innerTop;
+
+  const shouldAdjustX = bounds.width < state.startSize.width;
+  const shouldAdjustY = bounds.height < state.startSize.height;
+
+  let shiftX = 0;
+  let shiftY = 0;
+
+  if (shouldAdjustX && innerWidth > 0) {
+    const stepsWidth = maxX - minX;
+    if (stepsWidth <= innerWidth) {
+      if (minX < innerLeft) {
+        shiftX = innerLeft - minX;
+      } else if (maxX > innerRight) {
+        shiftX = innerRight - maxX;
+      }
+    } else if (state.handle.includes('e')) {
+      shiftX = innerRight - maxX;
+    } else if (state.handle.includes('w')) {
+      shiftX = innerLeft - minX;
+    } else {
+      shiftX = innerLeft - minX;
+    }
+  }
+
+  if (shouldAdjustY && innerHeight > 0) {
+    const stepsHeight = maxY - minY;
+    if (stepsHeight <= innerHeight) {
+      if (minY < innerTop) {
+        shiftY = innerTop - minY;
+      } else if (maxY > innerBottom) {
+        shiftY = innerBottom - maxY;
+      }
+    } else if (state.handle.includes('s')) {
+      shiftY = innerBottom - maxY;
+    } else if (state.handle.includes('n')) {
+      shiftY = innerTop - minY;
+    } else {
+      shiftY = innerTop - minY;
+    }
+  }
+
+  if (shiftX === 0 && shiftY === 0) return basePositions;
+
+  const adjustedPositions: ResizeState['stepPositions'] = {};
+  stepIds.forEach(stepId => {
+    const position = basePositions[stepId];
+    adjustedPositions[stepId] = {
+      x: position.x + shiftX,
+      y: position.y + shiftY,
+    };
+  });
+
+  return adjustedPositions;
+};
+
+const getStepBounds = (stepPositions: ResizeState['stepPositions'], stepSizes: ResizeState['stepSizes']) => {
+  const stepIds = Object.keys(stepPositions);
+  if (stepIds.length === 0) return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  stepIds.forEach(stepId => {
+    const position = stepPositions[stepId];
+    const size = stepSizes[stepId] ?? DEFAULT_NODE_DIMENSIONS;
+    minX = Math.min(minX, position.x);
+    minY = Math.min(minY, position.y);
+    maxX = Math.max(maxX, position.x + size.width);
+    maxY = Math.max(maxY, position.y + size.height);
+  });
+
+  if (!isFinite(minX) || !isFinite(minY)) return null;
+  return { minX, minY, maxX, maxY };
 };
 
 const handleResizeMove = (event: PointerEvent) => {
@@ -210,11 +362,54 @@ const handleResizeMove = (event: PointerEvent) => {
     y: nextY - state.startPosition.y,
   };
 
-  const bounds = { x: nextX, y: nextY, width: nextWidth, height: nextHeight };
-  updateGroupBounds(bounds);
-  updateChildPositions(delta, state.stepPositions);
+  const baseStepPositions: ResizeState['stepPositions'] = {};
+  Object.entries(state.stepPositions).forEach(([stepId, position]) => {
+    baseStepPositions[stepId] = {
+      x: position.x - delta.x,
+      y: position.y - delta.y,
+    };
+  });
 
-  resizeState.value = { ...state, lastBounds: bounds };
+  const stepBounds = getStepBounds(baseStepPositions, state.stepSizes);
+  if (stepBounds) {
+    const minWidth = Math.max(
+      stepBounds.maxX - stepBounds.minX + DEFAULT_GROUP_PADDING * 2,
+      MIN_GROUP_WIDTH
+    );
+    const minHeight = Math.max(
+      stepBounds.maxY - stepBounds.minY + DEFAULT_GROUP_PADDING * 2,
+      MIN_GROUP_HEIGHT
+    );
+
+    if (nextWidth < minWidth) {
+      nextWidth = minWidth;
+      if (hasWest) {
+        nextX = state.startRight - nextWidth;
+      } else {
+        nextX = state.startPosition.x;
+      }
+    }
+
+    if (nextHeight < minHeight) {
+      nextHeight = minHeight;
+      if (hasNorth) {
+        nextY = state.startBottom - nextHeight;
+      } else {
+        nextY = state.startPosition.y;
+      }
+    }
+  }
+
+  const bounds = { x: nextX, y: nextY, width: nextWidth, height: nextHeight };
+  const adjustedDelta = {
+    x: nextX - state.startPosition.x,
+    y: nextY - state.startPosition.y,
+  };
+  const nextStepPositions = buildAdjustedStepPositions(state, adjustedDelta, bounds);
+  updateGroupBounds(bounds);
+  applyStepPositions(nextStepPositions);
+
+  resizeState.value = { ...state, lastBounds: bounds, lastStepPositions: nextStepPositions };
 };
 
 const stopResize = () => {
@@ -226,6 +421,7 @@ const stopResize = () => {
   window.removeEventListener('pointercancel', stopResize);
 
   const bounds = state.lastBounds;
+  const lastStepPositions = state.lastStepPositions;
   if (bounds) {
     props.data.onUpdate?.(props.id, {
       position: {
@@ -235,21 +431,26 @@ const stopResize = () => {
         height: bounds.height,
       },
     });
+    if (lastStepPositions) {
+      if (hasStepPositionChanges(lastStepPositions, state.stepPositions)) {
+        props.data.onMoveSteps?.(lastStepPositions);
+      }
+    } else {
+      const delta = {
+        x: bounds.x - state.startPosition.x,
+        y: bounds.y - state.startPosition.y,
+      };
 
-    const delta = {
-      x: bounds.x - state.startPosition.x,
-      y: bounds.y - state.startPosition.y,
-    };
-
-    if (delta.x !== 0 || delta.y !== 0) {
-      const stepPositions: Record<string, { x: number; y: number }> = {};
-      Object.entries(state.stepPositions).forEach(([stepId, position]) => {
-        stepPositions[stepId] = {
-          x: position.x - delta.x,
-          y: position.y - delta.y,
-        };
-      });
-      props.data.onMoveSteps?.(stepPositions);
+      if (delta.x !== 0 || delta.y !== 0) {
+        const stepPositions: Record<string, { x: number; y: number }> = {};
+        Object.entries(state.stepPositions).forEach(([stepId, position]) => {
+          stepPositions[stepId] = {
+            x: position.x - delta.x,
+            y: position.y - delta.y,
+          };
+        });
+        props.data.onMoveSteps?.(stepPositions);
+      }
     }
   }
 
@@ -266,6 +467,7 @@ const startResize = (handle: ResizeHandle, event: PointerEvent) => {
   const height = props.dimensions.height || DEFAULT_GROUP_DIMENSIONS.height;
   const startPosition = { x: props.position.x, y: props.position.y };
 
+  const stepPositions = getStepPositions();
   resizeState.value = {
     handle,
     startPointer: { x: event.clientX, y: event.clientY },
@@ -273,7 +475,8 @@ const startResize = (handle: ResizeHandle, event: PointerEvent) => {
     startSize: { width, height },
     startRight: startPosition.x + width,
     startBottom: startPosition.y + height,
-    stepPositions: getStepPositions(),
+    stepPositions,
+    stepSizes: getStepSizes(stepPositions),
     lastBounds: { x: startPosition.x, y: startPosition.y, width, height },
   };
 
