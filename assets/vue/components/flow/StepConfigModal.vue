@@ -452,6 +452,8 @@ const currentInputState = computed(() => {
 const currentInputEmptyState = computed(() => {
   const reason = currentInputState.value.reason;
   const hasSingleUpstream = directUpstreamStepIds.value.length === 1;
+  const hasMultipleUpstream = directUpstreamStepIds.value.length > 1;
+  
   const runHint = hasSingleUpstream
     ? 'Run the previous step to fetch the latest upstream output.'
     : 'Run to this step to compute the latest upstream outputs.';
@@ -469,6 +471,14 @@ const currentInputEmptyState = computed(() => {
       description: isTriggerStep.value
         ? 'This trigger has not fired yet. Run to this step to capture input data.'
         : 'This step has no upstream connection yet. Run to this step to generate input data.',
+    };
+  }
+
+  // For 'not_run' reason - some inputs might have data but not all are available
+  if (hasMultipleUpstream) {
+    return {
+      title: 'Incomplete input data',
+      description: 'Some upstream steps have data, but all inputs must be available before we can display them. Run to this step to compute the latest upstream outputs.',
     };
   }
 
