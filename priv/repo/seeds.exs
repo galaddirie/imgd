@@ -50,7 +50,7 @@ temp2_user =
 
 scope = %Scope{user: user}
 
-IO.puts("\n🔐 Login Credentials:")
+IO.puts("\n🔐 Login Details:")
 IO.puts("  Email: temp@imgd.io")
 IO.puts("  Password: password123456")
 IO.puts("  Email: temp2@imgd.io")

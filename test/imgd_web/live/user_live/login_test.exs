@@ -44,7 +44,7 @@ defmodule ImgdWeb.UserLive.LoginTest do
   end
 
   describe "user login - password" do
-    test "redirects if user logs in with valid credentials", %{conn: conn} do
+    test "redirects if user logs in with valid password", %{conn: conn} do
       user = user_fixture() |> set_password()
 
       {:ok, lv, _html} = live(conn, ~p"/users/log-in")
@@ -59,7 +59,7 @@ defmodule ImgdWeb.UserLive.LoginTest do
       assert redirected_to(conn) == ~p"/"
     end
 
-    test "redirects to login page with a flash error if credentials are invalid", %{
+    test "redirects to login page with a flash error if password is invalid", %{
       conn: conn
     } do
       {:ok, lv, _html} = live(conn, ~p"/users/log-in")

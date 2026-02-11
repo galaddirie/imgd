@@ -16,7 +16,6 @@ If you want a workflow engine that is expressive, versioned, and traceable, with
 - **Expressions everywhere**: Liquid-style expressions (Solid) with n8n-compatible syntax, previews in the editor, and custom filters.
 - **Triggers and automation**: manual, schedule, webhook, and event triggers; clean execution tracking per run and per step.
 - **Workflow contracts**: derive input/output contracts from the workflow draft for safe embedding and API integrations.
-- **Credentials system**: encrypted credential storage with typed providers (API key, OAuth, etc.).
 - **Observability hooks**: structured logging, telemetry, and real-time execution events.
 
 ## Core Concepts
@@ -49,7 +48,7 @@ n8n is an excellent general-purpose automation tool. Imgd is optimized for teams
 - **Phoenix + LiveView** for backend, auth, and server-driven UI.
 - **LiveVue + Vue Flow** for a high-fidelity, reactive workflow editor.
 - **Runic** for immutable workflow execution and event-sourced state.
-- **Ecto + Postgres** for persistence (workflows, versions, executions, credentials).
+- **Ecto + Postgres** for persistence (workflows, versions, executions).
 - **Phoenix PubSub + Presence** for real-time collaboration and execution events.
 
 ## Roadmap

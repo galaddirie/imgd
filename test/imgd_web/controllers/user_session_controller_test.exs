@@ -61,7 +61,7 @@ defmodule ImgdWeb.UserSessionControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Welcome back!"
     end
 
-    test "redirects to login page with invalid credentials", %{conn: conn, user: user} do
+    test "redirects to login page with invalid password", %{conn: conn, user: user} do
       conn =
         post(conn, ~p"/users/log-in?mode=password", %{
           "user" => %{"email" => user.email, "password" => "invalid_password"}
