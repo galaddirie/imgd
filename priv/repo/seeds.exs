@@ -8,88 +8,8 @@ alias Imgd.Accounts.User
 alias Imgd.Accounts.Scope
 alias Imgd.Workflows
 alias Imgd.Workflows.WorkflowShare
-alias Imgd.Credentials.CredentialType
 
 IO.puts("🌱 Seeding database...")
-
-# ============================================================================
-# Seed Credential Types
-# ============================================================================
-IO.puts("\n🔐 Seeding credential types...")
-
-# Get built-in types and add OAuth provider-specific types
-credential_types =
-  CredentialType.built_in_types() ++
-    [
-      %{
-        slug: "google",
-        name: "Google",
-        icon: "hero-globe-alt",
-        category: "OAuth",
-        field_schema: %{
-          "type" => "object",
-          "required" => ["access_token"],
-          "properties" => %{
-            "access_token" => %{"type" => "string", "title" => "Access Token"},
-            "refresh_token" => %{"type" => "string", "title" => "Refresh Token"},
-            "token_type" => %{"type" => "string", "title" => "Token Type"},
-            "scope" => %{"type" => "string", "title" => "Scope"},
-            "expires_at" => %{"type" => "integer", "title" => "Expires At"}
-          }
-        },
-        built_in: true
-      },
-      %{
-        slug: "github",
-        name: "GitHub",
-        icon: "hero-code-bracket",
-        category: "OAuth",
-        field_schema: %{
-          "type" => "object",
-          "required" => ["access_token"],
-          "properties" => %{
-            "access_token" => %{"type" => "string", "title" => "Access Token"},
-            "refresh_token" => %{"type" => "string", "title" => "Refresh Token"},
-            "token_type" => %{"type" => "string", "title" => "Token Type"},
-            "scope" => %{"type" => "string", "title" => "Scope"}
-          }
-        },
-        built_in: true
-      },
-      %{
-        slug: "slack",
-        name: "Slack",
-        icon: "hero-chat-bubble-left-right",
-        category: "OAuth",
-        field_schema: %{
-          "type" => "object",
-          "required" => ["access_token"],
-          "properties" => %{
-            "access_token" => %{"type" => "string", "title" => "Access Token"},
-            "refresh_token" => %{"type" => "string", "title" => "Refresh Token"},
-            "token_type" => %{"type" => "string", "title" => "Token Type"},
-            "scope" => %{"type" => "string", "title" => "Scope"}
-          }
-        },
-        built_in: true
-      }
-    ]
-
-Enum.each(credential_types, fn type_attrs ->
-  case Repo.get_by(CredentialType, slug: type_attrs.slug) do
-    nil ->
-      %CredentialType{}
-      |> CredentialType.changeset(type_attrs)
-      |> Repo.insert!()
-
-      IO.puts("  ✅ Created credential type: #{type_attrs.name}")
-
-    _existing ->
-      IO.puts("  ℹ️  Credential type already exists: #{type_attrs.name}")
-  end
-end)
-
-IO.puts("✅ Credential types seeded!")
 
 # Create test users if they don't exist
 user =

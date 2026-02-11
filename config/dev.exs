@@ -91,6 +91,3 @@ config :phoenix_live_view,
 config :swoosh, :api_client, false
 
 config :flame, :backend, FLAME.LocalBackend
-
-# Credentials Encryption Key (Development)
-config :imgd, :credential_encryption_key, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="

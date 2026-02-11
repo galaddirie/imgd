@@ -13,7 +13,6 @@ defmodule Imgd.Workflows.Validator do
       |> Kernel.++(validate_group_connectivity(draft))
       |> Kernel.++(validate_group_connections(draft))
       |> Kernel.++(validate_no_cross_group_references(draft))
-      |> Kernel.++(validate_credential_references(draft))
 
     if errors == [] do
       :ok
@@ -162,24 +161,6 @@ defmodule Imgd.Workflows.Validator do
           [
             {:step, step.id, "cannot reference #{ref_step_id} across group boundaries"}
           ]
-        end
-      end)
-    end)
-  end
-
-  defp validate_credential_references(draft) do
-    steps = draft.steps || []
-
-    Enum.flat_map(steps, fn step ->
-      refs = Imgd.Credentials.Reference.extract_refs(step.config)
-
-      Enum.flat_map(refs, fn ref ->
-        cond do
-          is_nil(ref.credential_id) or ref.credential_id == "" ->
-            [{:step, step.id, "Credential reference is missing ID"}]
-
-          true ->
-            []
         end
       end)
     end)

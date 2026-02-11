@@ -48,9 +48,3 @@ config :phoenix_live_view,
 config :imgd, Oban, testing: :manual
 
 config :flame, :backend, FLAME.LocalBackend
-
-# Credentials Encryption Key (Test)
-config :imgd, :credential_encryption_key, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-
-# Disable async credential touch in tests
-config :imgd, :async_credential_touch, false
