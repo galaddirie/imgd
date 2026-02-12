@@ -5,10 +5,6 @@ defmodule Imgd.Application do
 
   @impl true
   def start(_type, _args) do
-    Imgd.Sandbox.Telemetry.setup()
-
-    _flame_parent = FLAME.Parent.get()
-
     children =
       [
         # Start the Cluster Supervisor
@@ -24,7 +20,6 @@ defmodule Imgd.Application do
         {Task.Supervisor, name: Imgd.Runtime.Execution.TaskSupervisor},
         Imgd.Runtime.Execution.Supervisor,
         Imgd.Runtime.Expression.Cache,
-        Imgd.Sandbox.Supervisor,
         # Trigger runtime
         Imgd.Runtime.Triggers.Registry,
         # Collaboration modules

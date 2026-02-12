@@ -1,23 +1,5 @@
 import Config
 
-# config/runtime.exs is executed for all environments, including
-# during releases. It is executed after compilation and before the
-# system starts, so it is typically used to load production configuration
-# and secrets from environment variables or elsewhere. Do not define
-# any compile-time configuration in here, as it won't be applied.
-
-env = config_env()
-
-if env == :prod do
-  config :flame, :backend, FLAME.LocalBackend
-
-  config :imgd, Imgd.Sandbox.Pool,
-    min: 1,
-    max: 20,
-    max_concurrency: 50,
-    idle_shutdown_after: 60_000
-end
-
 # The block below contains prod specific runtime configuration.
 
 # ## Using releases

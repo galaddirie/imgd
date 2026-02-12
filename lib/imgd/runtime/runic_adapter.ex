@@ -18,8 +18,7 @@ defmodule Imgd.Runtime.RunicAdapter do
           metadata: map(),
           step_outputs: map(),
           trigger_data: map(),
-          trigger_type: atom(),
-          default_compute: term()
+          trigger_type: atom()
         ]
 
   @spec to_runic_workflow(source(), build_opts()) :: Workflow.t()
@@ -50,7 +49,6 @@ defmodule Imgd.Runtime.RunicAdapter do
       upstream_lookup: upstream_lookup,
       trigger_data: Keyword.get(opts, :trigger_data, %{}),
       trigger_type: Keyword.get(opts, :trigger_type),
-      default_compute: Keyword.get(opts, :default_compute),
       all_groups: groups
     ]
 

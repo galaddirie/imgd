@@ -53,31 +53,9 @@ defmodule Imgd.Runtime.Steps.StepRunner do
   """
   @spec create(workflow_step(), step_opts()) :: Runic.Workflow.Step.t()
   def create(step, opts \\ []) do
-    # Capture step and opts in the closure
-    # Runic will call this function with the input from parent steps
-
-    # Determine execution target
-    # Priority: Step Config > Workflow Default (via opts) > Local
-    target = determine_compute_target(step, opts)
-
     runic_step =
       Runic.step(
-        fn input ->
-          # Dispatch execution to the target
-          # We pass the MFA: {StepRunner, :execute_with_context, [step, input, opts]}
-          case Imgd.Compute.run(target, __MODULE__, :execute_with_context, [step, input, opts]) do
-            {:ok, result} ->
-              result
-
-            {:error, {:throw, reason}} ->
-              # Propagate thrown errors (e.g. from ComputeNode catch)
-              throw(reason)
-
-            {:error, reason} ->
-              # Wrap other errors (e.g. RPC failure)
-              throw({:step_error, step.id, {:compute_error, reason}})
-          end
-        end,
+        fn input -> execute_step(step, input, opts) end,
         name: runic_name(step)
       )
 
@@ -87,15 +65,28 @@ defmodule Imgd.Runtime.Steps.StepRunner do
     %{runic_step | hash: unique_hash}
   end
 
-  defp determine_compute_target(step, opts) do
-    # check step config first
-    step_config_target = Map.get(step.config, "compute")
+  defp execute_step(step, input, opts) do
+    case run_step(step, input, opts) do
+      {:ok, result} ->
+        result
 
-    if step_config_target do
-      Imgd.Compute.Target.parse(step_config_target)
-    else
-      # check workflow default
-      Keyword.get(opts, :default_compute, Imgd.Compute.Target.local())
+      {:error, {:throw, reason}} ->
+        throw(reason)
+
+      {:error, reason} ->
+        throw({:step_error, step.id, {:execution_error, reason}})
+    end
+  end
+
+  defp run_step(step, input, opts) do
+    try do
+      {:ok, execute_with_context(step, input, opts)}
+    rescue
+      e ->
+        {:error, e}
+    catch
+      kind, reason ->
+        {:error, {kind, reason}}
     end
   end
 

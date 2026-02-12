@@ -46,5 +46,3 @@ config :phoenix_live_view,
 
 # Configure Oban for testing
 config :imgd, Oban, testing: :manual
-
-config :flame, :backend, FLAME.LocalBackend

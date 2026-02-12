@@ -32,8 +32,7 @@ defmodule Imgd.Runtime.StepSkipIntegrationTest do
       execution_id: execution.id,
       workflow_id: workflow.id,
       # Mismatch to force skip
-      trigger_type: :webhook,
-      default_compute: Imgd.Compute.Target.local()
+      trigger_type: :webhook
     ]
 
     # 3. Create a Runic Step that uses StepRunner
