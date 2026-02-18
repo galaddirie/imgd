@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(mix ecto.gen.migration:*)",
+      "Bash(mix compile:*)",
+      "Bash(mix ecto.migrate:*)",
+      "Bash(mix run:*)",
+      "Bash(mix test:*)",
+      "Bash(mix precommit:*)"
+    ]
+  }
+}
