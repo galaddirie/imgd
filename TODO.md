@@ -1,18 +1,27 @@
 # TODO
 
 ### Core / Platform
-- [ ] Credentials system
 - [ ] Sub-workflows ( webhook triggers, add streaming outputs, and events users can subscribe to for workflow outputs etc before we do this, why? so that the step can subscribe to the execution without polling)
 - [ ] Add variable feature like n8n, add a flag to keep variables local to the execution or global (cross execution and workflow)
     - [ ] Add variable trigger nodes (ex. variable changed)
 - [ ] State machine support for **cross-execution memory** (e.g., saga pattern with persisted state, game server)
-- [ ] Execution registry (for visbility in what executions are running on what node for observability and lifecycle management - future durability features)
 - [ ] Add debug execution mode 
 
 
 ### Editor UX
-- [ ] lets be efficent with edit stack, if a user moves a node 5 times, do we need to add 5 entries to the edit stack? no. if they move groups and nodes multiple times, ( not just 1 change but multiple changes that are relitively small and heavily related to each other) do we need to add multiple entries to the edit stack? no. we should be efficient with edit stack and only add entries when there are significant changes that are not related to each other, when they are far apart,  and or unique changes that are not related to each other. 
+- [ ] lets be efficent with edit stack, if a user moves a node 5 times, do we need to add 5 entries to the edit stack? no. if they move groups and nodes multiple times, ( not just 1 change but multiple changes that are relitively small and heavily related to each other) do we need to add multiple entries to the edit stack? no. we should be efficient with edit stack and only add entries when there are significant changes that are not related to each other,  and or unique changes that are not related to each other. 
+
 maybe after edit stack is full we normalize / merge edits? 
+
+- [ ] Lets add a  " add node" flow users will be able to right click on a node and select "add node" and then select a node from the list of available nodes to add to the workflow with a automatic connection to the node.
+
+- if node is selected and we drop a node on it, we should create a connection between the two nodes
+
+- if node a -> b and we drop node c between them, we should create a connection between node a and node c and node c and node b removing the connection between node a and node b
+
+- we should add node wrangler (blender) like features to the editor 
+
+- implement disable node feature, clean up any legacy types of node disabling
 
 
 
@@ -80,12 +89,6 @@ merge node will also act as a edit fields node
 - determine risk of api key exposure in webhook trigger outputs
 
 
-- if we edit connections we should update the context menu to show the new current input data as long as that upstream has changed
-
-
-- fix assets/vue stores and store dirs, merge into a single store dir 
-
-
 - review what we store in proccess dictionaries and if we need to clean them up
 
 
@@ -93,6 +96,3 @@ Suport logs /traces for some nodes (ex. ai exeuction node should show openai ext
 - we should have langgraph style detailed traces
 
 
-- when we refresh we dont load duration data for steps only for fan out steps
-
-- random nil steps showing up in data
